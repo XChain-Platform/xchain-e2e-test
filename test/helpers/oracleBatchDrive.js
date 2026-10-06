@@ -406,7 +406,7 @@ function parsePriceBatchWire(wire) {
  * produced" must not have a test-authored transaction counted into it.
  */
 async function broadcastWire(venue, wire) {
-    const transactionHelper = require('../transactionHelper');
+    const transactionHelper = require('./core/transactionHelper');
     const capture = {};
     const txid = await transactionHelper.createAndSendTransaction(
         venue.publisherAddress, wire, null, [], null, null, false, { capture });

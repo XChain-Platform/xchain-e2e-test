@@ -75,10 +75,10 @@ const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract, settleStack,
     readAppliedResponse, readContractState,
     mineWhile,
-} = require("./mirrorDrillFixture")
+} = require("./helpers/mirrorDrillFixture")
 const {
     findEmittedAttestRequest, waitForMirrorRowEverywhere, waitForAppliedEverywhere, widenArithmetic,
-} = require('./mirrorDrillWaits')
+} = require('./helpers/mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 
 

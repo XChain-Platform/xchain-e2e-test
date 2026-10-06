@@ -58,7 +58,7 @@ const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract, readContractState,
     readAppliedResponse,
     mineWhile,
-} = require("./mirrorDrillFixture")
+} = require("./helpers/mirrorDrillFixture")
 const {
     APPLIED_FIELDS, untilOrClearDogeStall, diffRows,
     waitForMirrorRowEverywhere, waitForAppliedEverywhere,
@@ -68,9 +68,9 @@ const {
     attestRequestWatermark,
     settleOrReport,
     jsonSafe,
-} = require('./mirrorDrillWaits')
+} = require('./helpers/mirrorDrillWaits')
 const vmHelper     = require('../helpers/vmHelper')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 
 const FIXED_BODY = '{"score":11,"meta":"at4-reorg"}'
 

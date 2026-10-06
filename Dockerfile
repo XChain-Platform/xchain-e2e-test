@@ -75,10 +75,10 @@ RUN ln -s /XChainE2ETest/node_modules /xchain-indexer/node_modules
 # green while never once running.
 COPY ./xchain-sync /xchain-sync
 
-# Same node_modules resolution problem as the bundled indexer: /xchain-sync/src/db.js
-# requires mariadb, which npm ci installed under /XChainE2ETest. Sync files needing
-# deps absent here (express, ws, helmet) still fail if loaded; none are on the
-# drift-lock path.
+# Same node_modules resolution problem as the bundled indexer:
+# /xchain-sync/src/db/index.js requires mariadb, which npm ci installed under
+# /XChainE2ETest. Sync files needing deps absent here (express, ws, helmet) still
+# fail if loaded; none are on the drift-lock path.
 RUN ln -s /XChainE2ETest/node_modules /xchain-sync/node_modules
 
 # xchain-hub already lives in the image at /XChainE2ETest/xchain-hub (the file:

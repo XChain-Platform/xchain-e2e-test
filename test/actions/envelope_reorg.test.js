@@ -40,7 +40,7 @@
  ********************************************************************/
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const envelopeHelper = require('../helpers/envelopeHelper')
 
 const BODY = Buffer.from(

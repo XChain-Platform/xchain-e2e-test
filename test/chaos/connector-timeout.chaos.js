@@ -18,8 +18,8 @@
 
 const assert = require('assert')
 const sinon = require('sinon')
-const { createDb, makeMockConnection } = require('./chaos-helpers')
-const BlockchainConnector = require('../../src/BlockchainConnector')
+const { createDb, makeMockConnection } = require('./helpers/chaos_helpers')
+const BlockchainConnector = require('../../src/blockchain_connector')
 const XChainUtxoTrackerConnector = require('../../src/XChainUtxoTrackerConnector')
 
 describe('Chaos Experiment 1: Connector Timeout Cascade @P0', function () {

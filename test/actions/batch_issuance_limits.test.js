@@ -41,7 +41,7 @@
 // parameter (the seed guard pins it), and the shared fixture is restored afterwards.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const issueHelper = require('../helpers/issueHelper')
 const mintHelper = require('../helpers/mintHelper')
 const orderHelper = require('../helpers/orderHelper')
@@ -202,7 +202,7 @@ function issueCmd(tick, maxSupply, maxMint, mintSupply, description){
 // a FEE_DESTINATION, and a natively-paid ISSUE debits no gas at all. A6's arithmetic
 // is a gas balance, so its setup ISSUE has to take this path.
 async function sendGasPaidIssue(addressInfo, tick, description){
-    const transactionHelper = require('../transactionHelper')
+    const transactionHelper = require('../helpers/core/transactionHelper')
     const txHash = await transactionHelper.createAndSendTransaction(
         addressInfo, issueCmd(tick, 100000, 100000, 10, description), null, [], null, null, true)
     const row = await indexerDatabase.waitForIssue({
@@ -509,7 +509,7 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
             // ^<id>.<n> resolves its parent to a tick this address owns, so every guard
             // ahead of the caret rule passes and the caret-dot rejection is what fires.
             const caretTick = "^" + id + ".5"
-            const txHash = await require('../transactionHelper').createAndSendTransaction(
+            const txHash = await require('../helpers/core/transactionHelper').createAndSendTransaction(
                 addr, issueCmd(caretTick, 100, 100, 1, "caretdot"))
             const row = await indexerDatabase.waitForIssue({
                 source: address, txHash: txHash, status: 'invalid: TICK (caret dot)'
@@ -557,7 +557,7 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
             assert.strictEqual(await tickerId(parent), null, "the parent name must be unseen at the start")
             assert.strictEqual(await tickerId(child),  null, "the child name must be unseen at the start")
 
-            const txHash = await require('../transactionHelper').createAndSendTransaction(
+            const txHash = await require('../helpers/core/transactionHelper').createAndSendTransaction(
                 addr, issueCmd(child, 100, 100, 1, "orphan"))
             const row = await indexerDatabase.waitForIssue({
                 source: address, txHash: txHash, status: 'invalid: TICK (parent unknown)'
@@ -1017,7 +1017,7 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
     // at-flag witnesses only.
     describe('A5: one payment fills ONE dispenser (rows 19/20/23) and a batched create dispenses (row 35)', function () {
 
-        const transactionHelper = require('../transactionHelper')
+        const transactionHelper = require('../helpers/core/transactionHelper')
         const sendHelper        = require('../helpers/sendHelper')
         const dispenserHelper   = require('../helpers/dispenserHelper')
 

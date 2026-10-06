@@ -56,7 +56,7 @@ const { execFileSync } = require('child_process')
 
 const rc        = require('../helpers/rollcallHelper')
 const chainRail = require('../helpers/chainRail')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const stakeHelper  = require('../helpers/stakeHelper')
 const sendHelper   = require('../helpers/sendHelper')
 const { requireFederationEnv } = require('../helpers/federationGuards')

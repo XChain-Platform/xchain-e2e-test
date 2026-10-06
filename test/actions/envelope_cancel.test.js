@@ -38,7 +38,7 @@
 const assert = require('assert')
 const bitcoin = require('bitcoinjs-lib')
 const ecc = require('tiny-secp256k1')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const envelopeHelper = require('../helpers/envelopeHelper')
 
 bitcoin.initEccLib(ecc)

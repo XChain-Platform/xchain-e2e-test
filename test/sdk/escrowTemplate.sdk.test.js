@@ -34,7 +34,7 @@
 const fs   = require('fs');
 const path = require('path');
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, mintGas, uniqueTick, mine, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mintGas, uniqueTick, mine, submitOpts } = require('./helpers/sdkHelper');
 
 // Load a template's REAL source from the xchain-contracts repo. That repo is
 // a sibling of the platform monorepo (and, on some venues, a separate tree

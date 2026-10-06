@@ -14,7 +14,7 @@ const assert = require('assert')
 const sinon = require('sinon')
 const fc = require('fast-check')
 
-const gen = require('../../fuzz-generators')
+const gen = require('../../helpers/fuzz_generators')
 
 require('../../../integration/fixtures/mockMariadb')
 
@@ -87,6 +87,6 @@ for (const [name, row] of Object.entries(mockDbResults)) {
 }
 global.indexerDatabase.ping = async () => true
 
-const transactionHelper = require('../../../transactionHelper')
+const transactionHelper = require('../../../helpers/core/transactionHelper')
 
 module.exports = { assert, sinon, fc, gen, transactionHelper }

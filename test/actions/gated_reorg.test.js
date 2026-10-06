@@ -33,9 +33,9 @@
 
 const assert            = require('assert')
 const crypto            = require('crypto')
-const cryptoHelper      = require('../cryptoHelper')
+const cryptoHelper      = require('../helpers/core/cryptoHelper')
 const issueHelper       = require('../helpers/issueHelper')
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 
 function makeGatedCiphertext(plaintext) {
     const key = crypto.randomBytes(32)

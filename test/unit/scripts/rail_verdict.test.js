@@ -158,7 +158,7 @@ describe('rail verdict report input', function () {
     it('ignores pending cases from unnamed files', function () {
         const value = report(
             [testCase('alpha passes', '/checkout/' + ALPHA)],
-            [testCase('root hook is pending', '/checkout/test/initialCheck.test.js')]
+            [testCase('root hook is pending', '/checkout/test/initial_check.test.js')]
         )
 
         assertResult(run(value, [ALPHA]), 0, [

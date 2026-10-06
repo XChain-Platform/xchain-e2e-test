@@ -9,7 +9,7 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 
 // MANUAL VERIFICATION REQUIRED:
 // E2E-TEAR-002 (DB pool shutdown): After `npm run test:e2e` exits, run

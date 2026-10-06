@@ -28,16 +28,16 @@
  * Run (per chain, after `npm run test:sdk` env is set up):
  *   PARITY_OUT_DIR=/tmp/parity \
  *   ./node_modules/.bin/mocha --timeout 0 \
- *     --require ./test/initialCheck.test.js test/parity/multichain_parity.test.js
+ *     --require ./test/initial_check.test.js test/parity/multichain_parity.test.js
  *********************************************************************/
 
 'use strict';
 
 const path = require('path');
 const { expect } = require('chai');
-const { makeSdk, GAS_TICK, submitOpts } = require('../sdk/sdkHelper');
-const { buildRoles, corpus, resolveParams, PIN_T0 } = require('./parityCorpus');
-const { captureLiveDigest, writeDigest } = require('./digest');
+const { makeSdk, GAS_TICK, submitOpts } = require('../sdk/helpers/sdkHelper');
+const { buildRoles, corpus, resolveParams, PIN_T0 } = require('./helpers/parityCorpus');
+const { captureLiveDigest, writeDigest } = require('./helpers/digest');
 
 // Baseline height every chain is mined to before the pinned corpus. Must be
 // ABOVE any fresh regtest install's post-funding height AND identical across

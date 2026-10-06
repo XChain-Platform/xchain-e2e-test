@@ -30,7 +30,7 @@
 'use strict';
 
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./helpers/sdkHelper');
 const { chunkHelper } = require('xchain-sdk');
 
 // A contract too large for a single DEPLOY: a ~7 KB string literal pads the source

@@ -28,7 +28,7 @@
 // flat per-transaction fee. Every other case fits inside the flat fee.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const listHelper = require('../helpers/listHelper')
 const issueHelper = require('../helpers/issueHelper')
 const batchHelper = require('../helpers/batchHelper')

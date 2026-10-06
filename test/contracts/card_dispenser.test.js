@@ -27,7 +27,7 @@
 // test (card_dispenser.test.js in xchain-contracts) covers distribution.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const vmHelper = require('../helpers/vmHelper')
 const issueHelper = require('../helpers/issueHelper')
 const gasHelper = require('../helpers/gasHelper')

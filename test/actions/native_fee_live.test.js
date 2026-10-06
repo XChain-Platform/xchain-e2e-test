@@ -9,8 +9,8 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
-const transactionHelper = require('../transactionHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 const nativeFeeHelper = require('../helpers/nativeFeeHelper')
 const { BOOTSTRAP_XCHAIN_USD, NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
 const { FIXTURE_ID_FLOOR, FIXTURE_INSERT_SQL } = require('../helpers/priceSnapshotHelper')

@@ -64,7 +64,7 @@ const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract, readContractState, withWedgeClear,
     mineWhile,
-} = require("./mirrorDrillFixture")
+} = require("./helpers/mirrorDrillFixture")
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere,
     readAttestRewards, readResponseRows, readRequestRow, venueTipProbe,
@@ -77,9 +77,9 @@ const {
     jsonSafe,
     feeLines,
     rawAttestRewards,
-} = require('./mirrorDrillWaits')
+} = require('./helpers/mirrorDrillWaits')
 const vmHelper          = require('../helpers/vmHelper')
-const cryptoHelper      = require('../cryptoHelper')
+const cryptoHelper      = require('../helpers/core/cryptoHelper')
 const attestationHelper = require('../helpers/attestationHelper')
 
 const FIXED_BODY = '{"score":19,"meta":"at6-flagday"}'

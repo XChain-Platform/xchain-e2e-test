@@ -28,9 +28,9 @@ const requireFederation = process.env.E2E_REQUIRE_FEDERATION === '1';
 if(requireFederation) process.env.XC_ANCHOR_FOLD_REGTEST_ACTIVATION = '0';
 else console.log('Skipping ANCHOR fold live acceptance: E2E_REQUIRE_FEDERATION=1 is not set');
 
-const venueHooks = require('../../initialCheck.test.js').mochaHooks;
-const cryptoHelper = require('../../cryptoHelper');
-const CryptoNetworks = require('../../../src/CryptoNetworks');
+const venueHooks = require('../../initial_check.test.js').mochaHooks;
+const cryptoHelper = require('../../helpers/core/cryptoHelper');
+const CryptoNetworks = require('../../../src/crypto_networks');
 const {
     MultiValidatorHub,
     ValidatorIdentity,

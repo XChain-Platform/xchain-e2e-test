@@ -28,6 +28,8 @@ const collectFiles = require('mocha/lib/cli/collect-files')
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..')
 const INTEGRATION_DIR = path.join(REPO_ROOT, 'test', 'integration')
 const LIVE_MARKERS = /require\([^)]*\b(disposableHubDb|multiValidatorHubHelper)\b/
+const HERMETIC_DIRS = ['database', 'errors', 'helpers', 'parity', 'pipeline', 'setup', 'state']
+const HERMETIC_SPECS = HERMETIC_DIRS.map(dir => `test/integration/${dir}/**/*.test.js`)
 
 // Resolve a mocha spec/ignore selection to sorted repo-relative paths.
 function resolveSelection(spec, ignore) {
@@ -37,11 +39,16 @@ function resolveSelection(spec, ignore) {
 }
 
 // Read the spec and --ignore globs out of the npm stubbed script.
-function stubbedScriptSelection() {
+function stubbedScriptConfig() {
     const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'))
     const script = pkg.scripts['test:integration:stubbed']
     const ignore = [...script.matchAll(/--ignore\s+'([^']+)'/g)].map(m => m[1])
     const spec = [...script.matchAll(/'([^']+)'/g)].map(m => m[1]).filter(g => !ignore.includes(g))
+    return { spec, ignore }
+}
+
+function stubbedScriptSelection() {
+    const { spec, ignore } = stubbedScriptConfig()
     return resolveSelection(spec, ignore)
 }
 
@@ -67,6 +74,12 @@ function reachableFrom(entry) {
 }
 
 describe('stubbed integration lane stays hermetic', () => {
+
+    it('names only the pinned hermetic integration directories', () => {
+        const { spec, ignore } = stubbedScriptConfig()
+        assert.deepStrictEqual(spec, HERMETIC_SPECS)
+        assert.deepStrictEqual(ignore, [])
+    })
 
     it('selects no split-part directory and no file that requires a live helper', () => {
         const files = stubbedScriptSelection()

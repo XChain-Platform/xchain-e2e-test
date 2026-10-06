@@ -15,8 +15,8 @@ const fs = require('fs');
 const path = require('path');
 const { encode: wifEncode } = require('wif');
 
-const cryptoHelper = require('../../cryptoHelper');
-const CryptoNetworks = require('../../../src/CryptoNetworks');
+const cryptoHelper = require('../../helpers/core/cryptoHelper');
+const CryptoNetworks = require('../../../src/crypto_networks');
 const Database = require('../../../src/db');
 const {
     MultiValidatorHub,

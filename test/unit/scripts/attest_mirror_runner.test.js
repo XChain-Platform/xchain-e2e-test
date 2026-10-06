@@ -269,7 +269,7 @@ describe('attest-mirror aggregate runner', function () {
 
     it('runs a two-leg aggregate through the CLI and releases both stacks', function () {
         const f = fixture()
-        const selected = ['test/attestMirror/at0-anti-wedge.test.js',
+        const selected = ['test/attestMirror/at0_anti_wedge.test.js',
             'test/attestMirror/barrier_family/ab4_below_activation.test.js']
         const result = spawnSync(process.execPath, [path.join(__dirname, '..', '..', '..', 'scripts', 'run-attest-mirror.js')], {
             cwd: f.root,
@@ -294,9 +294,9 @@ describe('attest-mirror aggregate runner', function () {
     it('summarizes a mixed run by failure phase', function () {
         const f = fixture()
         const selected = [
-            'test/attestMirror/at0-anti-wedge.test.js',
+            'test/attestMirror/at0_anti_wedge.test.js',
             'test/attestMirror/at1_mirror_finalize.test.js',
-            'test/attestMirror/at2-dissemination-determinism.test.js',
+            'test/attestMirror/at2_dissemination_determinism.test.js',
         ]
         const failures = {
             [selected[0]]: 'up',
@@ -324,7 +324,7 @@ describe('attest-mirror aggregate runner', function () {
     it('keeps the failed-leg exit code when every failure is at run', function () {
         const f = fixture()
         const selected = [
-            'test/attestMirror/at0-anti-wedge.test.js',
+            'test/attestMirror/at0_anti_wedge.test.js',
             'test/attestMirror/at1_mirror_finalize.test.js',
         ]
         const failures = Object.fromEntries(selected.map((leg) => [leg, 'run']))

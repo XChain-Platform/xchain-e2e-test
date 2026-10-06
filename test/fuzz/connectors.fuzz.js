@@ -17,14 +17,14 @@ const assert = require('assert')
 const sinon = require('sinon')
 const fc = require('fast-check')
 
-const BlockchainConnector = require('../../src/BlockchainConnector')
+const BlockchainConnector = require('../../src/blockchain_connector')
 const XChainUtxoTrackerConnector = require('../../src/XChainUtxoTrackerConnector')
 const XChainHubConnector = require('../../src/XChainHubConnector')
-const RegtestMinerConnector = require('../../src/RegtestMinerConnector')
+const RegtestMinerConnector = require('../../src/regtest_miner_connector')
 const XChainEncoderConnector = require('../../src/XChainEncoderConnector')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector')
 
-const gen = require('./fuzz-generators')
+const gen = require('./helpers/fuzz_generators')
 
 const FC_PARAMS = { numRuns: 200 }
 

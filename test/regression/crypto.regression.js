@@ -25,8 +25,8 @@ global.utxoTrackerConnector  = {
     getSyncStatus: async () => null,
 }
 
-const cryptoHelper  = require('../cryptoHelper')
-const CryptoNetworks = require('../../src/CryptoNetworks')
+const cryptoHelper  = require('../helpers/core/cryptoHelper')
+const CryptoNetworks = require('../../src/crypto_networks')
 
 describe('[regression:p0] Crypto & Wallet Management', function () {
 

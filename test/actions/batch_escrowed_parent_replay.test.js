@@ -42,7 +42,7 @@
 // reconstructs in the same order.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const issueHelper = require('../helpers/issueHelper')
 const orderHelper = require('../helpers/orderHelper')
 const batchHelper = require('../helpers/batchHelper')

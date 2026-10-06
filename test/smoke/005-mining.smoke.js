@@ -17,7 +17,7 @@ describe('SMOKE: Regtest Mining', () => {
     })
 
     it('should be able to send funds to a new address', async () => {
-        const cryptoHelper = require('../cryptoHelper')
+        const cryptoHelper = require('../helpers/core/cryptoHelper')
         const addressInfo = await cryptoHelper.getNewAddress(
             'SMOKE.MINING', COIN, NETWORK, null, 'legacy', 0
         )

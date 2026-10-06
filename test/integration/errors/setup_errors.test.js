@@ -19,8 +19,8 @@ const bitcoin = require('bitcoinjs-lib')
 
 require('../fixtures/mockMariadb')
 
-const CryptoNetworks = require('../../../src/CryptoNetworks')
-const RegtestMinerConnector = require('../../../src/RegtestMinerConnector')
+const CryptoNetworks = require('../../../src/crypto_networks')
+const RegtestMinerConnector = require('../../../src/regtest_miner_connector')
 
 let savedGlobals
 
@@ -46,7 +46,7 @@ function restoreGlobals() {
     sinon.restore()
 }
 
-// Mirror the phase('service-pings') body of initialCheck.test.js: same order, calls and messages.
+// Mirror the phase('service-pings') body of initial_check.test.js: same order, calls and messages.
 // (Only the console.log in the node catch is dropped; the offline suite has no use for it.)
 async function runPingSequence() {
     try {
@@ -258,7 +258,7 @@ function registerGasBootstrapTests() {
     describe('Scenario 3.7.5: Gas token bootstrap failure', function () {
 
         it('throws when gas token issue fails', async function () {
-            // Replicate gas token check from initialCheck.test.js lines 198-215
+            // Replicate gas token check from initial_check.test.js lines 198-215
             async function runGasBootstrap(db, cryptoHelper, issueHelper) {
                 const GAS_TICK = 'XCHAIN'
                 const gasTokenExists = await db.checkIssue({ tick: GAS_TICK, status: 'valid' })

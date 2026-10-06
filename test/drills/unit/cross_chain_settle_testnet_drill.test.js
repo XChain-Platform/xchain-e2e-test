@@ -19,8 +19,8 @@ function loadDrill(runCrossChainSettle = async () => ({ ok: true })) {
     }
 
     const submit = () => {};
-    const drill = proxyquire('../crossChainSettleTestnet.drill', {
-        '../sdk/sdkHelper': { XChainSDK: StubSdk, submit },
+    const drill = proxyquire('../cross_chain_settle_testnet.test', {
+        '../sdk/helpers/sdkHelper': { XChainSDK: StubSdk, submit },
         './lib/testnetSettleRunner': { runCrossChainSettle }
     });
     return { drill, submit };

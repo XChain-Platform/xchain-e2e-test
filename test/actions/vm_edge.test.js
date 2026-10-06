@@ -9,11 +9,11 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const vmHelper = require('../helpers/vmHelper')
 const issueHelper = require('../helpers/issueHelper')
 const gasHelper = require('../helpers/gasHelper')
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 
 /**
  * VM Edge: negative paths, security boundaries, and the deploy-time constructor,

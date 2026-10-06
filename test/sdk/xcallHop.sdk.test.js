@@ -32,7 +32,7 @@
 
 const { expect } = require('chai');
 const axios = require('axios');
-const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./helpers/sdkHelper');
 
 // BTC-side contract: fires the outbound call AND receives the bounced-back
 // call. gasLimit on the outbound leg must cover the bouncer's own

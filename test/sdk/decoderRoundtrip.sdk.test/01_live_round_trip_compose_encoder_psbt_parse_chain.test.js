@@ -47,7 +47,7 @@
 
 const { expect } = require('chai');
 const { makeSdk, submit, fundedGasAddress, fundedSdkAddress,
-        uniqueTick, submitOpts, loadSDK } = require('../sdkHelper');
+        uniqueTick, submitOpts, loadSDK } = require('../helpers/sdkHelper');
 const { haveConnectors, compacted, firstOf, indexedDetails, indexerNameMatches } =
     require('./helpers/decoder_roundtrip');
 

@@ -74,13 +74,13 @@ const { ValidatorIdentity } = require('../helpers/multiValidatorHubHelper')
 const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract,
     mineWhile,
-} = require('./mirrorDrillFixture')
+} = require('./helpers/mirrorDrillFixture')
 const {
     APPLIED_FIELDS, diffRows, until, untilOrClearDogeStall, queryDb,
     readAppliedResponse, readContractState, readRequestRow,
     venueTipProbe, findEmittedAttestRequest, attestRequestWatermark,
     clearBeforeBroadcast, waitForHeightWithClear, settleOrReport, allHubTails, jsonSafe,
-} = require('./mirrorDrillWaits')
+} = require('./helpers/mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 
 const FIXED_BODY = '{"score":31,"meta":"zc4-fallthrough"}'

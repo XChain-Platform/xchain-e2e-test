@@ -52,7 +52,7 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, mine, submitOpts, loadSDK } = require('../sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mine, submitOpts, loadSDK } = require('../helpers/sdkHelper');
 const attestationHelper = require('../../helpers/attestationHelper');
 const { requireResponsibleValidator } = require('../../helpers/federationGuards');
 // Reuse the harness's SDK resolver (sibling checkout or installed dep) to get
