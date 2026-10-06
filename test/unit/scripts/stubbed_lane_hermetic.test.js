@@ -100,6 +100,13 @@ describe('stubbed integration lane stays hermetic', () => {
             'stryker.phase2.config.mjs and package.json test:integration:stubbed select different integration files')
     })
 
+    it('phase-2 mutation spec pins the hermetic directories with no glob or ignore', async () => {
+        const config = (await import(pathToFileURL(path.join(REPO_ROOT, 'stryker.phase2.config.mjs')).href)).default
+        const { spec, ignore = [] } = config.mochaOptions
+        assert.deepStrictEqual(spec.filter(g => g.startsWith('test/integration/')), HERMETIC_SPECS)
+        assert.deepStrictEqual(ignore, [])
+    })
+
     it('every split part of a live root is reached from that root', () => {
         const orphans = []
         for (const dir of fs.readdirSync(INTEGRATION_DIR).filter(d => d.endsWith('.integration.test'))) {

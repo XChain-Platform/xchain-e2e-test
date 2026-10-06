@@ -30,7 +30,7 @@ const protocol = require('../../../xchain-documentation/protocol/constants.js')
 
 const encoderValidator = require('../../../xchain-encoder/src/common/validator.js')
 const XChainDecoder     = require('../../../xchain-decoder/src/XChainDecoder.js')
-const sdkValidator      = require('../../../xchain-sdk/src/validator.js')
+const sdkValidator      = require('../../../xchain-sdk/src/protocol/validator.js')
 const indexerDeploy     = require('../../../xchain-indexer/src/actions/deploy/index.js')
 const indexerXcall      = require('../../../xchain-indexer/src/actions/xcall/index.js')
 // xexec is the one handler here that may still be flat: `actions/xexec.js` on an older
@@ -277,7 +277,7 @@ describe('Protocol size-limit drift guard', () => {
         // (STAKE v1/v2 carry no TICK field). If either copy drifted from consensus,
         // gas-scoped caps would silently stop binding STAKE.
         const indexerConfig = require('../../../xchain-indexer/src/config.js')
-        const sdkPolicy     = require('../../../xchain-sdk/src/cosigner/policyEvaluator.js')
+        const sdkPolicy     = require('../../../xchain-sdk/src/cosigner/policy_evaluator.js')
 
         it('[regression:p0] indexer GAS_TICK === canonical', () => {
             assert.strictEqual(
@@ -431,7 +431,7 @@ describe('Protocol size-limit drift guard', () => {
 
     describe('Chunked DEPLOY caps (MAX_DEPLOY_CHUNKS / MAX_DEPLOYCHUNK_PART_BYTES)', () => {
 
-        const chunkHelper        = require('../../../xchain-sdk/src/chunkHelper.js')
+        const chunkHelper        = require('../../../xchain-sdk/src/contract/chunk_helper.js')
         const indexerDeployChunk = require('../../../xchain-indexer/src/actions/deploy/deploy_chunk.js')
 
         it('[regression:p0] MAX_DEPLOY_CHUNKS === canonical across SDK + indexer', () => {
@@ -469,7 +469,7 @@ describe('Protocol size-limit drift guard', () => {
             // re-exported by the co-signer psbtActionDecode OVERSIZED gate. The decoder copy is
             // guarded above; without this the SDK/co-signer copy could drift so the co-signer
             // refuses PSBTs the decoder accepts and the chunker splits contracts that fit one tx.
-            const psbtActionDecode = require('../../../xchain-sdk/src/cosigner/psbtActionDecode.js')
+            const psbtActionDecode = require('../../../xchain-sdk/src/cosigner/psbt_action_decode.js')
             assert.strictEqual(chunkHelper.MAX_ACTION_DATA_LENGTH, protocol.MAX_ACTION_DATA_LENGTH,
                 'SDK chunkHelper MAX_ACTION_DATA_LENGTH drifted from the canonical protocol constant')
             assert.strictEqual(psbtActionDecode.MAX_ACTION_DATA_LENGTH, protocol.MAX_ACTION_DATA_LENGTH,
@@ -616,7 +616,7 @@ describe('Protocol size-limit drift guard', () => {
         // pair could drift from canonical together and stay green (uuid 3499).
         it('[regression:p0] COMPRESSION_MAX_RATIO === canonical across encoder + explorer + sdk', () => {
             const explorerCompression = require('../../../xchain-explorer/src/http/compression.js')
-            const sdkCompression      = require('../../../xchain-sdk/src/compression.js')
+            const sdkCompression      = require('../../../xchain-sdk/src/protocol/compression.js')
             assert.strictEqual(
                 encoderValidator.COMPRESSION_MAX_RATIO,
                 protocol.COMPRESSION_MAX_RATIO,
@@ -730,7 +730,7 @@ describe('Protocol size-limit drift guard', () => {
         // batchLimits.js, and four further SDK sites (validator, batchBuilder,
         // decoder/parse, preflight/checks/batch) follow that one (uuid 500f2f11).
         it('[regression:p0] BATCH_COMMAND_LIMIT === canonical across SDK batchLimits + indexer batch.js (uuid 500f2f11)', () => {
-            const sdkBatchLimits = require('../../../xchain-sdk/src/batchLimits.js')
+            const sdkBatchLimits = require('../../../xchain-sdk/src/protocol/batch_limits.js')
             assert.strictEqual(
                 sdkBatchLimits.BATCH_COMMAND_LIMIT,
                 protocol.BATCH_COMMAND_LIMIT,
@@ -768,7 +768,7 @@ describe('Protocol size-limit drift guard', () => {
         // the wallet builds batches the chain rejects whole. Same wallet-only-checkout
         // blind spot the THRESHOLD_SCALE guard above records (uuid 044f8438).
         it('[regression:p0] BATCH_WEIGHT_BUDGET === canonical across SDK batchLimits + indexer batch.js + wallet batchCommand (uuid 044f8438)', () => {
-            const sdkBatchLimits = require('../../../xchain-sdk/src/batchLimits.js')
+            const sdkBatchLimits = require('../../../xchain-sdk/src/protocol/batch_limits.js')
             assert.strictEqual(
                 sdkBatchLimits.BATCH_WEIGHT_BUDGET,
                 protocol.BATCH_WEIGHT_BUDGET,

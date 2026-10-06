@@ -31,9 +31,9 @@ const path   = require('path');
 // The SDK the way the tool itself resolves it: staged copies carry no
 // node_modules link, so a bare require('xchain-sdk') is not enough.
 function loadFormats() {
-    for (const c of ['xchain-sdk/src/formats.js',
-                     '../../xchain-sdk/src/formats.js',
-                     '../../../xchain-sdk/src/formats.js']) {
+    for (const c of ['xchain-sdk/src/protocol/formats.js',
+                     '../../xchain-sdk/src/protocol/formats.js',
+                     '../../../xchain-sdk/src/protocol/formats.js']) {
         try {
             return c.startsWith('.') ? require(path.resolve(__dirname, c)) : require(c);
         } catch (e) { /* next */ }
