@@ -17,29 +17,49 @@ const path   = require('path');
 
 const ROOT = path.resolve(__dirname, '../../../..');
 
-const STATE_HASH_PATHS = [
-    'xchain-indexer/src/consensus/state_hash.js',
-    'xchain-sync/src/consensus/state_hash.js'
+const TWIN_ROOTS = [
+    'xchain-indexer/src/consensus',
+    'xchain-sync/src/consensus'
 ];
 
-const stateHashBytes = STATE_HASH_PATHS.map(relativePath =>
-    fs.readFileSync(path.join(ROOT, relativePath)));
-const stateHashSources = stateHashBytes.map(source => source.toString('utf8'));
+// The state-hash code is the facade state_hash.js plus every file under the
+// state_hash/ directory it delegates to. Returns them as relative-path keyed bytes,
+// sorted so two twins compare file by file.
+function readStateHash (twinRoot) {
+    const base = path.join(ROOT, twinRoot);
+    const files = { 'state_hash.js': fs.readFileSync(path.join(base, 'state_hash.js')) };
+    const walk = (dir, prefix) => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const rel = prefix + entry.name;
+            if (entry.isDirectory()) walk(path.join(dir, entry.name), rel + '/');
+            else files[rel] = fs.readFileSync(path.join(dir, entry.name));
+        }
+    };
+    walk(path.join(base, 'state_hash'), 'state_hash/');
+    return Object.fromEntries(Object.keys(files).sort().map(name => [name, files[name]]));
+}
+
+const twins = TWIN_ROOTS.map(readStateHash);
 
 describe('anchor state-hash twin parity', function () {
     it('keeps the indexer and sync state-hash sources byte-identical', function () {
-        assert.deepStrictEqual(stateHashBytes[1], stateHashBytes[0],
-            'xchain-sync state_hash.js drifted from the xchain-indexer source');
+        assert.deepStrictEqual(Object.keys(twins[1]), Object.keys(twins[0]),
+            'xchain-sync state-hash file set drifted from the xchain-indexer source');
+        for (const name of Object.keys(twins[0])) {
+            assert.deepStrictEqual(twins[1][name], twins[0][name],
+                'xchain-sync ' + name + ' drifted from the xchain-indexer source');
+        }
     });
 
     it('defines both anchor row-family predicates in each twin', function () {
         const predicates = ['archiveHeadPredicate', 'checkpointSectionPredicate'];
 
-        for (const [index, source] of stateHashSources.entries()) {
+        for (const [index, files] of twins.entries()) {
+            const source = Object.values(files).map(bytes => bytes.toString('utf8')).join('\n');
             for (const predicate of predicates) {
                 const definition = new RegExp('function\\s+' + predicate + '\\s*\\(');
                 assert.match(source, definition,
-                    STATE_HASH_PATHS[index] + ' must define ' + predicate);
+                    TWIN_ROOTS[index] + ' state_hash must define ' + predicate);
             }
         }
     });
