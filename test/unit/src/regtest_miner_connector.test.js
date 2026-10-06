@@ -321,3 +321,51 @@ describe('RegtestMinerConnector', function () {
         });
     });
 });
+
+// A miner started with MINER_API_KEY answers a missing or wrong key with HTTP 401
+// and an {error} body. Axios rejects on any non-2xx, so the connector must read
+// that body itself or the caller sees only a bare status-code message.
+function httpRefusal(status, data) {
+    return Object.assign(new Error('Request failed with status code ' + status), {
+        response: { status, data },
+    });
+}
+
+describe('RegtestMinerConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
+    describe('non-2xx refusals', function () {
+
+        it('names the miner refusal and MINER_API_KEY on a 401 from any control call', async function () {
+            axiosPostStub.rejects(httpRefusal(401, { error: 'Unauthorized: missing or invalid X-API-Key' }));
+            const auth = /refused generate_blocks: Unauthorized: missing or invalid X-API-Key.*MINER_API_KEY/;
+            await assert.rejects(() => connector.generateBlocks(1), auth);
+            await assert.rejects(() => connector.sendFunds('addr', 1), /refused send_funds: Unauthorized.*MINER_API_KEY/);
+            await assert.rejects(() => connector.pauseMining(), /refused pause_mining: Unauthorized.*MINER_API_KEY/);
+        });
+
+        it('names the status without the key hint on a non-401 refusal', async function () {
+            axiosPostStub.rejects(httpRefusal(502, {}));
+            await assert.rejects(() => connector.setIdleMineInterval(0), (err) => {
+                assert.match(err.message, /refused set_idle_mine_interval: HTTP 502/);
+                assert.doesNotMatch(err.message, /MINER_API_KEY/);
+                return true;
+            });
+        });
+
+        it('rethrows a responseless failure unchanged', async function () {
+            const dead = new Error('connect ECONNREFUSED 127.0.0.1:18444');
+            axiosPostStub.rejects(dead);
+            await assert.rejects(() => connector.resumeMining(), (err) => err === dead);
+        });
+
+        it('fails setMockTime loudly on a 401 instead of falling back to the node', async function () {
+            axiosPostStub.rejects(httpRefusal(401, { error: 'Unauthorized: missing or invalid X-API-Key' }));
+            let nodeCalls = 0;
+            global.nodeConnector = { ['_rpc']: async () => { nodeCalls++; return null } };
+            await assert.rejects(() => connector.setMockTime(1), /refused set_mock_time: Unauthorized.*MINER_API_KEY/);
+            assert.strictEqual(nodeCalls, 0, 'a key mismatch must not be routed around');
+            delete global.nodeConnector;
+        });
+    });
+});

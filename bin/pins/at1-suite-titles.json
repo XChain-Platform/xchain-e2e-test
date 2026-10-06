@@ -2766,7 +2766,7 @@
       "6231c27b726caec657647c0722768773b3e11be7173cc5e35ad9c6cf4f3084ec",
       "e7cf7095df6aea5399479abcad2ff8902a2f05b28c11a637b147fc44a75686f5"
     ],
-    "ddbcd8e692452cd2": [
+    "76a1b61cdee9c853": [
       "54259fac2c724cff15402c526356865d47f686ef3e23c7a484ef0b239db72a3f",
       "cb68db7956bea945672ac62d03672b441c32895f0098ee9afe59da3bad55bd99",
       "40e5851d05cf52402cb30df3f9e889f12857e783511d39d942b9c98815c12c0f",
@@ -2787,6 +2787,8 @@
       "b893680fd20476e2b9ea385e46e4b37e8cd6117bad67020cb2c35a9b781648f4",
       "349b645b854b7e8d6643a3796673b209591a26e110709746fbc7cdb1c2cf2340",
       "332850cd03cfa6ab2af5429ee1823e2ef7b7b05082581efa93542c16ffc85439",
+      "5133ffdaa2a4baced105aaae9961d182fc71f64e5c50ddebc828897cd8698c75",
+      "446fb41f5e4c3f10752dcb9fc0804f94070c44c25a9433375fb676e7e561e99a",
       "d20a8e371454de5416b38bbbf9072612668c0feadd4ee70a9ded8933f4bbfd8f",
       "3a61141f5098ef24f493fdabd38b9527b767acc00940003fa8f6db9c351aa499",
       "2bb28da87e304b51472fc0ab4146c476a4e0e58b202b76e8bb6c29a532fc2019",
@@ -2994,7 +2996,7 @@
     },
     "test:regression": {
       "fileCount": 10,
-      "titleCount": 183,
+      "titleCount": 185,
       "files": {
         "test/regression/actions.regression.js": "a9b194a368d8fdd4",
         "test/regression/bootstrap.regression.js": "da3c5c8b692d1c83",
@@ -3002,7 +3004,7 @@
         "test/regression/connectors.regression.js": "5dccc051d4499d04",
         "test/regression/crypto.regression.js": "df46e6b82cd9ea68",
         "test/regression/database.regression.js": "d99deae25d296efa",
-        "test/regression/protocol-size-limits.regression.js": "ddbcd8e692452cd2",
+        "test/regression/protocol-size-limits.regression.js": "76a1b61cdee9c853",
         "test/regression/teardown-errors.regression.js": "263745e4962da7e8",
         "test/regression/transaction.regression.js": "ab9f1afc95331739",
         "test/regression/xcallDeliveryLag.regression.js": "5525d69c94ddce61"
@@ -3010,27 +3012,27 @@
     },
     "test:regression:p0": {
       "fileCount": 7,
-      "titleCount": 143,
+      "titleCount": 145,
       "files": {
         "test/regression/bootstrap.regression.js": "da3c5c8b692d1c83",
         "test/regression/connectors.regression.js": "5dccc051d4499d04",
         "test/regression/crypto.regression.js": "df46e6b82cd9ea68",
         "test/regression/database.regression.js": "d99deae25d296efa",
-        "test/regression/protocol-size-limits.regression.js": "ddbcd8e692452cd2",
+        "test/regression/protocol-size-limits.regression.js": "76a1b61cdee9c853",
         "test/regression/transaction.regression.js": "ab9f1afc95331739",
         "test/regression/xcallDeliveryLag.regression.js": "5525d69c94ddce61"
       }
     },
     "test:regression:p0p1": {
       "fileCount": 9,
-      "titleCount": 163,
+      "titleCount": 165,
       "files": {
         "test/regression/actions.regression.js": "a9b194a368d8fdd4",
         "test/regression/bootstrap.regression.js": "da3c5c8b692d1c83",
         "test/regression/connectors.regression.js": "5dccc051d4499d04",
         "test/regression/crypto.regression.js": "df46e6b82cd9ea68",
         "test/regression/database.regression.js": "d99deae25d296efa",
-        "test/regression/protocol-size-limits.regression.js": "ddbcd8e692452cd2",
+        "test/regression/protocol-size-limits.regression.js": "76a1b61cdee9c853",
         "test/regression/teardown-errors.regression.js": "263745e4962da7e8",
         "test/regression/transaction.regression.js": "ab9f1afc95331739",
         "test/regression/xcallDeliveryLag.regression.js": "5525d69c94ddce61"

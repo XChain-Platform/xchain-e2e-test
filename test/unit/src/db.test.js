@@ -606,6 +606,32 @@ describe('checkDispenser()', function () {
     })
 })
 
+describe('checkDispenser() fiatAmount filter', function () {
+    // Pin the FIAT_AMOUNT the caller names, so a dispenser indexed with the
+    // right fiat code but the wrong amount no longer satisfies the wait.
+    it('fiatAmount set: adds d.fiat_amount = ? with the value bound in step', async function () {
+        await db.checkDispenser({ txHash: 'hash1', fiatCode: 'USD', fiatAmount: '1.50' })
+        const sql    = mockConnection.query.firstCall.args[0]
+        const params = mockConnection.query.firstCall.args[1]
+        const wherePart = sql.split('WHERE')[1] || ''
+        assert.ok(wherePart.includes('d.fiat_amount = ?'))
+        assert.ok(params.includes('1.50'))
+        assert.strictEqual(countPlaceholders(sql), params.length)
+    })
+
+    // A dispenser with no fiat price passes "" or null, which must add no clause.
+    for (const fiatAmount of [null, '']) {
+        it('fiatAmount ' + JSON.stringify(fiatAmount) + ': adds no d.fiat_amount clause', async function () {
+            await db.checkDispenser({ txHash: 'hash1', fiatAmount })
+            const sql    = mockConnection.query.firstCall.args[0]
+            const params = mockConnection.query.firstCall.args[1]
+            const wherePart = sql.split('WHERE')[1] || ''
+            assert.ok(!wherePart.includes('d.fiat_amount'))
+            assert.strictEqual(countPlaceholders(sql), params.length)
+        })
+    }
+})
+
 describe('checkDispense()', function () {
     it('all-fields: 11 placeholders using isNullOrNullString', async function () {
         await db.checkDispense({

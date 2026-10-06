@@ -67,6 +67,8 @@ function addDispenserGetFilters(database, params, whereClauses, whereValues){
 
 function addDispenserConstraintFilters(database, params, whereClauses, whereValues){
     addDispenserWhereValue(database, whereClauses, whereValues, params.fiatCode, "ifs.code = ?")
+    // Match the fiat amount the caller named; the indexer stores the wire string verbatim
+    addDispenserWhereValue(database, whereClauses, whereValues, params.fiatAmount, "d.fiat_amount = ?")
     addDispenserWhereValue(database, whereClauses, whereValues, params.expiration, "d.expiration = ?")
     addDispenserWhereValue(database, whereClauses, whereValues, params.allowList, "d.allow_list = ?")
     addDispenserWhereValue(database, whereClauses, whereValues, params.blockList, "d.block_list = ?")
