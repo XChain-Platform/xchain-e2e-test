@@ -174,4 +174,5 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM XCALL dispatch relay (C.2)', 
 });
 
 // Run the split parts in this suite's lane; the stubbed lane ignores their directory.
+require('../attestMirror/helpers/crossChainOfferDecimals').installCrossChainSeeds();
 require('./multiHubXcallWeighted.integration.test/02_healthy_weighted_federation.test');
