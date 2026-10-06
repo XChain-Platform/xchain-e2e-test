@@ -90,6 +90,13 @@ function seedActiveValidators(mvh, weights) {
     return { restore() { restores.forEach((r) => r()); restores.length = 0; } };
 }
 
+function seedOracleWeights(mvh) {
+    const weights = equalWeights(mvh);
+    const seed = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators: weights });
+    const active = seedActiveValidators(mvh, weights);
+    return { restore() { active.restore(); seed.restore(); } };
+}
+
 async function attachOracle(mvh) {
     const stops = [];
     for (const hub of mvh.hubs) {
@@ -208,7 +215,7 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
     });
 
     describe('Price + Fiat oracle round (OracleConsensus) finalizes at N=10', function () {
-        let db, mvh, seed, active, oracle;
+        let db, mvh, seed, oracle;
 
         before(async function () {
             db = await startDisposableHubDb();
@@ -216,16 +223,13 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
             mvh = new MultiValidatorHub({ count: COUNT, basePort: 25000, startAttestation: false });
             await mvh.start();
             await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
-            const weights = equalWeights(mvh);
-            seed   = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators: weights });
-            active = seedActiveValidators(mvh, weights);
+            seed   = seedOracleWeights(mvh);
             oracle = await attachOracle(mvh);
             injectSubmissions(mvh);
         });
 
         after(async function () {
             if (oracle) oracle.stop();
-            if (active) active.restore();
             if (seed) seed.restore();
             if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
             if (db)  { await db.stop(); }
