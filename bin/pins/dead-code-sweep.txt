@@ -2,7 +2,7 @@ xchain-e2e-test dead-code sweep
 ===============================
 
 Candidates are src/ files that no package entry or node-run npm script reaches
-through a literal require or import. Nothing is deleted from this record: each
+through a literal require or import. Nothing is deleted: every candidate has live hits in at least xchain-e2e-test, so none is removable. The claude key counts the platform claude/ directory. Nothing is deleted from this record: each
 candidate carries the per-repository reference counts taken at the pinned revisions.
 
 EVIDENCE_JSON_BEGIN
@@ -56,7 +56,8 @@ EVIDENCE_JSON_BEGIN
         "xchain-utxo-tracker": 0,
         "xchain-vm": 0,
         "xchain-wallet": 0,
-        "xchain-websites": 0
+        "xchain-websites": 0,
+        "claude": 2
       }
     },
     {
@@ -83,7 +84,8 @@ EVIDENCE_JSON_BEGIN
         "xchain-utxo-tracker": 0,
         "xchain-vm": 0,
         "xchain-wallet": 0,
-        "xchain-websites": 0
+        "xchain-websites": 0,
+        "claude": 3
       }
     },
     {
@@ -110,7 +112,8 @@ EVIDENCE_JSON_BEGIN
         "xchain-utxo-tracker": 0,
         "xchain-vm": 0,
         "xchain-wallet": 0,
-        "xchain-websites": 0
+        "xchain-websites": 0,
+        "claude": 8
       }
     },
     {
@@ -137,7 +140,8 @@ EVIDENCE_JSON_BEGIN
         "xchain-utxo-tracker": 0,
         "xchain-vm": 0,
         "xchain-wallet": 0,
-        "xchain-websites": 0
+        "xchain-websites": 0,
+        "claude": 439
       }
     },
     {
@@ -164,7 +168,8 @@ EVIDENCE_JSON_BEGIN
         "xchain-utxo-tracker": 0,
         "xchain-vm": 0,
         "xchain-wallet": 0,
-        "xchain-websites": 0
+        "xchain-websites": 0,
+        "claude": 10
       }
     },
     {
@@ -191,7 +196,8 @@ EVIDENCE_JSON_BEGIN
         "xchain-utxo-tracker": 0,
         "xchain-vm": 0,
         "xchain-wallet": 0,
-        "xchain-websites": 0
+        "xchain-websites": 0,
+        "claude": 2
       }
     },
     {
@@ -218,7 +224,8 @@ EVIDENCE_JSON_BEGIN
         "xchain-utxo-tracker": 0,
         "xchain-vm": 0,
         "xchain-wallet": 0,
-        "xchain-websites": 0
+        "xchain-websites": 0,
+        "claude": 24
       }
     },
     {
@@ -245,7 +252,8 @@ EVIDENCE_JSON_BEGIN
         "xchain-utxo-tracker": 0,
         "xchain-vm": 0,
         "xchain-wallet": 0,
-        "xchain-websites": 0
+        "xchain-websites": 0,
+        "claude": 176
       }
     },
     {
@@ -272,7 +280,8 @@ EVIDENCE_JSON_BEGIN
         "xchain-utxo-tracker": 0,
         "xchain-vm": 0,
         "xchain-wallet": 0,
-        "xchain-websites": 0
+        "xchain-websites": 0,
+        "claude": 104
       }
     },
     {
@@ -299,7 +308,8 @@ EVIDENCE_JSON_BEGIN
         "xchain-utxo-tracker": 0,
         "xchain-vm": 0,
         "xchain-wallet": 0,
-        "xchain-websites": 0
+        "xchain-websites": 0,
+        "claude": 72
       }
     },
     {
@@ -326,7 +336,8 @@ EVIDENCE_JSON_BEGIN
         "xchain-utxo-tracker": 0,
         "xchain-vm": 0,
         "xchain-wallet": 0,
-        "xchain-websites": 0
+        "xchain-websites": 0,
+        "claude": 75
       }
     },
     {
@@ -353,7 +364,8 @@ EVIDENCE_JSON_BEGIN
         "xchain-utxo-tracker": 0,
         "xchain-vm": 0,
         "xchain-wallet": 0,
-        "xchain-websites": 0
+        "xchain-websites": 0,
+        "claude": 3808
       }
     },
     {
@@ -380,7 +392,8 @@ EVIDENCE_JSON_BEGIN
         "xchain-utxo-tracker": 0,
         "xchain-vm": 0,
         "xchain-wallet": 0,
-        "xchain-websites": 0
+        "xchain-websites": 0,
+        "claude": 3856
       }
     },
     {
@@ -407,7 +420,8 @@ EVIDENCE_JSON_BEGIN
         "xchain-utxo-tracker": 0,
         "xchain-vm": 0,
         "xchain-wallet": 0,
-        "xchain-websites": 0
+        "xchain-websites": 0,
+        "claude": 66
       }
     },
     {
@@ -434,7 +448,8 @@ EVIDENCE_JSON_BEGIN
         "xchain-utxo-tracker": 0,
         "xchain-vm": 0,
         "xchain-wallet": 0,
-        "xchain-websites": 0
+        "xchain-websites": 0,
+        "claude": 904
       }
     },
     {
@@ -461,7 +476,8 @@ EVIDENCE_JSON_BEGIN
         "xchain-utxo-tracker": 0,
         "xchain-vm": 0,
         "xchain-wallet": 0,
-        "xchain-websites": 0
+        "xchain-websites": 0,
+        "claude": 39
       }
     },
     {
@@ -488,7 +504,8 @@ EVIDENCE_JSON_BEGIN
         "xchain-utxo-tracker": 0,
         "xchain-vm": 0,
         "xchain-wallet": 0,
-        "xchain-websites": 0
+        "xchain-websites": 0,
+        "claude": 1
       }
     }
   ]
