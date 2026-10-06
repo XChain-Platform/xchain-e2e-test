@@ -128,6 +128,40 @@ function bridgeCreditWaitMs(destCoin){
     return relayMarginFloorS(destCoin) * 1000 + BRIDGE_CREDIT_SLACK_MS
 }
 
+// The interval each miner had before the run first touched it (null = unknown), keyed
+// by URL so two connectors for one miner share a snapshot. The miner boots its heartbeat
+// at 60000 ms unless IDLE_MINE_INTERVAL_MS is set, so a run must restore, never zero, it.
+const heartbeatBaselines = new Map()
+
+// Record a miner's interval once, before anything here changes it. Best-effort:
+// a miner that cannot report one is recorded as null and never restored to a guess.
+async function noteHeartbeatBaseline(miner){
+    if (heartbeatBaselines.has(miner.url)) return
+    let ms = null
+    try { ms = await miner.getIdleMineInterval() }
+    catch (err) { console.log('[gasHelper] could not read ' + miner.url + ' idle heartbeat: ' + err.message) }
+    heartbeatBaselines.set(miner.url, { miner, ms })
+}
+
+// Turn a miner's heartbeat off for the rest of the run, recording its startup value first.
+async function pinHeartbeatOff(miner){
+    await noteHeartbeatBaseline(miner)
+    await miner.setIdleMineInterval(0)
+}
+
+// Give every recorded miner back the interval it had before the run. Every miner
+// is attempted even when an earlier one fails; failures are returned, not thrown.
+async function restoreHeartbeatBaselines(){
+    const failures = []
+    for (const [url, { miner, ms }] of heartbeatBaselines) {
+        if (ms === null) continue
+        try { await miner.setIdleMineInterval(ms) }
+        catch (err) { failures.push(url + ': ' + err.message) }
+    }
+    heartbeatBaselines.clear()
+    return failures
+}
+
 // Run `fn` with the idle heartbeat on every miner in `miners`, and switch it back
 // off on each of them afterwards whether `fn` resolved or threw. The rest of the
 // suite assumes a block lands only on its own transaction (depth and reorg
@@ -179,6 +213,9 @@ module.exports = {
     bridgeCreditAttribution: requireRow.bridgeCreditAttribution,
     bridgeCreditEvidence: requireRow.bridgeCreditEvidence,
     withIdleMining,
+    noteHeartbeatBaseline,
+    pinHeartbeatOff,
+    restoreHeartbeatBaselines,
 
     // Grants XCHAIN on BTC, the only chain with a local supply: a faucet SEND, else a
     // MINT chunked to MAX_MINT while supply allows, else a named refusal (rail/gas_faucet.js).
@@ -380,5 +417,10 @@ module.exports = {
     ['_resetGasFaucet'](){
         faucetHolders.clear()
         faucetLastUsed.clear()
+    },
+
+    // Unit tests only: forget every recorded heartbeat baseline.
+    ['_resetHeartbeatBaselines'](){
+        heartbeatBaselines.clear()
     }
 }

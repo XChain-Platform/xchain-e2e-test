@@ -89,13 +89,14 @@ describe('Chaos Experiment 1: Connector Timeout Cascade @P0', function () {
             assert(mockConn.query.callCount >= 1)
         })
 
-        it('returns null when query always rejects within timeMax', async function () {
+        // A wait that never got an answer is not evidence the row is absent.
+        it('rejects with WAIT_NO_ANSWER when query always rejects within timeMax', async function () {
             const { db, mockConn } = createDb()
             mockConn.query.rejects(new Error('connect ETIMEDOUT'))
 
-            const result = await db.waitForIssue({ tick: 'CHAOS' }, 100)
-
-            assert.strictEqual(result, null)
+            // give-up-ok: the wait must refuse, never return a row; assert.rejects pins the refusal.
+            await assert.rejects(db.waitForIssue({ tick: 'CHAOS' }, 100),
+                err => err.code === 'WAIT_NO_ANSWER' && /ETIMEDOUT/.test(err.message))
         })
 
         it('returns row when query recovers after transient timeout', async function () {

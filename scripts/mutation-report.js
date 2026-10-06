@@ -22,6 +22,8 @@
  *   node scripts/mutation-report.js [path/to/report.json]
  *
  * Defaults to reports/mutation/phase1.json if no argument given.
+ * Writes reports/mutation/report-<phase>-<YYYY-MM-DD>.md, where <phase> is the
+ * input JSON's basename (phase1, phase2), so both lanes survive the same day.
  */
 
 'use strict'
@@ -263,6 +265,13 @@ function buildReport(report, options = {}) {
   }
 }
 
+// Name the markdown after the input's phase as well as the date: phase1 and
+// phase2 run on the same day would otherwise write one file, and the second
+// run would silently replace the first lane's score and survivor list.
+function reportOutPath(reportPath, date, outDir = path.join('reports', 'mutation')) {
+  return path.join(outDir, `report-${path.basename(reportPath, '.json')}-${date}.md`)
+}
+
 function run() {
   const reportPath = process.argv[2] || path.join('reports', 'mutation', 'phase1.json')
 
@@ -278,7 +287,7 @@ function run() {
   const outDir = path.join('reports', 'mutation')
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true })
 
-  const outPath = path.join(outDir, `report-${built.date}.md`)
+  const outPath = reportOutPath(reportPath, built.date, outDir)
   fs.writeFileSync(outPath, built.md, 'utf8')
 
   const t = built.totals
@@ -297,6 +306,6 @@ function run() {
   }
 }
 
-module.exports = { sliceSource, inlineCode, coveredScore, buildReport, isCriticalPath, statusEmoji }
+module.exports = { sliceSource, inlineCode, coveredScore, buildReport, isCriticalPath, statusEmoji, reportOutPath }
 
 if (require.main === module) run()

@@ -48,11 +48,14 @@
 # and PRICE rounds to the hub the way any indexer does. On a regtest venue that
 # is tolerable (the hub dedupes rounds, and the tip push is skipped while a node
 # is catching up), but it is the reason node B is meant to be torn down with
-# `down` once the drill has run rather than left resident.
+# `down` once the drill has run rather than left resident. A failed `up` (a
+# refused or mismatched code identity check, a failed clone or docker step,
+# Ctrl-C) removes node B itself, so a follower on divergent code never lingers.
 #
 # Secrets never reach the terminal: credentials are read straight out of the
 # source container's environment into a 0600 client file inside the database
-# container and a 0600 env-file on the venue host, and are never echoed.
+# container and a 0600 env-file on the venue host, and are never echoed. An
+# EXIT trap removes that client file on every exit path, failures included.
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
@@ -67,9 +70,34 @@ CNF=/tmp/bet-parity-client.cnf
 
 SRC_DB=$(docker exec "$SRC_CONTAINER" printenv INDEXER_DB_NAME)
 
+# Set by cmd_up just before node B is created, so only a failed `up` tears it
+# down; a failed `status` must never remove a node that passed its checks.
+NODE_B_MANAGED=0
+
+# Runs on every exit once the client file may exist, including set -e aborts,
+# REFUSING/MISMATCH exits and Ctrl-C. It never calls exit, so the status stands.
+cleanup_on_exit() {
+    local rc=$?
+    # Remove the plaintext credentials file whatever happened before.
+    docker exec "$DB_CONTAINER" rm -f "$CNF" >/dev/null 2>&1 || true
+    if [ "$rc" -ne 0 ] && [ "$NODE_B_MANAGED" = 1 ]; then
+        # Remove a node B that failed its checks: it is a full hub peer (see header).
+        echo "   up failed (exit $rc): removing $PARITY_CONTAINER so it does not stay resident" >&2
+        docker rm -f "$PARITY_CONTAINER" >/dev/null 2>&1 || true
+        # `rm -f ... || true` swallows its own failure, so prove the container is gone.
+        if [ -n "$(docker ps -aq --filter "name=^${PARITY_CONTAINER}$")" ]; then
+            echo "   WARNING: $PARITY_CONTAINER still exists; remove it by hand: docker rm -f $PARITY_CONTAINER" >&2
+        fi
+    fi
+}
+
 # Write a 0600 client options file inside the database container, sourced from
 # the live indexer's own environment. Nothing is printed.
 write_client_cnf() {
+    # Arm the cleanup before anything is written, so a half-written file is covered too.
+    trap cleanup_on_exit EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
     local u p
     u=$(docker exec "$SRC_CONTAINER" printenv INDEXER_DB_USER)
     p=$(docker exec "$SRC_CONTAINER" printenv INDEXER_DB_PASS)
@@ -144,6 +172,8 @@ cmd_up() {
     image=$(docker inspect -f '{{.Config.Image}}' "$SRC_CONTAINER")
     # The removal that used to live here now runs at the top of cmd_up, ahead of
     # the DROP/restore; nothing can have re-created the container since.
+    # From here until the identity check passes, a failed exit removes node B.
+    NODE_B_MANAGED=1
     docker create --name "$PARITY_CONTAINER" --network "$NETWORK" \
         --env-file "$WORK/env.parity" "$image" >/dev/null
     # Copy node A's RUNNING source tree in, not the image's: the P4 BET indexer
@@ -182,8 +212,10 @@ cmd_up() {
         exit 1
     fi
     echo "   both nodes run src sha256 ${a:0:16}... ($na files, .sql schema included)"
+    # Node B passed: keep it resident from here on, whatever happens next.
+    NODE_B_MANAGED=0
 
-    docker exec "$DB_CONTAINER" rm -f "$CNF" || true
+    # The EXIT trap armed in write_client_cnf removes the client file.
     echo "== node B is up; give it a minute to catch up, then:"
     echo "   BET_PARITY_DB_NAME=$PARITY_DB npm run test:sdk:bet-parity   (from the Mac)"
 }
@@ -192,7 +224,7 @@ cmd_status() {
     write_client_cnf
     echo "node A ($SRC_DB): tip $(tip_of "$SRC_DB")"
     echo "node B ($PARITY_DB): tip $(tip_of "$PARITY_DB")"
-    docker exec "$DB_CONTAINER" rm -f "$CNF" || true
+    # The EXIT trap armed in write_client_cnf removes the client file.
     docker ps --filter "name=$PARITY_CONTAINER" --format '{{.Names}} {{.Status}}'
 }
 

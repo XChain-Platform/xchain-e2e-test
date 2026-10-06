@@ -55,9 +55,14 @@ describe('E2E: Suite Bootstrap & Initialization', () => {
             assert(NETWORK_OBJECT.bip32, 'NETWORK_OBJECT should have bip32')
             assert(NETWORK_OBJECT.bip32.public !== undefined, 'NETWORK_OBJECT.bip32 should have public')
             assert(NETWORK_OBJECT.bip32.private !== undefined, 'NETWORK_OBJECT.bip32 should have private')
-            // Litecoin's dust relay fee is 10× Bitcoin's → 5460 litoshi floor
-            const expectedDust = COIN === 'litecoin' ? 5460 : 546
-            assert.strictEqual(NETWORK_OBJECT.dustThreshold, expectedDust, `dustThreshold should be ${expectedDust}`)
+            // Per-chain dust floors: Bitcoin 546 sats; Litecoin 5460 litoshis (10× Bitcoin's
+            // dust relay fee); Dogecoin 100000 koinu (Dogecoin Core's hard dust limit).
+            // Literals on purpose: reading src/coins would compare the registry with itself.
+            const DUST_BY_COIN = { bitcoin: 546, litecoin: 5460, dogecoin: 100000 }
+            const expectedDust = DUST_BY_COIN[COIN]
+            // Fail on an unknown coin rather than quietly expecting Bitcoin's floor
+            assert(expectedDust !== undefined, `no expected dustThreshold defined for COIN=${COIN}`)
+            assert.strictEqual(NETWORK_OBJECT.dustThreshold, expectedDust, `dustThreshold for ${COIN} should be ${expectedDust}`)
         })
     })
 })

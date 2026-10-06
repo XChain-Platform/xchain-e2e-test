@@ -293,6 +293,28 @@ class RegtestMinerConnector {
 
         return this.unwrap(response)
     }
+
+    // Read the miner's loop state snapshot (the unauthenticated `status` method).
+    async getStatus(){
+        const data = {
+            jsonrpc: '2.0',
+            method: 'status',
+            params: {},
+            id: 1
+        }
+
+        const response = await axios.post(this.url, data, this.reqConfig)
+
+        return this.unwrap(response)
+    }
+
+    // Read the current mine-empty heartbeat interval in ms (0 = off). Returns null
+    // when the miner's status carries no usable value, so a caller never restores a guess.
+    async getIdleMineInterval(){
+        const status = await this.getStatus()
+        const ms = status && status.idle_mine_interval_ms
+        return Number.isInteger(ms) && ms >= 0 ? ms : null
+    }
 }
 
 module.exports = RegtestMinerConnector
