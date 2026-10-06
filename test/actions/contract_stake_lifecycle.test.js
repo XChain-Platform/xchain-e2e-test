@@ -25,13 +25,13 @@
 
 const assert        = require('assert')
 const crypto        = require('crypto')
-const cryptoHelper  = require('../cryptoHelper')
+const cryptoHelper  = require('../helpers/core/cryptoHelper')
 const stakeHelper   = require('../helpers/stakeHelper')
 const vmHelper      = require('../helpers/vmHelper')
 const gasHelper     = require('../helpers/gasHelper')
 
 function newSigningPubkey(){
-    let { publicKey } = crypto.generateKeyPairSync('ed25519')
+    const { publicKey } = crypto.generateKeyPairSync('ed25519')
     return publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
 }
 

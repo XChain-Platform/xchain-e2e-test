@@ -14,7 +14,7 @@ const assert = require('assert');
 const sinon  = require('sinon');
 const axios  = require('axios');
 
-const RegtestMinerConnector = require('../../../src/RegtestMinerConnector');
+const RegtestMinerConnector = require('../../../src/regtest_miner_connector');
 
 const URL  = 'localhost';
 const PORT = 18444;
@@ -285,7 +285,7 @@ describe('RegtestMinerConnector', function () {
         it('uses the miner when it implements set_mock_time', async function () {
             axiosPostStub.resolves({ data: { result: 'ok' } });
             let nodeCalls = 0;
-            global.nodeConnector = { _rpc: async () => { nodeCalls++; return null } };
+            global.nodeConnector = { ['_rpc']: async () => { nodeCalls++; return null } };
             const result = await connector.setMockTime(1785126915);
             assert.strictEqual(result, 'ok');
             assert.strictEqual(nodeCalls, 0, 'a capable miner must not be bypassed');
@@ -296,7 +296,7 @@ describe('RegtestMinerConnector', function () {
         it('falls back to the node RPC when the miner has no set_mock_time', async function () {
             axiosPostStub.resolves({ data: { error: 'Method not found - set_mock_time' } });
             const seen = [];
-            global.nodeConnector = { _rpc: async (m, a) => { seen.push([m, a]); return null } };
+            global.nodeConnector = { ['_rpc']: async (m, a) => { seen.push([m, a]); return null } };
             await connector.setMockTime('1785126915');
             assert.deepStrictEqual(seen, [['setmocktime', [1785126915]]],
                 'the timestamp must reach the node as a NUMBER, whatever the caller passed');
@@ -308,7 +308,7 @@ describe('RegtestMinerConnector', function () {
             // Falling back here would drive a node the miner deliberately protected.
             axiosPostStub.resolves({ data: { error: 'refused: mainnet' } });
             let nodeCalls = 0;
-            global.nodeConnector = { _rpc: async () => { nodeCalls++; return null } };
+            global.nodeConnector = { ['_rpc']: async () => { nodeCalls++; return null } };
             await assert.rejects(() => connector.setMockTime(1), /refused: mainnet/);
             assert.strictEqual(nodeCalls, 0);
             delete global.nodeConnector;

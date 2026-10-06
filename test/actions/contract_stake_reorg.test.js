@@ -24,13 +24,13 @@
 
 const assert       = require('assert')
 const crypto       = require('crypto')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const stakeHelper  = require('../helpers/stakeHelper')
 const vmHelper     = require('../helpers/vmHelper')
 const gasHelper    = require('../helpers/gasHelper')
 
 function newSigningPubkey(){
-    let { publicKey } = crypto.generateKeyPairSync('ed25519')
+    const { publicKey } = crypto.generateKeyPairSync('ed25519')
     return publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
 }
 const STAKE_GATED_CONTRACT = `
@@ -108,7 +108,7 @@ describe('Contract Staking Reorg: a STAKE v3 row rolls back when its block is or
 
         const s = await stakeHelper.sendStakeV3(staker, '400.00000000', pubkey, ci, 'XCHAIN')
         assert.strictEqual(s.stake.status, 'valid', 'STAKE v3 valid pre-reorg')
-        let rows = await stakeRows(ci, 'XCHAIN', staker.address)
+        const rows = await stakeRows(ci, 'XCHAIN', staker.address)
         assert.strictEqual(rows.length, 1, 'one contract_stakes row pre-reorg')
         // Use the contract_stakes row's OWN block_index as the authoritative mined
         // block (blockOfAction via transactions can disagree). Invalidate the lower

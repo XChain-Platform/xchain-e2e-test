@@ -19,7 +19,7 @@ const assert = require('assert');
 const sinon  = require('sinon');
 const axios  = require('axios');
 
-const RegtestMinerConnector = require('../../../src/RegtestMinerConnector');
+const RegtestMinerConnector = require('../../../src/regtest_miner_connector');
 
 describe('RegtestMinerConnector.setIdleMineInterval', function () {
 
@@ -36,9 +36,9 @@ describe('RegtestMinerConnector.setIdleMineInterval', function () {
 
     it('calls set_idle_mine_interval with interval_ms, matching the miner controller', async function () {
         axiosPostStub.resolves({ data: { result: 'ok' } });
-        let result = await connector.setIdleMineInterval(5000);
+        const result = await connector.setIdleMineInterval(5000);
         assert.strictEqual(result, 'ok');
-        let body = axiosPostStub.firstCall.args[1];
+        const body = axiosPostStub.firstCall.args[1];
         assert.strictEqual(body.method, 'set_idle_mine_interval');
         assert.deepStrictEqual(body.params, { interval_ms: 5000 });
     });

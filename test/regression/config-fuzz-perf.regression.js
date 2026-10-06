@@ -13,18 +13,18 @@
 const assert = require('assert')
 const sinon  = require('sinon')
 
-const CryptoNetworks             = require('../../src/CryptoNetworks')
+const CryptoNetworks             = require('../../src/crypto_networks')
 const XChainHubConnector         = require('../../src/XChainHubConnector')
-const BlockchainConnector        = require('../../src/BlockchainConnector')
+const BlockchainConnector        = require('../../src/blockchain_connector')
 const XChainUtxoTrackerConnector = require('../../src/XChainUtxoTrackerConnector')
 const XChainEncoderConnector     = require('../../src/XChainEncoderConnector')
 const XChainIndexerConnector     = require('../../src/XChainIndexerConnector')
-const RegtestMinerConnector      = require('../../src/RegtestMinerConnector')
+const RegtestMinerConnector      = require('../../src/regtest_miner_connector')
 
 const mockMariadb = require('../integration/fixtures/mockMariadb')
 const Database    = require('../../src/db')
 
-const PerfCollector = require('../perf/perfCollector')
+const PerfCollector = require('../perf/helpers/perfCollector')
 
 describe('[regression:p2] Configuration & Cross-Chain', function () {
 

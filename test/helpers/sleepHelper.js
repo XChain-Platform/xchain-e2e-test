@@ -8,18 +8,18 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('./core/transactionHelper')
 const requireRow = require('./requireRow')
 
 module.exports = {
     async sendSleepV0(addressInfo, resumeBlock, memo){
-        let sleepMessage = "SLEEP|0|"+resumeBlock+"|"+memo
+        const sleepMessage = "SLEEP|0|"+resumeBlock+"|"+memo
 
         console.log("Creating and sending SLEEP V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, sleepMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, sleepMessage)
 
         console.log("Waiting for SLEEP in the database...")
-        let row = requireRow(await indexerDatabase.waitForSleep({
+        const row = requireRow(await indexerDatabase.waitForSleep({
             txHash: txHash,
             source: addressInfo["address"],
             resumeBlock: resumeBlock,
@@ -31,13 +31,13 @@ module.exports = {
     },
 
     async sendSleepV1(addressInfo, resumeBlock, tick, memo){
-        let sleepMessage = "SLEEP|1|"+resumeBlock+"|"+tick+"|"+memo
+        const sleepMessage = "SLEEP|1|"+resumeBlock+"|"+tick+"|"+memo
 
         console.log("Creating and sending SLEEP V1 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, sleepMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, sleepMessage)
 
         console.log("Waiting for SLEEP in the database...")
-        let row = requireRow(await indexerDatabase.waitForSleep({
+        const row = requireRow(await indexerDatabase.waitForSleep({
             txHash: txHash,
             source: addressInfo["address"],
             tick: tick,

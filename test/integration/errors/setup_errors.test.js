@@ -19,8 +19,8 @@ const bitcoin = require('bitcoinjs-lib')
 
 require('../fixtures/mockMariadb')
 
-const CryptoNetworks = require('../../../src/CryptoNetworks')
-const RegtestMinerConnector = require('../../../src/RegtestMinerConnector')
+const CryptoNetworks = require('../../../src/crypto_networks')
+const RegtestMinerConnector = require('../../../src/regtest_miner_connector')
 
 let savedGlobals
 
@@ -46,11 +46,11 @@ function restoreGlobals() {
     sinon.restore()
 }
 
-// Mirror the phase('service-pings') body of initialCheck.test.js: same order, calls and messages.
+// Mirror the phase('service-pings') body of initial_check.test.js: same order, calls and messages.
 // (Only the console.log in the node catch is dropped; the offline suite has no use for it.)
 async function runPingSequence() {
     try {
-        let pingNode = await nodeConnector.getNetworkInfo()
+        const pingNode = await nodeConnector.getNetworkInfo()
         if (!pingNode) {
             throw new Error("Can't connect to the node")
         }
@@ -58,37 +58,37 @@ async function runPingSequence() {
         throw new Error('There was an error trying to connect to the node')
     }
 
-    let pingUtxoTracker = await utxoTrackerConnector.ping()
+    const pingUtxoTracker = await utxoTrackerConnector.ping()
     if (!pingUtxoTracker) {
         throw new Error("Can't connect to the XChain Utxo Tracker module")
     }
 
-    let pingEncoder = await encoderConnector.ping()
+    const pingEncoder = await encoderConnector.ping()
     if (!pingEncoder) {
         throw new Error("Can't connect to the XChain Encoder module")
     }
 
-    let pingDecoder = await decoderConnector.ping()
+    const pingDecoder = await decoderConnector.ping()
     if (!pingDecoder) {
         throw new Error("Can't connect to the XChain Decoder module")
     }
 
-    let pingIndexer = await indexerConnector.ping()
+    const pingIndexer = await indexerConnector.ping()
     if (!pingIndexer) {
         throw new Error("Can't connect to the XChain Indexer module")
     }
 
-    let pingExplorer = await explorerConnector.ping()
+    const pingExplorer = await explorerConnector.ping()
     if (!pingExplorer) {
         throw new Error("Can't connect to the XChain Explorer module")
     }
 
-    let pingIndexerDatabase = await indexerDatabase.ping()
+    const pingIndexerDatabase = await indexerDatabase.ping()
     if (!pingIndexerDatabase) {
         throw new Error("Can't connect to the XChain Indexer Database")
     }
 
-    let pingRegtestMiner = await regtestMinerConnector.waitForReady()
+    const pingRegtestMiner = await regtestMinerConnector.waitForReady()
     if (!pingRegtestMiner) {
         throw new Error("Can't connect to the XChain Regtest Miner module (not ready after wait)")
     } else {
@@ -258,12 +258,12 @@ function registerGasBootstrapTests() {
     describe('Scenario 3.7.5: Gas token bootstrap failure', function () {
 
         it('throws when gas token issue fails', async function () {
-            // Replicate gas token check from initialCheck.test.js lines 198-215
+            // Replicate gas token check from initial_check.test.js lines 198-215
             async function runGasBootstrap(db, cryptoHelper, issueHelper) {
                 const GAS_TICK = 'XCHAIN'
                 const gasTokenExists = await db.checkIssue({ tick: GAS_TICK, status: 'valid' })
                 if (!gasTokenExists) {
-                    let gasAddressInfo = await cryptoHelper.getNewFundedAddress('GAS.TOKEN', COIN, NETWORK, null, 'legacy', 0, 1)
+                    const gasAddressInfo = await cryptoHelper.getNewFundedAddress('GAS.TOKEN', COIN, NETWORK, null, 'legacy', 0, 1)
                     await issueHelper.sendIssueV0(gasAddressInfo, GAS_TICK, 1000000000, 1000000, 0, 'XChain GAS Token', 1000000)
                 }
             }

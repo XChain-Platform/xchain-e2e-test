@@ -31,7 +31,7 @@
  ********************************************************************/
 
 const assert       = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const issueHelper  = require('../helpers/issueHelper')
 const gasHelper    = require('../helpers/gasHelper')
 const orderHelper  = require('../helpers/orderHelper')
@@ -112,7 +112,7 @@ describe('DEX Reorg: an open ORDER (and its escrow) rolls back across an on-chai
         // Pre-reorg: the order is live and the give amount is escrowed (balance debited
         // 100 -> 70). The escrow debit is the authoritative "open & holding" signal; the
         // status string is logged for context (not asserted: its exact value varies).
-        let ord = await orderRow(orderActionIndex)
+        const ord = await orderRow(orderActionIndex)
         assert(ord, 'order row exists pre-reorg')
         console.log('   order status =', ord.status)
         assert.strictEqual(await balanceOf(maker.address, tick), '70', 'give amount escrowed (balance debited 30)')

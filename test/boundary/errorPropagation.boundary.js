@@ -35,8 +35,8 @@ global.utxoTrackerConnector = {
 }
 global.encoderConnector = { createTx: async () => {} }
 
-const cryptoHelper = require('../cryptoHelper')
-const transactionHelper = require('../transactionHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 
 const mockMariadb = require('../integration/fixtures/mockMariadb')
 const Database = require('../../src/db')

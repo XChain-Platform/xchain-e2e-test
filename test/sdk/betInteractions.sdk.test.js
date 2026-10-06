@@ -33,12 +33,12 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { makeSdk, submit, submitOpts, fundedGasAddress } = require('./sdkHelper');
+const { makeSdk, submit, submitOpts, fundedGasAddress } = require('./helpers/sdkHelper');
 const {
     MIN_REFUND_WINDOW, getFeed, getBets, balanceOf, escrowOf, amtEq, actionIndexOf,
     blockTime, jumpTo, resumeMiningAtFrozenClock, releaseClock, waitFeedStatus,
     issueWagerToken, submitBet
-} = require('./betHelper');
+} = require('./helpers/betHelper');
 
 let sdk;
 let oracleS, bettorX, bettorZ, sweepDest, oracleSDest, tickSweep;

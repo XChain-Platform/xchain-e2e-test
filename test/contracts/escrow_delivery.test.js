@@ -42,10 +42,10 @@
 // on-chain token transfer with no human "release" call.
 
 const assert = require('assert')
-const _path = require('path')
-const _fs = require('fs')
+const internalPath = require('path')
+const internalFs = require('fs')
 
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 const vmHelper = require('../helpers/vmHelper')
@@ -53,18 +53,18 @@ const attestationHelper = require('../helpers/attestationHelper')
 const { skipIfResponseMirrorEra } = require('../helpers/attestLegacyResponsePath')
 
 // Resolve the REAL http_get provider the same way realUrlAttestation.test.js does.
-const _hubBase = (function () {
+const internalHubBase = (function () {
     const candidates = [
         process.env.XCHAIN_HUB_PATH,
-        _path.resolve(__dirname, '../../xchain-hub'),
-        _path.resolve(__dirname, '../../../xchain-hub')
+        internalPath.resolve(__dirname, '../../xchain-hub'),
+        internalPath.resolve(__dirname, '../../../xchain-hub')
     ].filter(Boolean)
     for (const c of candidates) {
-        if (_fs.existsSync(_path.join(c, 'src/providers/http_get.js'))) return c
+        if (internalFs.existsSync(internalPath.join(c, 'src/providers/http_get.js'))) return c
     }
     return candidates[candidates.length - 1]
 })()
-const http_get = require(_hubBase + '/src/providers/http_get.js')
+const httpGet = require(internalHubBase + '/src/providers/http_get.js')
 
 // Deterministic public endpoint (fixed resource, no time/counter fields) so
 // byte-equality consensus across the 3 mocked validators is satisfiable -
@@ -174,7 +174,7 @@ function settle(x, roles, role, term, dl) {
     }
 
     async function stakeValidatorFromOwnSource(v) {
-        let stakeSource = await cryptoHelper.getNewFundedAddress(
+        const stakeSource = await cryptoHelper.getNewFundedAddress(
             'esc-del-val', COIN, NETWORK, null, 'legacy', stakedValidators.length, 0.02
         )
         // 15000 clears BOTH the attestation capability min_stake (1000) and the
@@ -227,7 +227,7 @@ function settle(x, roles, role, term, dl) {
 
     // Real GET + real 3/3-signed ATTEST v1 broadcast (mirrors realUrlAttestation.test.js).
     async function fetchSignAndBroadcast(operator, requestId) {
-        const fetched = await http_get.fetch(REAL_URL, { maxResponseBytes: 32768, timeoutMs: 10000 })
+        const fetched = await httpGet.fetch(REAL_URL, { maxResponseBytes: 32768, timeoutMs: 10000 })
         const realBody = fetched.body.toString('utf8')
         const realMeta = String(fetched.meta)
         assert.strictEqual(realMeta, '200', 'expected HTTP 200 from the live endpoint')

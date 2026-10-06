@@ -31,14 +31,14 @@
  ********************************************************************/
 
 const assert            = require('assert')
-const cryptoHelper      = require('../cryptoHelper')
+const cryptoHelper      = require('../helpers/core/cryptoHelper')
 const gasHelper         = require('../helpers/gasHelper')
 const issueHelper       = require('../helpers/issueHelper')
 const orderHelper       = require('../helpers/orderHelper')
 const sendHelper        = require('../helpers/sendHelper')
 const destroyHelper     = require('../helpers/destroyHelper')
 const vmHelper          = require('../helpers/vmHelper')
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 const { waitForTxIndexed } = require('../helpers/indexerWait')
 
 async function q(sql, params) {
@@ -273,7 +273,7 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
         console.log('   tip', await tip(), '> cooldown_end', endBlock, '(cooldown expired)')
         await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tick}|50||${COIN_CODE}|XCHAIN|50||${owner.address}||||after-cooldown`)
         await mine(1)
-        let allowed = await waitValidOrder(owner.address, tick, 22500)
+        const allowed = await waitValidOrder(owner.address, tick, 22500)
         assert(allowed && allowed.status === 'valid', 'ORDER ACCEPTED after cooldown expiry')
         console.log('   ORDER accepted after cooldown; expiry OK. order#', allowed.action_index)
     })

@@ -46,7 +46,7 @@
  *
  * THE ESCAPE HATCH is a DEDICATED STAKING VENUE. A venue whose whole purpose
  * is to hold a seeded federation (the ROLLCALL acceptance venue, seeded by
- * test/tools/rollcallSeedFederation.test.js) must NOT have its stakes swept at
+ * test/tools/rollcall_seed_federation.test.js) must NOT have its stakes swept at
  * the end of the run that created them. Those venues set
  * E2E_STAKE_TEARDOWN=off, and they declare themselves in
  * xchain-documentation/components/e2e-test/staking-venue-policy.md. Off is a
@@ -264,7 +264,7 @@ async function clearWedgeIfPresent(log){
         // Lazily required, and tolerated absent. The remedy lives beside the
         // attest-mirror drills because that is where it was measured; a tree
         // without that module still tears down normally.
-        waits = require('../attestMirror/mirrorDrillWaits')
+        waits = require('../attestMirror/helpers/mirrorDrillWaits')
     } catch (e) {
         return { cleared: false, reason: 'no wedge-clear module in this tree' }
     }

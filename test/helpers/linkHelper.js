@@ -8,18 +8,18 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('./core/transactionHelper')
 const requireRow = require('./requireRow')
 
 module.exports = {
     async sendLinkV0(addressInfo, coin1, coin1ActionIndex, coin2, coin2ActionIndex, memo){
-        let linkMessage = "LINK|0|"+coin1+"|"+coin1ActionIndex+"|"+coin2+"|"+coin2ActionIndex+"|"+memo
+        const linkMessage = "LINK|0|"+coin1+"|"+coin1ActionIndex+"|"+coin2+"|"+coin2ActionIndex+"|"+memo
 
         console.log("Creating and sending LINK V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, linkMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, linkMessage)
 
         console.log("Waiting for LINK in the database...")
-        let row = requireRow(await indexerDatabase.waitForLink({
+        const row = requireRow(await indexerDatabase.waitForLink({
             txHash: txHash,
             source: addressInfo["address"],
             coin1: coin1,

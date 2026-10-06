@@ -10,7 +10,7 @@
 
 
 const assert = require('assert')
-const cryptoHelper = require('../../cryptoHelper')
+const cryptoHelper = require('../../helpers/core/cryptoHelper')
 const issueHelper = require('../../helpers/issueHelper')
 const dispenserHelper = require('../../helpers/dispenserHelper')
 const priceSnapshotHelper = require('../../helpers/priceSnapshotHelper')
@@ -19,19 +19,19 @@ const oraclePriceHelper = require('../../helpers/oraclePriceHelper')
 const FIAT_OFEE = 'JPY'   // oracle usage fee
 
 async function createUnpaidOracleFeeScenario() {
-    let dispenserAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.OFEE", COIN, NETWORK, null, "legacy", 0, 1)
-    let oracleAddr    = await cryptoHelper.getNewFundedAddress("DISPENSER.OFEE.SRC", COIN, NETWORK, null, "legacy", 0, 1)
-    let dispenserAddress = dispenserAddr["address"]
-    let oracleAddress    = oracleAddr["address"]
-    let tick = "DISPOFEE"+dispenserAddress.substring(dispenserAddress.length-8)
+    const dispenserAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.OFEE", COIN, NETWORK, null, "legacy", 0, 1)
+    const oracleAddr    = await cryptoHelper.getNewFundedAddress("DISPENSER.OFEE.SRC", COIN, NETWORK, null, "legacy", 0, 1)
+    const dispenserAddress = dispenserAddr["address"]
+    const oracleAddress    = oracleAddr["address"]
+    const tick = "DISPOFEE"+dispenserAddress.substring(dispenserAddress.length-8)
 
     await issueHelper.sendIssueV0(dispenserAddr, tick, 1000, 1000, 0, "Oracle fee test", 1000)
 
-    let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
-    let chainNow   = await priceSnapshotHelper.latestBlockTime()
-    let tokenPrice = 0.05      // oracle: 1 token = $0.05
-    let feeFrac    = 0.01      // oracle charges 1%
-    let escrow     = 1000
+    const expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+    const chainNow   = await priceSnapshotHelper.latestBlockTime()
+    const tokenPrice = 0.05      // oracle: 1 token = $0.05
+    const feeFrac    = 0.01      // oracle charges 1%
+    const escrow     = 1000
 
     // The below-dust waiver in quoteOracleFee is consensus: an expected fee
     // under the chain's dust threshold requires NO output at all, so the
@@ -43,7 +43,7 @@ async function createUnpaidOracleFeeScenario() {
     const DUST_SATS = { BTC: 546, LTC: 5460, DOGE: 100000 }
     const dustSats  = DUST_SATS[COIN_CODE] || 546
     let coinPrice   = 50000    // validator: 1 coin = $50,000
-    let feeUsd      = feeFrac * tokenPrice * escrow
+    const feeUsd      = feeFrac * tokenPrice * escrow
     if (Math.round(feeUsd / coinPrice * 1e8) < Math.ceil(dustSats * 1.5))
         coinPrice = Math.max(1, Math.floor(feeUsd * 1e8 / (4 * dustSats)))
 
@@ -63,11 +63,11 @@ async function createUnpaidOracleFeeScenario() {
     })
 
     // fee = FEE x (oracle_price x GIVE_ESCROW) / coin_price
-    let expectedFee  = (feeFrac * (tokenPrice * escrow)) / coinPrice   // 0.00001
-    let expectedSats = Math.round(expectedFee * 1e8)                   // 1000
+    const expectedFee  = (feeFrac * (tokenPrice * escrow)) / coinPrice   // 0.00001
+    const expectedSats = Math.round(expectedFee * 1e8)                   // 1000
 
     // 1. No output: the create must be rejected.
-    let noPay = await dispenserHelper.sendDispenserV0(
+    const noPay = await dispenserHelper.sendDispenserV0(
         dispenserAddr, COIN_CODE, tick, 1, escrow,
         COIN_CODE, null, 0, dispenserAddr["address"],
         FIAT_OFEE, null, oracleAddress, expiration,
@@ -112,13 +112,13 @@ describe('DISPENSER', () => {
                 return
             }
 
-            let scenario = await createUnpaidOracleFeeScenario()
-            let noPay = scenario.noPay
+            const scenario = await createUnpaidOracleFeeScenario()
+            const noPay = scenario.noPay
             assert(noPay.dispenser, "the attempt should still be recorded")
             assert.strictEqual(noPay.dispenser.status, 'invalid: ORACLE_ADDRESS (missing oracle fee output)',
                 "a Mode 2 create must be rejected when the oracle fee output is absent")
 
-            let paid = await payOracleFee(scenario)
+            const paid = await payOracleFee(scenario)
             assert(paid.dispenser, "the paying create should exist")
             assert.strictEqual(paid.dispenser.status, 'valid',
                 "a Mode 2 create paying the oracle fee must be accepted")

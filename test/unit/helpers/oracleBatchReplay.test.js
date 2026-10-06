@@ -13,11 +13,11 @@ const { CANONICAL_REORG_BUFFER } = require('../../helpers/oracleBatchVenue')
 
 function replayNode() {
     const node = new OracleBatchReplayNode({ label: 'unit' })
-    node._live = {
+    node['_live'] = {
         btcOracle: { host: null, port: null, apiKey: null, url: null }
     }
-    node._btcOracleProof = { coin: 'BTC', height: 120 }
-    node._priceMinStake = '10'
+    node['_btcOracleProof'] = { coin: 'BTC', height: 120 }
+    node['_priceMinStake'] = '10'
     return node
 }
 
@@ -64,7 +64,7 @@ describe('oracleBatchReplay Bitcoin oracle diagnostics', function () {
         const warn = sandbox.stub(console, 'warn')
         const node = replayNode()
 
-        await node._probeBtcOracle([{ snapshotBlock: anchor }])
+        await node['_probeBtcOracle']([{ snapshotBlock: anchor }])
 
         assert.deepStrictEqual(node.btcOracleEvidence(), {
             coin: 'BTC',
@@ -101,7 +101,7 @@ describe('oracleBatchReplay Bitcoin oracle diagnostics', function () {
         const warn = sandbox.stub(console, 'warn')
         const node = replayNode()
 
-        await node._probeBtcOracle([{ snapshotBlock: 100 }])
+        await node['_probeBtcOracle']([{ snapshotBlock: 100 }])
 
         assert.strictEqual(node.btcOracleEvidence().priceWeightSetAtAnchor, 3)
         assert.strictEqual(node.btcOracleEvidence().priceWeightSetAtBuried, 3)

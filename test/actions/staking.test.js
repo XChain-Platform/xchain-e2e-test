@@ -10,10 +10,10 @@
 
 const assert = require('assert')
 const crypto = require('crypto')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 
 
 let stakerAddr = null
@@ -36,14 +36,14 @@ async function setupStaking () {
     await gasHelper.ensureGasBalance(stakerAddr, '3000')
 
     // Generate an Ed25519 signing keypair (64 hex chars = 32 byte pubkey)
-    let { publicKey } = crypto.generateKeyPairSync('ed25519')
-    let spkiDer = publicKey.export({ format: 'der', type: 'spki' })
+    const { publicKey } = crypto.generateKeyPairSync('ed25519')
+    const spkiDer = publicKey.export({ format: 'der', type: 'spki' })
     signingPubkey = spkiDer.subarray(12).toString('hex') // Strip 12-byte SPKI prefix
 }
 
 function createStakeTests () {
 it('should stake XCHAIN and create a valid stake record', async function () {
-    let result = await stakeHelper.sendStakeV1(stakerAddr, '1000.00000000', signingPubkey)
+    const result = await stakeHelper.sendStakeV1(stakerAddr, '1000.00000000', signingPubkey)
     assert(result.stake, 'Stake record should exist in DB')
     assert.strictEqual(result.stake.status, 'valid', 'Stake status should be valid')
     assert.strictEqual(parseInt(result.stake.version), 1, 'Version should be 1 (new stake)')
@@ -61,9 +61,9 @@ it('should reject a second v1 stake reusing the same pubkey', async function () 
     // stake-teardown-ok: rejected for pubkey reuse, so it adds no stake and
     // joins no capability set; the pubkey's stake was booked by the
     // sendStakeV1 above that created it.
-    let msg = "STAKE|1|500.00000000|" + signingPubkey
-    let txHash = await transactionHelper.createAndSendTransaction(stakerAddr, msg)
-    let row = await stakeHelper.waitForAnyStake({
+    const msg = "STAKE|1|500.00000000|" + signingPubkey
+    const txHash = await transactionHelper.createAndSendTransaction(stakerAddr, msg)
+    const row = await stakeHelper.waitForAnyStake({
         source:        stakerAddr.address,
         signingPubkey: signingPubkey,
         txHash:        txHash
@@ -84,7 +84,7 @@ it('should accept a top-up to the same pubkey from the same source', async funct
     } finally {
         await regtestMinerConnector.resumeMining()
     }
-    let result = await stakeHelper.sendStakeV2(stakerAddr, '500.00000000', signingPubkey)
+    const result = await stakeHelper.sendStakeV2(stakerAddr, '500.00000000', signingPubkey)
     assert(result.stake, 'Top-up stake record should exist in DB')
     assert.strictEqual(result.stake.status, 'valid', 'Top-up status should be valid')
     assert.strictEqual(parseInt(result.stake.version), 2, 'Version should be 2 (top-up)')
@@ -100,7 +100,7 @@ it('should create an unstake record with cooldown', async function () {
     } finally {
         await regtestMinerConnector.resumeMining()
     }
-    let result = await stakeHelper.sendUnstakeV0(stakerAddr, signingPubkey)
+    const result = await stakeHelper.sendUnstakeV0(stakerAddr, signingPubkey)
     assert(result.unstake, 'Unstake record should exist in DB')
     assert.strictEqual(result.unstake.status, 'valid', 'Unstake status should be valid')
     assert(result.unstake.cooldown_end_block > 0, 'Cooldown end block should be set')
@@ -135,9 +135,9 @@ it('should reject a v2 top-up from a different source address', async function (
     // stake-teardown-ok: rejected for source ownership, so it adds no
     // stake and joins no capability set; the pubkey's real stake was
     // booked by the sendStakeV1 that created it.
-    let msg = "STAKE|2|500.00000000|" + signingPubkey
-    let txHash = await transactionHelper.createAndSendTransaction(otherAddr, msg)
-    let row = await stakeHelper.waitForAnyStake({
+    const msg = "STAKE|2|500.00000000|" + signingPubkey
+    const txHash = await transactionHelper.createAndSendTransaction(otherAddr, msg)
+    const row = await stakeHelper.waitForAnyStake({
         source:        otherAddr.address,
         signingPubkey: signingPubkey,
         txHash:        txHash
@@ -154,14 +154,14 @@ it('should reject a v2 top-up from a different source address', async function (
 function topUpFreshKeyRejectionTest () {
 it('should reject a v2 top-up against a fresh (never-staked) pubkey', async function () {
     // Generate a NEW pubkey that no one has staked.
-    let { publicKey } = crypto.generateKeyPairSync('ed25519')
-    let freshPubkey = publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
+    const { publicKey } = crypto.generateKeyPairSync('ed25519')
+    const freshPubkey = publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
 
     // stake-teardown-ok: rejected as "no active stake to top up", so no
     // stake row ever goes valid and nothing joins a capability set.
-    let msg = "STAKE|2|500.00000000|" + freshPubkey
-    let txHash = await transactionHelper.createAndSendTransaction(stakerAddr, msg)
-    let row = await stakeHelper.waitForAnyStake({
+    const msg = "STAKE|2|500.00000000|" + freshPubkey
+    const txHash = await transactionHelper.createAndSendTransaction(stakerAddr, msg)
+    const row = await stakeHelper.waitForAnyStake({
         source:        stakerAddr.address,
         signingPubkey: freshPubkey,
         txHash:        txHash
@@ -176,12 +176,12 @@ it('should reject a v2 top-up against a fresh (never-staked) pubkey', async func
 
 function unstakeRejectionTest () {
 it('should reject UNSTAKE against an unknown pubkey', async function () {
-    let { publicKey } = crypto.generateKeyPairSync('ed25519')
-    let unknownPubkey = publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
+    const { publicKey } = crypto.generateKeyPairSync('ed25519')
+    const unknownPubkey = publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
 
-    let msg = "UNSTAKE|0|" + unknownPubkey
-    let txHash = await transactionHelper.createAndSendTransaction(stakerAddr, msg)
-    let row = await stakeHelper.waitForAnyUnstake({
+    const msg = "UNSTAKE|0|" + unknownPubkey
+    const txHash = await transactionHelper.createAndSendTransaction(stakerAddr, msg)
+    const row = await stakeHelper.waitForAnyUnstake({
         source:        stakerAddr.address,
         signingPubkey: unknownPubkey,
         txHash:        txHash

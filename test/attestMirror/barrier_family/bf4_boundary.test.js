@@ -98,7 +98,7 @@ function deferralNote (venue, indexer) {
 // above the activation, publishing `heights`.
 function mirrorStub (heights, active) {
     return {
-        coin: 'BTC', network: 'regtest', heightWatermarks: heights || {}, _heightShortfalls: {},
+        coin: 'BTC', network: 'regtest', heightWatermarks: heights || {}, ['_heightShortfalls']: {},
         admissionChain: () => 'BTC', admissionActiveAt: () => !!active,
         publishedHeight: watermarks.publishedHeight, heightSatisfied: watermarks.heightSatisfied,
         matchBootstrapped: true, matchSyncTimestamp: T - 1, streamWatermark: T, matchWatermarkGraceS: 120,
@@ -125,8 +125,8 @@ describe('BF4 unit: below the activation every predicate is today\'s form, above
             assert.strictEqual(satisfied, want,
                 assertionMessage(why + ' to produce heightSatisfied=' + want, satisfied, 'the BF4 height matrix case'))
             if (!want) {
-                assert.strictEqual(stub._heightShortfalls[TABLE + '|BTC'], target,
-                    assertionMessage(why + ' shortfall=' + target, stub._heightShortfalls[TABLE + '|BTC'], 'the BF4 shortfall map'))
+                assert.strictEqual(stub['_heightShortfalls'][TABLE + '|BTC'], target,
+                    assertionMessage(why + ' shortfall=' + target, stub['_heightShortfalls'][TABLE + '|BTC'], 'the BF4 shortfall map'))
             }
         }
     })

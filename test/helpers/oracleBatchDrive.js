@@ -169,7 +169,7 @@ function attachBatchSigners(venue, opts) {
         const origCanonical = signer.canonical.bind(signer);
         signer.canonical = function (first, last, anchor, rounds) {
             const bytes = origCanonical(first, last, anchor, rounds);
-            signer._lastCanonical = bytes;
+            signer['_lastCanonical'] = bytes;
             return bytes;
         };
 
@@ -190,7 +190,7 @@ function attachBatchSigners(venue, opts) {
             // On a timeout the signer returns no canonical (there is nothing to
             // publish), so fall back to the bytes the wrapper above captured, which are
             // the same bytes either way.
-            entry.canonical = (result && result.canonical) || signer._lastCanonical || null;
+            entry.canonical = (result && result.canonical) || signer['_lastCanonical'] || null;
             entry.endedAt   = Date.now();
             return result;
         };
@@ -210,8 +210,8 @@ function attachBatchSigners(venue, opts) {
         unsilence(indexes) { for (const i of indexes) signers[i].start(); },
         stop() {
             for (let i = 0; i < signers.length; i++) {
-                try { signers[i].stop(); } catch (_) { /* teardown is best effort */ }
-                try { delete venue.mvh.hubs[i].oracleBatchSigner; } catch (_) { /* ditto */ }
+                try { signers[i].stop(); } catch (internal) { /* teardown is best effort */ }
+                try { delete venue.mvh.hubs[i].oracleBatchSigner; } catch (internal) { /* ditto */ }
             }
         }
     };
@@ -244,18 +244,18 @@ async function finalizeRoundNoWait(venue, index, opts) {
     for (let i = 0; i < venue.mvh.hubs.length; i++) {
         const subs = new Map();
         for (const addr of addrs) subs.set(addr, { prices: prices });
-        venue._oracles[i].round.submissions.set(round, subs);
+        venue['_oracles'][i].round.submissions.set(round, subs);
     }
 
     await Promise.all(venue.mvh.hubs.map((h, i) =>
-        venue._oracles[i].oc.finalizeRound(round, venue.anchorHeight, anchorTime)
+        venue['_oracles'][i].oc.finalizeRound(round, venue.anchorHeight, anchorTime)
             .catch((e) => { console.warn('oracleBatchDrive: hub ' + i + ' finalizeRound threw: ' + (e && e.message)); })));
 
     const finalized = await waitFor(async () => {
         const counts = [];
         for (const hub of venue.mvh.hubs) {
-            try { counts.push((await venue._snapshotRows(hub, round)).length); }
-            catch (_) { counts.push(0); }
+            try { counts.push((await venue['_snapshotRows'](hub, round)).length); }
+            catch (internal) { counts.push(0); }
         }
         return { ok: counts.length > 0 && counts.every((c) => c >= 1), counts: counts };
     }, { timeoutMs: opts.timeoutMs || FINALIZE_WAIT_MS });
@@ -267,7 +267,7 @@ async function finalizeRoundNoWait(venue, index, opts) {
             'rung, upstream of anything the batch rail does.');
     }
 
-    const events = venue._finalizedEvents.get(round) || [];
+    const events = venue['_finalizedEvents'].get(round) || [];
     const lead   = events.find((e) => e && Array.isArray(e.signatures)) || null;
     return {
         round:      round,
@@ -406,7 +406,7 @@ function parsePriceBatchWire(wire) {
  * produced" must not have a test-authored transaction counted into it.
  */
 async function broadcastWire(venue, wire) {
-    const transactionHelper = require('../transactionHelper');
+    const transactionHelper = require('./core/transactionHelper');
     const capture = {};
     const txid = await transactionHelper.createAndSendTransaction(
         venue.publisherAddress, wire, null, [], null, null, false, { capture });

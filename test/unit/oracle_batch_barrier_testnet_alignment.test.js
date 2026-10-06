@@ -43,7 +43,7 @@
 
 const assert = require('assert');
 
-const drill = require('../drills/oracleBatchBarrierTestnet.drill.js');
+const drill = require('../drills/lib/oracle_batch_barrier_testnet.js');
 
 // ---------------------------------------------------------------------------
 // Run 5's own 20 actions, node side and origin side

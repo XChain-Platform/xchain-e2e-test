@@ -55,16 +55,16 @@ const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract,
     mineWhile,
-} = require('./mirrorDrillFixture')
+} = require('./helpers/mirrorDrillFixture')
 const {
     APPLIED_FIELDS, untilOrClearDogeStall, diffRows,
     waitForMirrorRowEverywhere, waitForAppliedEverywhere, waitForHeightWithClear,
     readAppliedResponse, readContractState, readRequestRow, readAttestRewards, rawAttestRewards,
     venueTipProbe, findEmittedAttestRequest, attestRequestWatermark,
     clearBeforeBroadcast, settleOrReport, feeLines, allHubTails, jsonSafe,
-} = require('./mirrorDrillWaits')
+} = require('./helpers/mirrorDrillWaits')
 const vmHelper     = require('../helpers/vmHelper')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 
 const FIXED_BODY = '{"score":13,"meta":"zc2-remine"}'
 
@@ -296,6 +296,7 @@ describe('ZC2: a re-mined request re-binds once and is paid for once', function 
 
         await settleOrReport('zc2')
         const beforeRows   = await waitForAppliedEverywhere(venue, requestId)
+        await waitForHeightWithClear(venue, 0, request.blockIndex)
         const local        = await readRequestRow(venue, 0, requestId)
         const requestBlock = Number(local.block_index)
         const appliedBlock = Number(beforeRows[0].block_index)

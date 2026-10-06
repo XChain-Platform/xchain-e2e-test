@@ -16,9 +16,9 @@ const axios  = require('axios')
 
 const mockMariadb = require('../integration/fixtures/mockMariadb')
 const Database    = require('../../src/db')
-const RegtestMinerConnector  = require('../../src/RegtestMinerConnector')
+const RegtestMinerConnector  = require('../../src/regtest_miner_connector')
 const XChainEncoderConnector = require('../../src/XChainEncoderConnector')
-const BlockchainConnector    = require('../../src/BlockchainConnector')
+const BlockchainConnector    = require('../../src/blockchain_connector')
 
 function makeMockConnection(queryResult) {
     return {

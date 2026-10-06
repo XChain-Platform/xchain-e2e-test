@@ -86,7 +86,7 @@ async function tearDownSigner() {
 
     if (mvh) await mvh.stop()
     if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true })
-    delete global.__f13SignerBroadcasts
+    delete global['__f13SignerBroadcasts']
 }
 
 describe('[federation] AttestationPublisher operator-signer wiring (F13)', function () {
@@ -126,7 +126,7 @@ describe('[federation] AttestationPublisher operator-signer wiring (F13)', funct
         const myPubkey  = mvh.getPubkeys()[0].toLowerCase()
         const requestId = 'f13'.padEnd(64, 'a')
 
-        const before = (global.__f13SignerBroadcasts || []).length
+        const before = (global['__f13SignerBroadcasts'] || []).length
 
         // Finalized-consensus event, with this hub as leader. request.block_index
         // is omitted so the leader comes from the event (no capability-snapshot
@@ -141,7 +141,7 @@ describe('[federation] AttestationPublisher operator-signer wiring (F13)', funct
             signatures:   [{ pubkey: myPubkey, sig: 'ab'.repeat(64) }]
         })
 
-        const broadcasts = global.__f13SignerBroadcasts || []
+        const broadcasts = global['__f13SignerBroadcasts'] || []
         assert.strictEqual(broadcasts.length, before + 1,
             'the operator module broadcast(payload) should have been invoked exactly once')
         const wire = broadcasts[broadcasts.length - 1]

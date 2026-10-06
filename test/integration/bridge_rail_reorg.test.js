@@ -37,7 +37,7 @@
  *
  *   nohup ~/scratch/xc-meta/doge-loop.sh >/dev/null 2>&1 & echo $! > ~/scratch/xc-meta/doge-loop.pid
  *   COIN=bitcoin NETWORK=regtest NODE_PATH=<the chunked module directory> \
- *     npx mocha --timeout 0 --exit --require ./test/initialCheck.test.js \
+ *     npx mocha --timeout 0 --exit --require ./test/initial_check.test.js \
  *     test/integration/bridge_rail_reorg.test.js "test/integration/bridge_rail_reorg.test/*.test.js"
  *   kill $(cat ~/scratch/xc-meta/doge-loop.pid)
  *
@@ -68,8 +68,8 @@ const assert = require('assert');
 
 const chainRail         = require('../helpers/chainRail');
 const stakeTeardown     = require('../helpers/stakeTeardown');
-const cryptoHelper      = require('../cryptoHelper');
-const fixture           = require('../attestMirror/mirrorDrillFixture');
+const cryptoHelper      = require('../helpers/core/cryptoHelper');
+const fixture           = require('../attestMirror/helpers/mirrorDrillFixture');
 const {
     BridgeRailVenue,
     resolveVenueQuorum,
@@ -110,7 +110,7 @@ async function setUpBridgeRail() {
         const row = set.byPubkey.get(pk) || {};
         return { pubkey: pk, stake: Number(row.weight || 0) };
     });
-    const quorum = resolveVenueQuorum(seated, fixture._knownSignerSeeds());
+    const quorum = resolveVenueQuorum(seated, fixture['_knownSignerSeeds']());
     if (!quorum.ok) {
         blocked = quorum.reason;
         console.log('\nBRIDGE REORG: no federation can be built here.\n  ' + blocked + '\n');

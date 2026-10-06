@@ -75,7 +75,7 @@ describe('oracleBatchReplay: the explicit live-chain override (AT5 venue, row 41
         const node = new mod.OracleBatchReplayNode({
             label: 'at5unit', coin: 'dogecoin', network: 'testnet', liveChain: override });
 
-        const live = await node._resolveLiveChain();
+        const live = await node['_resolveLiveChain']();
 
         assert.strictEqual(seen.constructed, 0,
             'the rig constructed the hub connector ' + seen.constructed + ' time(s) despite being given an ' +
@@ -103,7 +103,7 @@ describe('oracleBatchReplay: the explicit live-chain override (AT5 venue, row 41
         const override = fullOverride();
         override.liveIndexer = { host: '127.0.0.1', port: 13306, name: 'Live_Indexer', user: 'r', pass: 'p' };
         const node = new mod.OracleBatchReplayNode({ label: 'at5unit', liveChain: override });
-        const live = await node._resolveLiveChain();
+        const live = await node['_resolveLiveChain']();
         assert.deepStrictEqual(live.liveIndexer, override.liveIndexer);
     });
 
@@ -127,7 +127,7 @@ describe('oracleBatchReplay: the explicit live-chain override (AT5 venue, row 41
                 const override = fullOverride();
                 breakIt(override);
                 const node = new mod.OracleBatchReplayNode({ label: 'at5unit', liveChain: override });
-                await assert.rejects(() => node._resolveLiveChain(), (err) => {
+                await assert.rejects(() => node['_resolveLiveChain'](), (err) => {
                     assert.ok(err instanceof Error, 'a malformed override must reject with an Error');
                     assert.ok(err.message.indexOf(field) !== -1,
                         'the refusal must name the missing field `' + field + '`; it said: ' + err.message);
@@ -143,7 +143,7 @@ describe('oracleBatchReplay: the explicit live-chain override (AT5 venue, row 41
             const override = fullOverride();
             override.feeDestination = 12345;
             const node = new mod.OracleBatchReplayNode({ label: 'at5unit', liveChain: override });
-            await assert.rejects(() => node._resolveLiveChain(), /feeDestination/);
+            await assert.rejects(() => node['_resolveLiveChain'](), /feeDestination/);
         });
 
         it('accepts an explicitly null feeDestination, which means the pinned default', async function () {
@@ -151,7 +151,7 @@ describe('oracleBatchReplay: the explicit live-chain override (AT5 venue, row 41
             const override = fullOverride();
             override.feeDestination = null;
             const node = new mod.OracleBatchReplayNode({ label: 'at5unit', liveChain: override });
-            const live = await node._resolveLiveChain();
+            const live = await node['_resolveLiveChain']();
             assert.strictEqual(live.feeDestination, null);
         });
     });
@@ -162,7 +162,7 @@ describe('oracleBatchReplay: the explicit live-chain override (AT5 venue, row 41
         // than surfacing as a null host inside the MariaDB driver.
         const { mod } = rigWithCountedConnector();
         const node = new mod.OracleBatchReplayNode({ label: 'at5unit', liveChain: fullOverride() });
-        node._live = await node._resolveLiveChain();
+        node['_live'] = await node['_resolveLiveChain']();
         await assert.rejects(() => node.liveChainFeeCoordinates({}), /liveIndexer/);
     });
 });
@@ -238,7 +238,7 @@ describe('oracleBatchReplay: the credential path', function () {
             constructor() {}
             static parseEndpoints() { return ['http://127.0.0.1:1']; }
             async ping() { return true; }
-            async _call(body) {
+            async ['_call'](body) {
                 seen.calls.push(body);
                 const wants = !!(body && body.params && body.params.include_secrets);
                 if (wants && !opts.authorized) return null;
@@ -282,7 +282,7 @@ describe('oracleBatchReplay: the credential path', function () {
         const node = new (rigModule(StubHubConnector).OracleBatchReplayNode)(
             { label: 'cred', coin: COIN, network: NET });
 
-        const live = await node._resolveLiveChain();
+        const live = await node['_resolveLiveChain']();
 
         assert.strictEqual(node.unavailable, null, 'the rig went unavailable: ' + node.unavailable);
         assert.strictEqual(live.decoder.pass, LIVE_DECODER_PASS,
@@ -312,7 +312,7 @@ describe('oracleBatchReplay: the credential path', function () {
             const node = new (rigModule(StubHubConnector).OracleBatchReplayNode)(
                 { label: 'cred', coin: COIN, network: NET });
 
-            const live = await node._resolveLiveChain();
+            const live = await node['_resolveLiveChain']();
 
             assert.strictEqual(live, null, 'the rig built a live chain out of a redacted tree');
             assert.ok(node.unavailable, 'the rig neither built a chain nor said why');
@@ -332,7 +332,7 @@ describe('oracleBatchReplay: the credential path', function () {
         const { StubHubConnector } = hubServing({ authorized: false });
         const node = new (rigModule(StubHubConnector).OracleBatchReplayNode)(
             { label: 'cred', coin: COIN, network: NET });
-        const live = await node._resolveLiveChain();
+        const live = await node['_resolveLiveChain']();
         const carried = live ? [live.decoder.pass, live.node.pass, live.liveIndexer && live.liveIndexer.pass] : [];
         for (const v of carried) assert.notStrictEqual(v, SENTINEL, 'the redaction sentinel was passed on as a password');
     });
@@ -344,8 +344,8 @@ describe('oracleBatchReplay: the credential path', function () {
             // drill that does open it must be told which store to fix.
             const { StubHubConnector } = hubServing({ authorized: true });
             class PartialHub extends StubHubConnector {
-                async _call(body) {
-                    const out = await StubHubConnector.prototype._call.call(this, body);
+                async ['_call'](body) {
+                    const out = await StubHubConnector.prototype['_call'].call(this, body);
                     if (out && out.configs) out.configs[COIN][NET]['xchain-indexer'].pass = SENTINEL;
                     return out;
                 }
@@ -353,7 +353,7 @@ describe('oracleBatchReplay: the credential path', function () {
             const node = new (rigModule(PartialHub).OracleBatchReplayNode)(
                 { label: 'cred', coin: COIN, network: NET });
 
-            const live = await node._resolveLiveChain();
+            const live = await node['_resolveLiveChain']();
 
             assert.ok(live, 'the node failed over an optional credential: ' + node.unavailable);
             assert.strictEqual(live.liveIndexer, null, 'an unresolvable live indexer must normalize to null');
@@ -454,7 +454,7 @@ describe('oracleBatchReplay: the credential path', function () {
 
         it('treats a hub too old to carry the flag as redacting', async function () {
             class OldHub {
-                async _call() { return { configs: configTree(true), seq: 1 }; }
+                async ['_call']() { return { configs: configTree(true), seq: 1 }; }
                 async getAllConfig() { return configTree(true); }
             }
             const out = await readHubConfigTree(new OldHub());
@@ -473,7 +473,7 @@ describe('oracleBatchReplay: the credential path', function () {
 
         it('is null when no tree can be read at all', async function () {
             class DeadHub {
-                async _call() { return null; }
+                async ['_call']() { return null; }
                 async getAllConfig() { return null; }
             }
             assert.strictEqual(await readHubConfigTree(new DeadHub()), null);
@@ -483,7 +483,7 @@ describe('oracleBatchReplay: the credential path', function () {
 
 describe('oracleBatchBarrierTestnet: the launcher environment contract (row 41)', function () {
 
-    const drill = require('../drills/oracleBatchBarrierTestnet.drill.js');
+    const drill = require('../drills/lib/oracle_batch_barrier_testnet.js');
 
     // The complete set the launcher exports, by name.
     function fullEnv() {
@@ -518,7 +518,7 @@ describe('oracleBatchBarrierTestnet: the launcher environment contract (row 41)'
         // composes is what the rig accepts, checked by the rig itself.
         const { mod } = rigWithCountedConnector();
         const node = new mod.OracleBatchReplayNode({ label: 'at5unit', network: 'testnet', liveChain: live });
-        return node._resolveLiveChain();
+        return node['_resolveLiveChain']();
     });
 
     it('throws naming the FIRST variable the launcher failed to export', function () {

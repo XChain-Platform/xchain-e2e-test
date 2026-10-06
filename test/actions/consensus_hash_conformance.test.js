@@ -85,7 +85,7 @@ async function ensureSpecialAddressLedgerRecord(dbAdapter) {
     }
     if (donate1) {
         console.log('no special-address ledger record on this venue yet; sending 1 XCHAIN to DONATE1 ' + donate1);
-        const cryptoHelper = require('../cryptoHelper');
+        const cryptoHelper = require('../helpers/core/cryptoHelper');
         const sendHelper   = require('../helpers/sendHelper');
         const gasTick      = (typeof GAS_TICK !== 'undefined' && GAS_TICK) ? GAS_TICK : 'XCHAIN';
         const addr = await cryptoHelper.getNewFundedAddress('CONF.DONATE', COIN, NETWORK, null, 'legacy', 0, 1);
@@ -275,7 +275,7 @@ describe('state commitment conformance: sync block_merkle_root == indexer commit
         }
         assert.strictEqual(mismatches.length, 0,
             'sync block_merkle_root diverged from indexer committed roots (block-content conformance pair drifted). ' +
-            'Update BOTH xchain-sync/src/db.js getBlockLeafRows / stateCommitment.js and the indexer side, then ' +
+            'Update BOTH xchain-sync/src/db/actions.js getBlockLeafRows / src/state_commitment/index.js and the indexer side, then ' +
             'regenerate the golden:\n' + JSON.stringify(mismatches.slice(0, 10), null, 2));
     });
 });

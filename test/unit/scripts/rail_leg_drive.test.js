@@ -96,7 +96,7 @@ describe('bridge rail leg drive command', function () {
         })
         const guardsAt = command.argv.indexOf(GUARDS)
 
-        assert.ok(guardsAt > command.argv.indexOf('./test/initialCheck.test.js'))
+        assert.ok(guardsAt > command.argv.indexOf('./test/initial_check.test.js'))
         assert.ok(command.argv.indexOf(BASE_ROOT) > guardsAt)
         assert.ok(command.argv.indexOf(BASE_GLOB) > command.argv.indexOf(BASE_ROOT))
     })

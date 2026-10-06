@@ -61,7 +61,7 @@ const envelopeHelper = require('../helpers/envelopeHelper')
 const nativeFeeHelper = require('../helpers/nativeFeeHelper')
 const addressHelper = require('../helpers/addressHelper')
 
-// The SDK is a sibling checkout, resolved the way test/sdk/sdkHelper.js resolves
+// The SDK is a sibling checkout, resolved the way test/sdk/helpers/sdkHelper.js resolves
 // it. These are internal modules rather than package entry points, so they are
 // reached through the package root instead of by deep-requiring a bare specifier.
 function sdkModule(relative){
@@ -88,7 +88,7 @@ async function fundAggregate(address, amount){
     assert(await nodeConnector.waitForTx(txid, 60000), 'the funding tx should reach the chain')
     try { await regtestMinerConnector.generateBlocks(1) } catch (e) { /* the miner auto-mines anyway */ }
 
-    const raw = await nodeConnector._rpc('getrawtransaction', [txid, true])
+    const raw = await nodeConnector['_rpc']('getrawtransaction', [txid, true])
     // Both vout shapes, because litecoind still reports the pre-Core-22
     // `addresses` array; matching only `address` made this test structurally
     // unable to pass on LTC (see addressHelper.findVoutPayingAddress).
@@ -218,7 +218,7 @@ async function signMuSig2Commit(client, built, agentSk, commitPsbt, envelopeScri
     // Commit: key-path spend of the account, authorized off the leaf.
     return await client.signAll({
         psbt: built['psbt'], secretKey: agentSk,
-        inputIndexes: commitPsbt.data.inputs.map((_, i) => i),
+        inputIndexes: commitPsbt.data.inputs.map((internal, i) => i),
         envelopeScript: envelopeScript.toString('hex'), network: NETWORK_OBJECT
     })
 }

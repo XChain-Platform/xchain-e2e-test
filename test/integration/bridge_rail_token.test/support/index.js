@@ -22,10 +22,10 @@ const axios = require('axios');
 const XChainHubConnector = require('../../../../src/XChainHubConnector');
 const chainRail         = require('../../../helpers/chainRail');
 const stakeTeardown     = require('../../../helpers/stakeTeardown');
-const cryptoHelper      = require('../../../cryptoHelper');
-const transactionHelper = require('../../../transactionHelper');
+const cryptoHelper      = require('../../../helpers/core/cryptoHelper');
+const transactionHelper = require('../../../helpers/core/transactionHelper');
 const issueHelper       = require('../../../helpers/issueHelper');
-const fixture           = require('../../../attestMirror/mirrorDrillFixture');
+const fixture           = require('../../../attestMirror/helpers/mirrorDrillFixture');
 const { checkFullDriveReady } = require('../../../helpers/rail_preflight/full_drive_ready');
 const { requireHealthyHub } = require('../../../helpers/rail_preflight/hub_health_gate');
 const {
@@ -230,7 +230,7 @@ function createRailDrive(cfg) {
             const row = set.byPubkey.get(pk) || {};
             return { pubkey: pk, stake: Number(row.weight || 0) };
         });
-        state.quorum = resolveVenueQuorum(seated, fixture._knownSignerSeeds());
+        state.quorum = resolveVenueQuorum(seated, fixture['_knownSignerSeeds']());
         state.evidence.seated = seated.map((s) => s.pubkey.slice(0, 16) + '@' + s.stake).join(', ');
         state.evidence.buriedBlock = buried;
         state.evidence.btcTip = Number(tip.block_index);

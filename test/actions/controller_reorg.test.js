@@ -34,12 +34,12 @@
  ********************************************************************/
 
 const assert            = require('assert')
-const cryptoHelper      = require('../cryptoHelper')
+const cryptoHelper      = require('../helpers/core/cryptoHelper')
 const gasHelper         = require('../helpers/gasHelper')
 const issueHelper       = require('../helpers/issueHelper')
 const sendHelper        = require('../helpers/sendHelper')
 const vmHelper          = require('../helpers/vmHelper')
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 
 // Deny a SEND of the bound token to give the binding observable teeth pre-reorg.
 const SEND_GATE = `module.exports = { meta: { name: 'Send Gate Reorg', description: 'Controller guard denying SEND, used to observe a binding across a reorg.', version: '1.0.0' }, guard: function(){

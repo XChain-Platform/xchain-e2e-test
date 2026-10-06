@@ -44,7 +44,7 @@
  *
  *   nohup ~/scratch/xc-meta/doge-loop.sh >/dev/null 2>&1 & echo $! > ~/scratch/xc-meta/doge-loop.pid
  *   COIN=bitcoin NETWORK=regtest NODE_PATH=<the chunked module directory> \
- *     npx mocha --timeout 0 --exit --require ./test/initialCheck.test.js \
+ *     npx mocha --timeout 0 --exit --require ./test/initial_check.test.js \
  *     test/integration/bridgeRailDogeGuards.rail.test.js
  *   kill $(cat ~/scratch/xc-meta/doge-loop.pid)
  *
@@ -57,8 +57,8 @@
 const assert = require('assert');
 
 const chainRail         = require('../helpers/chainRail');
-const cryptoHelper      = require('../cryptoHelper');
-const transactionHelper = require('../transactionHelper');
+const cryptoHelper      = require('../helpers/core/cryptoHelper');
+const transactionHelper = require('../helpers/core/transactionHelper');
 const issueHelper       = require('../helpers/issueHelper');
 const {
     startDogeVenue,
@@ -94,7 +94,7 @@ describe('XBRIDGE acceptance drive, the federation-free legs on DOGE regtest (AT
             console.log('\nBRIDGE GUARDS: ' + unavailable + '\n');
             return;
         }
-        const fixture = require('../attestMirror/mirrorDrillFixture');
+        const fixture = require('../attestMirror/helpers/mirrorDrillFixture');
         await chainRail.withRail(dogeRail, () => fixture.waitForVenueIndexersAtTip(venue));
         evidence.venueIndexer = venue.indexers[0].apiUrl;
         evidence.venueIndexerDb = venue.indexers[0].indexerDbName;

@@ -49,7 +49,7 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, mine, submitOpts, uniqueTick, XChainSDK } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mine, submitOpts, uniqueTick, XChainSDK } = require('./helpers/sdkHelper');
 
 const MODE = String(process.env.ROYALTY_DENY_MODE || 'allow').trim().toLowerCase();
 const DENY = (MODE === 'deny');
@@ -66,7 +66,7 @@ function localCoin() {
     return COIN_OF[raw] || 'BTC';
 }
 function networkTier() {
-    let net = String(global.NETWORK || process.env.NETWORK || 'regtest');
+    const net = String(global.NETWORK || process.env.NETWORK || 'regtest');
     return net.includes('-') ? net.split('-')[1] : net;
 }
 

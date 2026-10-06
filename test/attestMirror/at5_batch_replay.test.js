@@ -76,7 +76,7 @@ const { AttestMirrorVenue, assertLlmAvailable, llmProbes, hubCredentialEnv } = r
 const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract,
     queryVenueDb, withWedgeClear, mineWhile,
-} = require("./mirrorDrillFixture")
+} = require("./helpers/mirrorDrillFixture")
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere,
     venueTipProbe, mineDogeBlocks, findEmittedAttestRequest,
@@ -85,7 +85,7 @@ const {
     attestRequestWatermark,
     settleOrReport,
     jsonSafe,
-} = require('./mirrorDrillWaits')
+} = require('./helpers/mirrorDrillWaits')
 const { oneValidHeadVerdict, emptyWindowVerdict } = require('./helpers/batchWindowVerdicts')
 const { readHubsReading } = require('./helpers/hubsReading')
 const {
@@ -95,7 +95,7 @@ const {
 } = require('./helpers/at5ResponseProvider')
 const vmHelper     = require('../helpers/vmHelper')
 const chainRail    = require('../helpers/chainRail')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const { loadHubModule } = require('../helpers/multiValidatorHubHelper')
 
 // Short enough that several windows close inside a drill, and comfortably above
@@ -253,7 +253,7 @@ async function stageDogeSigner (label, rail) {
     const path   = require('path')
     const crypto = require('crypto')
     const { encode: wifEncode } = require('wif')
-    const CryptoNetworks = require('../../src/CryptoNetworks.js')
+    const CryptoNetworks = require('../../src/crypto_networks.js')
 
     // Funded ON the DOGE rail, which is the whole point: the publisher pays a real
     // fee on that chain for every window it broadcasts.
@@ -411,7 +411,7 @@ async function configureDogeReconcileIndexer (venue, dogeVenue) {
     const moduleConfig = config.dogecoin[venue.network]['xchain-indexer']
     let result = null
     for (const hub of venue.hubs) {
-        result = await hub.connector._call({
+        result = await hub.connector['_call']({
             jsonrpc: '2.0', id: Date.now(), method: 'updateconfig',
             params: { config: config },
         })
@@ -619,7 +619,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
             // every time, and read the refusal as success through a null check;
             // the followers then held no chain_tips row and refused to co-sign every
             // window (`tip unresolved: no BTC chain_tips row exists`).
-            const res = await hub.connector._call({
+            const res = await hub.connector['_call']({
                 jsonrpc: '2.0', id: Date.now(), method: 'pushchaintip',
                 params: { coin: 'BTC', network: venue.network, block_height: tip, block_time: Number(block.time) },
             }).catch((e) => ({ error: String(e && e.message) }))
@@ -639,7 +639,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         // directory itself is this drill's litter and goes back.
         if (publisher && publisher.signerDir) {
             try { require('fs').rmSync(publisher.signerDir, { recursive: true, force: true }) }
-            catch (_) { /* already gone */ }
+            catch (internal) { /* already gone */ }
         }
     })
 

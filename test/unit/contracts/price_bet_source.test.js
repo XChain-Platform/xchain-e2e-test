@@ -6,7 +6,7 @@
 const assert = require('assert')
 const fs = require('fs')
 const path = require('path')
-const { PRICE_BET } = require('../../contracts/sources/price_bet_source')
+const { PRICE_BET } = require('../../contracts/fixtures/price_bet_source')
 
 describe('Price Bet: inline copy matches the canonical template', function () {
     const CANONICAL = path.join(__dirname, '..', '..', '..', '..',

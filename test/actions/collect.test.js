@@ -21,7 +21,7 @@
 
 const assert = require('assert')
 const crypto = require('crypto')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 
@@ -41,11 +41,11 @@ describe('COLLECT v0 (claim accrued validator rewards)', function () {
         it('records the reward_claims row with a "no active stake" status', async function () {
             // A freshly funded address that has never staked has no validator
             // capability, so COLLECT must reject before any reward calculation.
-            let addr = await cryptoHelper.getNewFundedAddress(
+            const addr = await cryptoHelper.getNewFundedAddress(
                 'collect-no-stake', COIN, NETWORK, null, 'legacy', 0, 1
             )
 
-            let result = await stakeHelper.sendCollectInvalid(addr)
+            const result = await stakeHelper.sendCollectInvalid(addr)
             assert(result.claim, 'a rejected COLLECT should still record a reward_claims row')
             assert.notStrictEqual(result.claim.status, 'valid',
                 'COLLECT without an active stake must not be valid; got status=' + result.claim.status)
@@ -64,16 +64,16 @@ describe('COLLECT v0 (claim accrued validator rewards)', function () {
             // so the stake is observable as active for COLLECT's existence check.
             // With an active stake but zero accrued rewards, COLLECT reaches the
             // reward-total check and rejects with 'no unclaimed rewards'.
-            let addr = await cryptoHelper.getNewFundedAddress(
+            const addr = await cryptoHelper.getNewFundedAddress(
                 'collect-no-rewards', COIN, NETWORK, null, 'legacy', 0, 1
             )
             await gasHelper.ensureGasBalance(addr, '2000')
 
-            let { publicKey } = crypto.generateKeyPairSync('ed25519')
-            let signingPubkey = publicKey.export({ format: 'der', type: 'spki' })
+            const { publicKey } = crypto.generateKeyPairSync('ed25519')
+            const signingPubkey = publicKey.export({ format: 'der', type: 'spki' })
                 .subarray(12).toString('hex')
 
-            let stakeResult = await stakeHelper.sendStakeV1(addr, '1000.00000000', signingPubkey)
+            const stakeResult = await stakeHelper.sendStakeV1(addr, '1000.00000000', signingPubkey)
             assert(stakeResult.stake, 'stake record should exist before COLLECT')
             assert.strictEqual(stakeResult.stake.status, 'valid', 'stake should be valid')
 
@@ -87,7 +87,7 @@ describe('COLLECT v0 (claim accrued validator rewards)', function () {
                 await regtestMinerConnector.resumeMining()
             }
 
-            let result = await stakeHelper.sendCollectInvalid(addr)
+            const result = await stakeHelper.sendCollectInvalid(addr)
             assert(result.claim, 'a rejected COLLECT should still record a reward_claims row')
             assert.notStrictEqual(result.claim.status, 'valid',
                 'COLLECT with no accrued rewards must not be valid; got status=' + result.claim.status)
@@ -99,7 +99,7 @@ describe('COLLECT v0 (claim accrued validator rewards)', function () {
             // precedes amount validation). Reward ACCRUAL is federation-driven and
             // not exercisable on this pipeline, so the partial happy path is
             // covered by the indexer unit suite instead.
-            let partial = await stakeHelper.sendCollectInvalid(addr, '5')
+            const partial = await stakeHelper.sendCollectInvalid(addr, '5')
             assert(partial.claim, 'a rejected partial COLLECT should still record a reward_claims row')
             assert.match(partial.claim.status, /no unclaimed rewards/i,
                 'partial COLLECT with no rewards should reject identically; got: ' + partial.claim.status)

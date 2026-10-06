@@ -29,7 +29,7 @@ function loadDriveFactory() {
 
 const createRailDrive = loadDriveFactory();
 const chainRail = require('../../../helpers/chainRail');
-const { transactionState } = require('../../../transactionHelper/lib/01_create_and_send_transaction');
+const { transactionState } = require('../../../helpers/core/transactionHelper/lib/01_create_and_send_transaction');
 const { spendableInputCount, freshInputCount } = require('../../../helpers/rail_preflight/policy_at2_at4');
 const { withDogeFeeSchedule } = require('../../../helpers/rail_preflight/token_doge_fee');
 const { withMiningPaused, verdictOf } = bridgeRailVenue;
@@ -140,7 +140,7 @@ function tickCandidates(label) {
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     let seed = 0;
     for (const char of String(label)) seed = (seed * 33 + char.charCodeAt(0)) % (26 ** 4);
-    return Array.from({ length: 128 }, (_, offset) => {
+    return Array.from({ length: 128 }, (internal, offset) => {
         let value = (seed + offset * 7919) % (26 ** 4), tick = '';
         for (let i = 0; i < 4; i++) {
             tick = alphabet[value % 26] + tick;

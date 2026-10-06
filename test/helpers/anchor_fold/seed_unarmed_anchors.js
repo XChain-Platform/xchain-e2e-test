@@ -24,8 +24,8 @@ const os = require('os');
 const path = require('path');
 const { encode: wifEncode } = require('wif');
 
-const cryptoHelper = require('../../cryptoHelper');
-const CryptoNetworks = require('../../../src/CryptoNetworks');
+const cryptoHelper = require('../core/cryptoHelper');
+const CryptoNetworks = require('../../../src/crypto_networks');
 const { MultiValidatorHub, ValidatorIdentity, loadHubModule, resolveHubFile } = require('../multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../disposableHubDb');
 const { seedWeightSnapshot } = require('../seededWeightSnapshot');
@@ -146,7 +146,7 @@ class UnarmedAnchorSeed {
         for(const dependency of ['xchain-sdk', 'dotenv']){
             let target;
             try { target = path.dirname(require.resolve(dependency + '/package.json')); }
-            catch(_){ target = path.resolve(__dirname, '../../../../', dependency); }
+            catch(internal){ target = path.resolve(__dirname, '../../../../', dependency); }
             fs.symlinkSync(target, path.join(this.signerDir, 'node_modules', dependency), 'dir');
         }
         const network = CryptoNetworks.getBitcoinJsNetwork(COIN + '-' + NETWORK);

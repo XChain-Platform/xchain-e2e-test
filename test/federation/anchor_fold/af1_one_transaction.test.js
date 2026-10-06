@@ -28,9 +28,9 @@ const requireFederation = process.env.E2E_REQUIRE_FEDERATION === '1';
 if(requireFederation) process.env.XC_ANCHOR_FOLD_REGTEST_ACTIVATION = '0';
 else console.log('Skipping ANCHOR fold live acceptance: E2E_REQUIRE_FEDERATION=1 is not set');
 
-const venueHooks = require('../../initialCheck.test.js').mochaHooks;
-const cryptoHelper = require('../../cryptoHelper');
-const CryptoNetworks = require('../../../src/CryptoNetworks');
+const venueHooks = require('../../initial_check.test.js').mochaHooks;
+const cryptoHelper = require('../../helpers/core/cryptoHelper');
+const CryptoNetworks = require('../../../src/crypto_networks');
 const {
     MultiValidatorHub,
     ValidatorIdentity,
@@ -71,7 +71,7 @@ function stageProductionSigner(addressInfo){
     for(const dependency of ['xchain-sdk', 'dotenv']){
         let target;
         try { target = path.dirname(require.resolve(dependency + '/package.json')); }
-        catch(_){ target = path.resolve(__dirname, '../../../', dependency); }
+        catch(internal){ target = path.resolve(__dirname, '../../../', dependency); }
         fs.symlinkSync(target, path.join(signerDir, 'node_modules', dependency), 'dir');
     }
     const network = CryptoNetworks.getBitcoinJsNetwork(COIN + '-' + NETWORK);

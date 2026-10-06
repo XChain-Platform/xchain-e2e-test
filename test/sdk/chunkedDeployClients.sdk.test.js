@@ -69,7 +69,7 @@
 'use strict';
 
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, mine, submitOpts, uniqueTick, waitForBalance } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mine, submitOpts, uniqueTick, waitForBalance } = require('./helpers/sdkHelper');
 const { chunkHelper } = require('xchain-sdk');
 const {
     GAS_LIMIT,

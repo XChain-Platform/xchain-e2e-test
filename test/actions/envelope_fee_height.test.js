@@ -43,7 +43,7 @@
  ********************************************************************/
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const nativeFeeHelper = require('../helpers/nativeFeeHelper')
 const envelopeHelper = require('../helpers/envelopeHelper')
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')

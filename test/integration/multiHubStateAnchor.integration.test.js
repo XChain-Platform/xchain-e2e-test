@@ -110,7 +110,7 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
     this.timeout(180_000);
 
     let db, mvh, seed, seedCount, book;
-    let published = [];          // [{ hubIndex, payload }] captured "on-chain" anchors
+    const published = [];          // [{ hubIndex, payload }] captured "on-chain" anchors
 
     before(async function () {
         db = await startDisposableHubDb();
@@ -156,7 +156,7 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         // and capture every "on-chain" anchor broadcast instead of hitting DOGE.
         mvh.hubs.forEach((hub, i) => {
             hub.resolveBtcLatestBlock = async () => BLOCK_INDEX;
-            let cps = hub.stateCheckpoints;
+            const cps = hub.stateCheckpoints;
             cps.network = 'regtest';   // engine cached '' at construction (pre-seed)
             cps.chains = ['BTC'];
             cps.confirmations = 0;
@@ -184,20 +184,20 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         // Each hub's own state_checkpoints row is the post-condition asserted next.
         await waitFor(async () => {
             let held = 0;
-            for (let hub of mvh.hubs) {
+            for (const hub of mvh.hubs) {
                 try {
-                    let r = await hub.db.doQuery(
+                    const r = await hub.db.doQuery(
                         'SELECT checkpoint_seq FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ?',
                         ['BTC', 'regtest', TIP.block_index]);
                     if (r.length >= 1) held++;
-                } catch (_) { /* a hub that cannot be read has not stored it */ }
+                } catch (internal) { /* a hub that cannot be read has not stored it */ }
             }
             return { ok: held === mvh.hubs.length, held: held };
         }, { timeoutMs: SETTLE_MS });
 
-        let rows = [];
-        for (let hub of mvh.hubs) {
-            let r = await hub.db.doQuery(
+        const rows = [];
+        for (const hub of mvh.hubs) {
+            const r = await hub.db.doQuery(
                 'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ?',
                 ['BTC', 'regtest', TIP.block_index]);
             assert.strictEqual(r.length, 1, 'every hub must hold exactly one checkpoint row');
@@ -209,43 +209,43 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         // the signed bytes are the v0 raw canonical wrapped in the uniform header
         // (TAG=XCHECKPOINT, v0 round id chain|network|block_index|checkpoint_seq,
         // VIEW=0); below it, the bare raw bytes. Gate keys on the snapshot_block.
-        let raw = ['XCHECKPOINT', 'BTC', 'regtest', String(TIP.block_index), TIP.block_hash,
+        const raw = ['XCHECKPOINT', 'BTC', 'regtest', String(TIP.block_index), TIP.block_hash,
                    TIP.ledger_hash, TIP.actions_hash, TIP.contract_hash,
                    String(rows[0].checkpoint_seq), String(BLOCK_INDEX)].join('|') + ROOT_SUFFIX;
-        let canonical = eq.isEquivHeaderActive(BLOCK_INDEX, 'regtest')
+        const canonical = eq.isEquivHeaderActive(BLOCK_INDEX, 'regtest')
             ? eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
                 'BTC|regtest|' + TIP.block_index + '|' + rows[0].checkpoint_seq, 0, raw)
             : raw;
-        for (let row of rows) {
+        for (const row of rows) {
             assert.strictEqual(row.ledger_hash, TIP.ledger_hash);
-            let sigs = JSON.parse(row.validator_signatures);
-            let verifying = new Set();
-            for (let s of sigs)
+            const sigs = JSON.parse(row.validator_signatures);
+            const verifying = new Set();
+            for (const s of sigs)
                 if (ValidatorIdentity.verify(canonical, s.sig, s.pubkey)) verifying.add(s.pubkey);
             assert.ok(verifying.size >= 3, 'expected >= 2f+1 = 3 verifying sigs, got ' + verifying.size);
         }
-        let distinct = new Set(rows.map(r => r.ledger_hash + '|' + r.checkpoint_seq));
+        const distinct = new Set(rows.map(r => r.ledger_hash + '|' + r.checkpoint_seq));
         assert.strictEqual(distinct.size, 1, 'all hubs hold the identical checkpoint');
     });
 
     it('anchor flush: leader publishes v3 checkpoint anchor + quorum-signed v1 archive; back-fill reaches every hub', async function () {
         // A finalized cross-chain match gives the archive something to carry.
-        let dexes = mvh.getCrossChainDexes();
+        const dexes = mvh.getCrossChainDexes();
         await Promise.all(dexes.map(d => d.discoverAndMatch().catch(() => {})));
         // The finalized match on every hub is the precondition the loop below
         // asserts, so wait for it rather than for a fixed window.
         await waitFor(async () => {
             let held = 0;
-            for (let hub of mvh.hubs) {
+            for (const hub of mvh.hubs) {
                 try {
-                    let m = await hub.db.doQuery("SELECT match_id FROM cross_chain_matches WHERE status = 'finalized'");
+                    const m = await hub.db.doQuery("SELECT match_id FROM cross_chain_matches WHERE status = 'finalized'");
                     if (m.length >= 1) held++;
-                } catch (_) { /* a hub that cannot be read has not stored it */ }
+                } catch (internal) { /* a hub that cannot be read has not stored it */ }
             }
             return { ok: held === mvh.hubs.length, held: held };
         }, { timeoutMs: SETTLE_MS });
-        for (let hub of mvh.hubs) {
-            let m = await hub.db.doQuery("SELECT * FROM cross_chain_matches WHERE status = 'finalized'");
+        for (const hub of mvh.hubs) {
+            const m = await hub.db.doQuery("SELECT * FROM cross_chain_matches WHERE status = 'finalized'");
             assert.ok(m.length >= 1, 'every hub must hold the finalized match before anchoring');
         }
 
@@ -267,11 +267,11 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         // round having completed rather than on a clock reading.
         await waitFor(async () => {
             if (!published.some(p => p.payload.split('|')[1] === '3')) return { ok: false, stage: 'v3 checkpoint anchor' };
-            for (let hub of mvh.hubs) {
+            for (const hub of mvh.hubs) {
                 try {
-                    let m = await hub.db.doQuery('SELECT batch_seq FROM cross_chain_matches WHERE batch_seq IS NOT NULL');
+                    const m = await hub.db.doQuery('SELECT batch_seq FROM cross_chain_matches WHERE batch_seq IS NOT NULL');
                     if (m.length < 1) return { ok: false, stage: 'XANC_FINALIZED back-fill' };
-                } catch (_) { return { ok: false, stage: 'XANC_FINALIZED back-fill (hub read failed)' }; }
+                } catch (internal) { return { ok: false, stage: 'XANC_FINALIZED back-fill (hub read failed)' }; }
             }
             return { ok: true };
         }, { timeoutMs: 30000, intervalMs: 250 });
@@ -280,8 +280,8 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         // ANCHOR v3 (not legacy v0) whenever the checkpoint carries the signed
         // light-client roots. TIP seeds those roots and regtest's commitment
         // flag-day is genesis, so every post-flag-day checkpoint here is v3.
-        let v3s = published.filter(p => p.payload.split('|')[1] === '3');
-        let v1s = published.filter(p => p.payload.split('|')[1] === '1');
+        const v3s = published.filter(p => p.payload.split('|')[1] === '3');
+        const v1s = published.filter(p => p.payload.split('|')[1] === '1');
         // The safety invariant is PER-ARTIFACT, not "one hub does everything": the
         // checkpoint anchor (v3, elected per checkpoint row via _v0ElectionKey) and
         // the archive (v1, elected per election block via archiveElectionKey) run
@@ -298,28 +298,28 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         // wraps it ONCE, and the v1 round id appends batchSeq (the R-4 v0/v1 collision fix)
         // so v0 and its archive get DISTINCT equivocation keys. f[4]=block_index,
         // f[9]=checkpoint_seq, f[10]=snapshot_block, f[11]=batchSeq.
-        let f = v1s[0].payload.split('|');
-        let raw = ['XCHECKPOINT', f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9], f[10],
+        const f = v1s[0].payload.split('|');
+        const raw = ['XCHECKPOINT', f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9], f[10],
                    f[11], f[12], f[13], f[14]].join('|');
-        let canonical = eq.isEquivHeaderActive(f[10], 'regtest')
+        const canonical = eq.isEquivHeaderActive(f[10], 'regtest')
             ? eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
                 f[2] + '|' + f[3] + '|' + f[4] + '|' + f[9] + '|' + f[11], 0, raw)
             : raw;
-        let sigCount = Number(f[16]);
+        const sigCount = Number(f[16]);
         assert.ok(sigCount >= 3, 'v1 carries >= 2f+1 = 3 sigs, got ' + sigCount);
-        let verifying = new Set();
+        const verifying = new Set();
         for (let i = 0; i < sigCount; i++)
             if (ValidatorIdentity.verify(canonical, f[18 + 2 * i], f[17 + 2 * i])) verifying.add(f[17 + 2 * i]);
         assert.ok(verifying.size >= 3, 'v1 sigs must verify over the extended canonical');
 
-        let archive = JSON.parse(zlib.gunzipSync(Buffer.from(f[15], 'base64url')).toString('utf8'));
+        const archive = JSON.parse(zlib.gunzipSync(Buffer.from(f[15], 'base64url')).toString('utf8'));
         assert.ok(archive.matches.length >= 1);
         assert.ok(archive.capability_snapshots.some(s => s.capability === 'cross_chain'));
         assert.ok(archive.capability_snapshots.some(s => s.capability === 'oracle_publish'));
 
         // XANC_FINALIZED back-fill: every hub's match rows carry the batch metadata.
-        for (let hub of mvh.hubs) {
-            let m = await hub.db.doQuery('SELECT batch_seq, archived_status FROM cross_chain_matches WHERE batch_seq IS NOT NULL');
+        for (const hub of mvh.hubs) {
+            const m = await hub.db.doQuery('SELECT batch_seq, archived_status FROM cross_chain_matches WHERE batch_seq IS NOT NULL');
             assert.ok(m.length >= 1, 'back-fill must reach every hub');
             assert.strictEqual(String(m[0].archived_status), 'finalized');
         }

@@ -63,16 +63,16 @@ const { loadHubModule } = require('../helpers/multiValidatorHubHelper')
 const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract,
     mineWhile,
-} = require('./mirrorDrillFixture')
+} = require('./helpers/mirrorDrillFixture')
 const {
     APPLIED_FIELDS, STATE_HASH_FIELDS, diffRows, diffStateHashes, untilOrClearDogeStall,
     waitForMirrorRowEverywhere, waitForAppliedEverywhere, waitForHeightWithClear,
     readAppliedResponse, readContractState, readRequestRow,
     venueTipProbe, findEmittedAttestRequest, attestRequestWatermark,
     clearBeforeBroadcast, settleOrReport, allHubTails, jsonSafe,
-} = require('./mirrorDrillWaits')
+} = require('./helpers/mirrorDrillWaits')
 const vmHelper               = require('../helpers/vmHelper')
-const cryptoHelper           = require('../cryptoHelper')
+const cryptoHelper           = require('../helpers/core/cryptoHelper')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
 
 // ---------------------------------------------------------------------------
@@ -406,6 +406,7 @@ describe('ZC5 above the height: a rollback across a bound response restores the 
 
         await settleOrReport('zc5')
         const beforeRows = await waitForAppliedEverywhere(venue, requestId)
+        await waitForHeightWithClear(venue, 0, request.blockIndex)
         const local      = await readRequestRow(venue, 0, requestId)
         const B          = Number(beforeRows[0].block_index)
         console.log('ZC5: request at ' + local.block_index + ', response bound at ' + B)

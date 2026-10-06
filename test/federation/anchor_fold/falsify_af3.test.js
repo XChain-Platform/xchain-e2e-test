@@ -22,7 +22,7 @@ const REPLACE = `    assert.deepStrictEqual(statuses, { chainStatuses: Array(cha
 function readReport(reportFile) {
     try {
         return JSON.parse(fs.readFileSync(reportFile, 'utf8'))
-    } catch (_) {
+    } catch (internal) {
         return null
     }
 }
@@ -33,14 +33,14 @@ function runDriver() {
     // the globals initialCheck sets, which a bare child mocha never has.
     const args = [MOCHA, '--no-config', '--no-package', '--timeout', '0', '--exit',
         '--reporter', 'json', '--reporter-option', 'output=' + reportFile,
-        '--require', path.join(ROOT, 'test', 'initialCheck.test.js'), DRIVER]
+        '--require', path.join(ROOT, 'test', 'initial_check.test.js'), DRIVER]
     const child = childProcess.spawnSync(process.execPath, args, {
         cwd: ROOT,
         encoding: 'utf8',
         maxBuffer: 64 * 1024 * 1024,
     })
     const report = readReport(reportFile)
-    try { fs.unlinkSync(reportFile) } catch (_) {}
+    try { fs.unlinkSync(reportFile) } catch (internal) {}
     return { child, report }
 }
 

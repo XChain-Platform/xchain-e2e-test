@@ -18,13 +18,13 @@ const assert = require('assert');
 
 const chainRail         = require('../../../helpers/chainRail');
 const stakeTeardown     = require('../../../helpers/stakeTeardown');
-const cryptoHelper      = require('../../../cryptoHelper');
-const transactionHelper = require('../../../transactionHelper');
+const cryptoHelper      = require('../../../helpers/core/cryptoHelper');
+const transactionHelper = require('../../../helpers/core/transactionHelper');
 const issueHelper       = require('../../../helpers/issueHelper');
 const mintHelper        = require('../../../helpers/mintHelper');
 // Funds a leg's BTC-side XCHAIN: a faucet SEND once the supply is spent, else a MINT.
 const gasHelper         = require('../../../helpers/gasHelper');
-const fixture           = require('../../../attestMirror/mirrorDrillFixture');
+const fixture           = require('../../../attestMirror/helpers/mirrorDrillFixture');
 const {
     BridgeRailVenue,
     resolveVenueQuorum,
@@ -197,7 +197,7 @@ async function prepareQuorum() {
         const row = set.byPubkey.get(pk) || {};
         return { pubkey: pk, stake: Number(row.weight || 0) };
     });
-    state.quorum = resolveVenueQuorum(seated, fixture._knownSignerSeeds());
+    state.quorum = resolveVenueQuorum(seated, fixture['_knownSignerSeeds']());
     state.evidence.seated = seated.map((s) => s.pubkey.slice(0, 16) + '@' + s.stake).join(', ');
     state.evidence.buriedBlock = buried;
     state.evidence.btcTip = Number(tip.block_index);

@@ -127,8 +127,8 @@ const path   = require('path');
 const fs = require('fs');
 const { encode: wifEncode } = require('wif');
 
-const cryptoHelper      = require('../cryptoHelper');
-const CryptoNetworks    = require('../../src/CryptoNetworks');
+const cryptoHelper      = require('../helpers/core/cryptoHelper');
+const CryptoNetworks    = require('../../src/crypto_networks');
 const { MultiValidatorHub, ValidatorIdentity, loadHubModule, resolveHubFile } = require('../helpers/multiValidatorHubHelper');
 const anchorVersions    = require('../helpers/anchorVersionHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
@@ -161,8 +161,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // parses) is what makes the narrowing key match the wrapper, whichever chain
 // it turns out to be.
 function archiveWrapperLedgerHash(payload){
-    let f = String(payload || '').split('|');
-    let hash = f[6];
+    const f = String(payload || '').split('|');
+    const hash = f[6];
     assert.match(String(hash), /^[0-9a-f]{64}$/i, 'v1 payload LEDGER_HASH field (index 6) is a 64-hex hash');
     return hash;
 }
@@ -175,8 +175,8 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
     let weightSeed = null;             // gap (b): seededWeightSnapshot restore()
     let publisherAddr = null;
     let signerDir = null;              // staged production signer (~/hub-signer analogue)
-    let broadcasts = [];               // { payload, txid, phase1_txid }
-    let matchId = crypto.createHash('sha256').update('anchor-acceptance-' + Date.now()).digest('hex');
+    const broadcasts = [];               // { payload, txid, phase1_txid }
+    const matchId = crypto.createHash('sha256').update('anchor-acceptance-' + Date.now()).digest('hex');
     let SCE = null;                    // hub's StateCheckpointEngine, for the canonical
     let bundleSections = [];           // the three checkpoint rows the bundle carried
     let bundleTxid = null;             // AT4 reads the same bundle back through the RPC
@@ -220,7 +220,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
     }
 
     async function indexerQuery(sql, params){
-        let conn = await indexerDatabase.getConnection();
+        const conn = await indexerDatabase.getConnection();
         try { return await conn.query(sql, params); }
         finally { await conn.release(); }
     }
@@ -236,7 +236,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
     // log line rather than emitting a rootless section (D8), so a filler without
     // them would be silently absent and the bundle would come out short.
     function signedSyntheticCheckpoint(chain, seq, snapshotBlock){
-        let row = {
+        const row = {
             chain, network: 'regtest', block_index: 100000 + seq,
             block_hash:    crypto.randomBytes(32).toString('hex'),
             ledger_hash:   crypto.randomBytes(32).toString('hex'),
@@ -359,12 +359,12 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         // dirty regtest chain can carry a prior run's rows under ANY of these, and a
         // scan narrowed to today's (0,1) would miss them and restart the seqs low
         // enough for the indexer's replay guard to reject this run's anchors.
-        let prior = await indexerQuery(
+        const prior = await indexerQuery(
             `SELECT MAX(checkpoint_seq) AS max_cp,
                     (SELECT MAX(match_batch_seq) FROM anchor_actions WHERE version IN (1, 6)) AS max_batch
              FROM anchor_actions WHERE version IN (0, 1, 3, 4, 5, 6, 7)`);
-        let maxCp    = (prior.length && prior[0].max_cp    != null) ? Number(prior[0].max_cp)    : null;
-        let maxBatch = (prior.length && prior[0].max_batch != null) ? Number(prior[0].max_batch) : null;
+        const maxCp    = (prior.length && prior[0].max_cp    != null) ? Number(prior[0].max_cp)    : null;
+        const maxBatch = (prior.length && prior[0].max_batch != null) ? Number(prior[0].max_batch) : null;
         if (maxCp !== null) {
             await hub.db.doQuery(
                 `INSERT IGNORE INTO state_checkpoints (chain, network, block_index, block_hash, ledger_hash,
@@ -395,10 +395,10 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
 
     it('AT1: checkpoints REAL indexer state and lands ONE quorum-signed v0 bundle with three sections on the DOGE chain', async function () {
         await hub.stateCheckpoints.tick();
-        let cps = await hub.db.doQuery(
+        const cps = await hub.db.doQuery(
             "SELECT * FROM state_checkpoints WHERE chain = 'DOGE' AND network = 'regtest' ORDER BY checkpoint_seq DESC LIMIT 1");
         assert.strictEqual(cps.length, 1, 'hub holds a DOGE checkpoint after the tick');
-        let cp = cps[0];
+        const cp = cps[0];
         assert.match(String(cp.ledger_hash), /^[0-9a-f]{64}$/);
         // A v0 section is root-bearing by construction (D8). Regtest arms
         // CHECKPOINT_COMMITMENT at genesis, so a real engine-cut row without roots
@@ -409,12 +409,12 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
 
         // The REAL snapshot block resolved by the hub at tick time; everything
         // downstream (capability mirror rows, the synthetic match) keys on it.
-        let snapBlock = Number(cp.snapshot_block);
+        const snapBlock = Number(cp.snapshot_block);
 
         // Hand-mirror the capability snapshot into the INDEXER DB (what
         // hub_db_sync would deliver in a hub-connected deployment) so the
         // ANCHOR handler verifies signatures as 'valid' rather than 'unverified'.
-        for (let cap of ['oracle_publish', 'cross_chain']) {
+        for (const cap of ['oracle_publish', 'cross_chain']) {
             // WI-1: the indexer verify is stake-weighted on regtest (activates at
             // genesis) and tallies by DISTINCT source; a blank source FAILS CLOSED.
             // Seed a non-blank source (the validator's own key = its staking source)
@@ -424,7 +424,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
                 'ON DUPLICATE KEY UPDATE amount = VALUES(amount), source = VALUES(source)',
                 [snapBlock, cap, identity.getPubkeyHex().toLowerCase(), '1', identity.getPubkeyHex().toLowerCase()]);
         }
-        let seeded = await indexerQuery(
+        const seeded = await indexerQuery(
             'SELECT capability FROM capability_snapshots WHERE snapshot_block = ?', [snapBlock]);
         console.log('    seeded capability rows @ ' + snapBlock + ': ' + JSON.stringify(seeded.map(r => r.capability)));
         assert.strictEqual(seeded.length, 2, 'capability snapshot rows readable at snapshot block ' + snapBlock);
@@ -434,8 +434,8 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         // at the SAME snapshot_block, signed by the same seeded validator over the
         // hub's own canonical, hence verifiable by the same mirrored oracle_publish
         // set. Seqs clear the indexer's per-chain replay guard on a dirty chain.
-        for (let chain of ['BTC', 'LTC']) {
-            let prior = await indexerQuery(
+        for (const chain of ['BTC', 'LTC']) {
+            const prior = await indexerQuery(
                 'SELECT COALESCE(MAX(checkpoint_seq), -1) + 1 AS s FROM anchor_actions WHERE chain = ? AND network = ?',
                 [chain, 'regtest']);
             await insertCheckpoint(signedSyntheticCheckpoint(chain, Number(prior[0].s), snapBlock));
@@ -443,7 +443,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
 
         // Synthetic finalized cross-chain match, signed by the seeded validator
         // (gives the v1 archive real content without a second chain).
-        let m = {
+        const m = {
             match_id: matchId, snapshot_block: snapBlock, network: 'regtest',
             a_chain: 'DOGE', a_action_index: 11, a_kind: 'swap', a_tick: 'TOKA', a_amount: '1000',
             a_filled_before: '0', a_ownership: 0, a_payout_addr: 'acceptance_payout_a',
@@ -451,8 +451,8 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
             b_filled_before: '0', b_ownership: 0, b_payout_addr: 'acceptance_payout_b',
             effective_time: Math.floor(Date.now() / 1000)
         };
-        let canonical = hub.crossChainDex.canonicalMatch(m);
-        let sigs = JSON.stringify([{ pubkey: identity.getPubkeyHex().toLowerCase(), sig: identity.sign(canonical) }]);
+        const canonical = hub.crossChainDex.canonicalMatch(m);
+        const sigs = JSON.stringify([{ pubkey: identity.getPubkeyHex().toLowerCase(), sig: identity.sign(canonical) }]);
         await hub.db.doQuery(
             `INSERT INTO cross_chain_matches
                 (match_id, snapshot_block, network, a_chain, a_action_index, a_kind, a_tick, a_amount,
@@ -481,7 +481,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         // (getWeightSnapshot), never touching this table. It's kept for any path
         // that reads capability_snapshots directly (recovery) rather than through
         // resolveCapabilitySet/getActiveOraclePublishPubkeys.
-        for (let cap of ['cross_chain', 'oracle_publish']) {
+        for (const cap of ['cross_chain', 'oracle_publish']) {
             await hub.db.doQuery(
                 'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
                 [snapBlock, cap, identity.getPubkeyHex().toLowerCase(), '1', identity.getPubkeyHex().toLowerCase()]);
@@ -491,22 +491,22 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         // is v0 and nothing else, the archive leg v1 and nothing else. Both helpers
         // still report `rewardActive`/`rootBearing` off the flag-days at the
         // resolved snapshot_block, which is what `describe` below is showing.
-        let cpExpect  = anchorVersions.expectedCheckpointAnchor(cp);
-        let arcExpect = anchorVersions.expectedArchiveAnchor(cp);
+        const cpExpect  = anchorVersions.expectedCheckpointAnchor(cp);
+        const arcExpect = anchorVersions.expectedArchiveAnchor(cp);
         console.log('    expecting ' + cpExpect.describe + ' + ' + arcExpect.describe);
 
-        let summary = await hub.stateAnchorPublisher.flush();
+        const summary = await hub.stateAnchorPublisher.flush();
         assert.ok(broadcasts.length >= 2,
             'expected a bundle + archive broadcast, got ' + broadcasts.length);
 
         // ONE v0 for the network, carrying all three chains. Three separate
         // checkpoint transactions is exactly the shape the bundle replaced.
-        let bundleWires = anchorVersions.bundleBroadcasts(broadcasts);
+        const bundleWires = anchorVersions.bundleBroadcasts(broadcasts);
         assert.strictEqual(bundleWires.length, 1,
             'exactly one ANCHOR v0 bundle, got ' + bundleWires.length + '; saw versions ' +
             JSON.stringify(broadcasts.map(b => anchorVersions.anchorPayloadVersion(b.payload))));
-        let v0 = bundleWires[0];
-        let v1 = anchorVersions.findAnchorBroadcast(broadcasts, arcExpect.accepted);
+        const v0 = bundleWires[0];
+        const v1 = anchorVersions.findAnchorBroadcast(broadcasts, arcExpect.accepted);
         assert.ok(v0.txid, 'the bundle published with a real txid');
         assert.ok(v1 && v1.txid, arcExpect.describe + ' published with a real txid; saw versions ' +
             JSON.stringify(broadcasts.map(b => anchorVersions.anchorPayloadVersion(b.payload))));
@@ -515,30 +515,30 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         assert.deepStrictEqual(v0.bundle.chains, ['BTC', 'DOGE', 'LTC'], 'sections ride CHAIN ascending (D5)');
         assert.strictEqual(v0.bundle.network, 'regtest', 'the wire NETWORK on regtest is the literal "regtest"');
         assert.strictEqual(v0.bundle.snapshot_block, snapBlock, 'header SNAPSHOT_BLOCK is the MAX over sections (D6)');
-        for (let s of v0.bundle.sections)
+        for (const s of v0.bundle.sections)
             assert.ok(s.state_root && s.block_merkle_root, s.chain + ': the section carries its roots');
 
         // The two-phase property the walletSign-only gap used to hide: each
         // publish must produce a DISTINCT phase-1 funding tx and phase-2
         // reveal tx (the decodable one). A single-tx publish here means the
         // reveal leg silently vanished, which is exactly the production bug class.
-        for (let b of [v0, v1]) {
+        for (const b of [v0, v1]) {
             assert.ok(b.phase1_txid, 'publish went two-phase (phase-1 txid present)');
             assert.notStrictEqual(b.phase1_txid, b.txid, 'phase-2 reveal txid differs from phase-1');
         }
         // The flush summary (the anchorflush RPC surface) reports ONE entry per
         // SECTION, all naming the one bundle transaction.
         assert.strictEqual(summary.anchored.length, 3, 'flush summary names all three anchored sections');
-        for (let a of summary.anchored)
+        for (const a of summary.anchored)
             assert.strictEqual(a.txid, v0.txid, a.chain + ': every section names the one bundle txid');
         assert.strictEqual(summary.archive, 'published');
-        let arcVersion = anchorVersions.anchorPayloadVersion(v1.payload);
+        const arcVersion = anchorVersions.anchorPayloadVersion(v1.payload);
         // The archive's own wrapper identity, off the wire it actually published (see
         // archiveWrapperLedgerHash above): the wrapper checkpoint the archive rides is
         // elected over every chain's state_checkpoints row for this network and can
         // land on BTC or LTC rather than the DOGE row `cp` names, so `cp.ledger_hash`
         // is the wrong key to read this row back by.
-        let arcLedgerHash = archiveWrapperLedgerHash(v1.payload);
+        const arcLedgerHash = archiveWrapperLedgerHash(v1.payload);
         bundleTxid = v0.txid;
         console.log('    on-chain: bundle v0 [' + v0.bundle.chains.join(',') + '] ' + v0.txid +
                     ' (' + v0.bundle.attest_sig_count + ' attesting sig(s)) / archive v' + arcVersion +
@@ -556,7 +556,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         await regtestMinerConnector.generateBlocks(3);
         let sections = [], r1 = null;
         for (let i = 0; i < 60 && (sections.length !== 3 || !r1); i++) {
-            let rows = await indexerQuery(
+            const rows = await indexerQuery(
                 `SELECT a.*, s.status FROM anchor_actions a
                  LEFT JOIN index_statuses s ON s.id = a.status_id
                  ORDER BY a.action_index ASC, a.section_index ASC`);
@@ -573,19 +573,19 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         assert.ok(r1, 'archive v' + arcVersion + ' row for our archive present');
 
         // AT1's core evidence: ONE action_index, section_index 0..2, all valid.
-        let actionIndex = String(sections[0].action_index);
-        for (let s of sections)
+        const actionIndex = String(sections[0].action_index);
+        for (const s of sections)
             assert.strictEqual(String(s.action_index), actionIndex, 'all three sections share one action_index');
         assert.deepStrictEqual(sections.map(s => Number(s.section_index)), [0, 1, 2],
             'section_index runs 0..2 in wire order');
-        for (let s of sections)
+        for (const s of sections)
             assert.strictEqual(String(s.status), 'valid',
                 s.chain + ' section verified against the mirrored oracle_publish set (got ' + s.status + ')');
         assert.deepStrictEqual(sections.map(s => String(s.chain)), ['BTC', 'DOGE', 'LTC']);
         // Every section row carries its OWN per-chain identity and the BUNDLE's
         // network (rebuilt from the header, §2.1), which is what keeps
         // idx_anchor_checkpoint and every per-chain reader working unchanged.
-        for (let s of sections) {
+        for (const s of sections) {
             assert.strictEqual(String(s.network), 'regtest', s.chain + ': header NETWORK written onto the section row');
             assert.ok(s.state_root && s.block_merkle_root, s.chain + ': section row carries its roots');
             assert.ok(String(s.validator_signatures || '').length > 2, s.chain + ': section row carries its signatures');
@@ -593,7 +593,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
 
         // Checkpoint leg: the on-chain DOGE section equals what the hub signed over
         // the REAL indexer hashes (the full circle: indexer -> hub -> chain -> indexer).
-        let doge = sections.find(s => String(s.chain) === 'DOGE');
+        const doge = sections.find(s => String(s.chain) === 'DOGE');
         assert.strictEqual(Number(doge.block_index), Number(cp.block_index));
         assert.strictEqual(String(doge.ledger_hash), String(cp.ledger_hash));
         assert.strictEqual(String(doge.actions_hash), String(cp.actions_hash));
@@ -604,7 +604,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         // Archive leg: decompresses to the synthetic match + both capability sets.
         assert.strictEqual(String(r1.status), 'valid',
             'archive v' + arcVersion + ' verified against the mirrored oracle_publish set');
-        let archive = JSON.parse(zlib.gunzipSync(Buffer.from(String(r1.archive_b64), 'base64url')).toString('utf8'));
+        const archive = JSON.parse(zlib.gunzipSync(Buffer.from(String(r1.archive_b64), 'base64url')).toString('utf8'));
         assert.strictEqual(archive.matches.length, 1);
         assert.strictEqual(archive.matches[0].match_id, matchId);
         assert.ok(archive.capability_snapshots.some(s => s.capability === 'cross_chain'));
@@ -630,10 +630,10 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         assert.ok(bundleSections.length === 3 && bundleTxid,
             'AT1 must have run first (it produces the bundle this reads back)');
 
-        let targets = [{ label: 'this venue', conn: indexerConnector }];
+        const targets = [{ label: 'this venue', conn: indexerConnector }];
         if (process.env.XC_ANCHOR_FRESH_INDEXER_URL) {
-            let XChainIndexerConnector = require('../../src/XChainIndexerConnector');
-            let u = new URL(process.env.XC_ANCHOR_FRESH_INDEXER_URL);
+            const XChainIndexerConnector = require('../../src/XChainIndexerConnector');
+            const u = new URL(process.env.XC_ANCHOR_FRESH_INDEXER_URL);
             targets.push({ label: 'fresh full-parse indexer',
                            conn: new XChainIndexerConnector(u.hostname, u.port,
                                                             process.env.INDEXER_API_KEY || null) });
@@ -641,9 +641,9 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
             console.log('    (no XC_ANCHOR_FRESH_INDEXER_URL; asserting the chain-derived rows on this venue only)');
         }
 
-        for (let t of targets) {
-            for (let s of bundleSections) {
-                let r = await t.conn.call('getanchoraction', {
+        for (const t of targets) {
+            for (const s of bundleSections) {
+                const r = await t.conn.call('getanchoraction', {
                     chain: String(s.chain), network: String(s.network),
                     block_index: Number(s.block_index), checkpoint_seq: Number(s.checkpoint_seq)
                 });

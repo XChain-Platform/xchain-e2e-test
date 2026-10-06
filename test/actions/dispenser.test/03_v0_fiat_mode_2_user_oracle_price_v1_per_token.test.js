@@ -10,8 +10,8 @@
 
 
 const assert = require('assert')
-const cryptoHelper = require('../../cryptoHelper')
-const transactionHelper = require('../../transactionHelper')
+const cryptoHelper = require('../../helpers/core/cryptoHelper')
+const transactionHelper = require('../../helpers/core/transactionHelper')
 const issueHelper = require('../../helpers/issueHelper')
 const dispenserHelper = require('../../helpers/dispenserHelper')
 const priceSnapshotHelper = require('../../helpers/priceSnapshotHelper')
@@ -20,25 +20,25 @@ const oraclePriceHelper = require('../../helpers/oraclePriceHelper')
 const FIAT_PERTOK = 'MXN'   // per-TOKEN oracle pricing at GIVE_AMOUNT > 1
 
 async function createPerTokenDispenser() {
-    let dispenserAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.PERTOK", COIN, NETWORK, null, "legacy", 0, 1)
-    let buyerAddr     = await cryptoHelper.getNewFundedAddress("DISPENSER.PERTOK.BUYER", COIN, NETWORK, null, "legacy", 0, 1)
-    let oracleAddr    = await cryptoHelper.getNewFundedAddress("DISPENSER.PERTOK.SRC", COIN, NETWORK, null, "legacy", 0, 1)
-    let dispenserAddress = dispenserAddr["address"]
-    let buyerAddress     = buyerAddr["address"]
-    let oracleAddress    = oracleAddr["address"]
-    let tick = "DISPPTOK"+dispenserAddress.substring(dispenserAddress.length-8)
+    const dispenserAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.PERTOK", COIN, NETWORK, null, "legacy", 0, 1)
+    const buyerAddr     = await cryptoHelper.getNewFundedAddress("DISPENSER.PERTOK.BUYER", COIN, NETWORK, null, "legacy", 0, 1)
+    const oracleAddr    = await cryptoHelper.getNewFundedAddress("DISPENSER.PERTOK.SRC", COIN, NETWORK, null, "legacy", 0, 1)
+    const dispenserAddress = dispenserAddr["address"]
+    const buyerAddress     = buyerAddr["address"]
+    const oracleAddress    = oracleAddr["address"]
+    const tick = "DISPPTOK"+dispenserAddress.substring(dispenserAddress.length-8)
 
     await issueHelper.sendIssueV0(dispenserAddr, tick, 100, 100, 0, "Per-token oracle dispenser test", 100)
-    let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+    const expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
     // Same seeding order and clock anchoring as the case above: the
     // validator snapshot must sit at or before the quote's effective_at,
     // and the quote must be effective before the create.
-    let pair       = COIN_CODE + "/" + FIAT_PERTOK
-    let coinPrice  = 50000      // 1 coin  = 50,000 fiat (validator)
-    let tokenPrice = 100        // 1 TOKEN = 100 fiat    (user oracle)
-    let giveAmount = 5          // 5 tokens per fill, so a fill costs 500 fiat
-    let chainNow   = await priceSnapshotHelper.latestBlockTime()
+    const pair       = COIN_CODE + "/" + FIAT_PERTOK
+    const coinPrice  = 50000      // 1 coin  = 50,000 fiat (validator)
+    const tokenPrice = 100        // 1 TOKEN = 100 fiat    (user oracle)
+    const giveAmount = 5          // 5 tokens per fill, so a fill costs 500 fiat
+    const chainNow   = await priceSnapshotHelper.latestBlockTime()
 
     await priceSnapshotHelper.clearPair(pair)
     await priceSnapshotHelper.seedSnapshot({
@@ -55,7 +55,7 @@ async function createPerTokenDispenser() {
         effectiveAt: chainNow - 60, actionIndex: 999000003
     })
 
-    let dispenserResult = await dispenserHelper.sendDispenserV0(
+    const dispenserResult = await dispenserHelper.sendDispenserV0(
         dispenserAddr, COIN_CODE, tick, giveAmount, 50,
         COIN_CODE, null, 0, dispenserAddr["address"],
         FIAT_PERTOK, null, oracleAddress, expiration,
@@ -71,16 +71,16 @@ async function preparePerTokenSettlement(scenario) {
     //   credit = 1 * 5                 = 5 tokens
     // Under the pre-flag-day reading this same payment credited
     // floor(5.5) * 5 = 25 tokens, i.e. five times as many.
-    let paySats = 1100000
-    let txHash = await transactionHelper.createSimpleTransaction(
+    const paySats = 1100000
+    const txHash = await transactionHelper.createSimpleTransaction(
         scenario.buyerAddr, scenario.dispenserAddress, paySats
     )
 
-    let coinAmount     = paySats / 1e8                                  // 0.011
-    let tokensAfforded = (coinAmount * scenario.coinPrice) / scenario.tokenPrice          // 5.5
-    let expectedFills  = Math.floor(tokensAfforded / scenario.giveAmount)        // 1
-    let expectedCredit = String(expectedFills * scenario.giveAmount)             // '5'
-    let perFillReading = String(Math.floor(tokensAfforded) * scenario.giveAmount) // '25'
+    const coinAmount     = paySats / 1e8                                  // 0.011
+    const tokensAfforded = (coinAmount * scenario.coinPrice) / scenario.tokenPrice          // 5.5
+    const expectedFills  = Math.floor(tokensAfforded / scenario.giveAmount)        // 1
+    const expectedCredit = String(expectedFills * scenario.giveAmount)             // '5'
+    const perFillReading = String(Math.floor(tokensAfforded) * scenario.giveAmount) // '25'
 
     return { expectedCredit, perFillReading, txHash }
 }
@@ -114,20 +114,20 @@ describe('DISPENSER', () => {
                 return
             }
 
-            let scenario = await createPerTokenDispenser()
-            let dispenserResult = scenario.dispenserResult
+            const scenario = await createPerTokenDispenser()
+            const dispenserResult = scenario.dispenserResult
             assert(dispenserResult.dispenser, "Mode 2 per-token FIAT dispenser should be created")
 
-            let settlement = await preparePerTokenSettlement(scenario)
-            let expectedCredit = settlement.expectedCredit
-            let perFillReading = settlement.perFillReading
+            const settlement = await preparePerTokenSettlement(scenario)
+            const expectedCredit = settlement.expectedCredit
+            const perFillReading = settlement.perFillReading
             assert.notStrictEqual(expectedCredit, perFillReading,
                 "the fixture must be able to tell the two readings apart")
 
-            let dispenseRow = await waitForPerTokenDispense(scenario, settlement.txHash)
+            const dispenseRow = await waitForPerTokenDispense(scenario, settlement.txHash)
             assert(dispenseRow, "per-token Mode 2 dispense should exist in DB and be valid")
 
-            let credit = await indexerDatabase.waitForCredit({
+            const credit = await indexerDatabase.waitForCredit({
                 address: scenario.buyerAddress,
                 tick: scenario.tick,
                 amount: expectedCredit

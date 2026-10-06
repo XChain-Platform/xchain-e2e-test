@@ -41,7 +41,7 @@ const { applyCapturedArmHeights } = require('./anchorArmHeight');
 // (host-process dev), under xchain-node's modules/, or staged into the
 // e2e build context by LIBRARY_BUNDLES (in-container at /XChainE2ETest/
 // xchain-hub/). Try a few well-known locations or accept an explicit override.
-function _resolveHubFile(rel){
+function internalResolveHubFile(rel){
     const candidates = [
         process.env.XCHAIN_HUB_PATH && path.join(process.env.XCHAIN_HUB_PATH, rel),
         path.resolve(__dirname, '../../xchain-hub', rel),                          // bundled into e2e image
@@ -59,25 +59,25 @@ function _resolveHubFile(rel){
     );
 }
 
-function _loadHubModule(rel){
-    return require(_resolveHubFile(rel));
+function internalLoadHubModule(rel){
+    return require(internalResolveHubFile(rel));
 }
 
-const XChainHub        = _loadHubModule('src/XChainHub.js');
-const ValidatorIdentity = _loadHubModule('src/validators/identity.js');
+const XChainHub        = internalLoadHubModule('src/XChainHub.js');
+const ValidatorIdentity = internalLoadHubModule('src/validators/identity.js');
 
 // The signing members of the rail-seeded ROLLCALL federation, as rollcallHelper's
-// roster lists the keys the seed tool stakes (test/tools/rollcallSeedFederation.test.js).
+// roster lists the keys the seed tool stakes (test/tools/rollcall_seed_federation.test.js).
 // A seeded federation run (E2E_REQUIRE_FEDERATION=1 with the rail's federation
 // mnemonic set) must sign with those keys, or every in-process hub runs as an
 // observer and refuses to co-sign. Each identity is built through the hub's own
 // ValidatorIdentity and must agree with the roster's independently derived pubkey,
 // so a drift between the two derivations fails here instead of as a silent absence.
 // Explicit identities win; a mesh larger than the signing roster keeps generated keys.
-function _resolvePresetIdentities(opts, env, rosterFn) {
+function internalResolvePresetIdentities(opts, env, rosterFn) {
     if (opts.identities) return opts.identities;
     if (env.E2E_REQUIRE_FEDERATION !== '1' || !env.XC_ROLLCALL_FEDERATION_MNEMONIC) return null;
-    const roster = (rosterFn || _seededSigningRoster)();
+    const roster = (rosterFn || internalSeededSigningRoster)();
     if (opts.count > roster.length) return null;
     return roster.slice(0, opts.count).map((member) => {
         const pubkeyHex = new ValidatorIdentity(member.seed).getPubkeyHex().toLowerCase();
@@ -90,14 +90,14 @@ function _resolvePresetIdentities(opts, env, rosterFn) {
 }
 
 // Required lazily: rollcallHelper reaches sibling repos, and most hub meshes never need it.
-function _seededSigningRoster() {
+function internalSeededSigningRoster() {
     const rollcall = require('./rollcallHelper');
     return rollcall.federationRoster().filter((member) => member.index !== rollcall.IDLE_SEED_INDEX);
 }
 
 // Check whether a TCP port is free. Used for picking unused P2P ports
 // at startup so concurrent test runs don't collide.
-function _portFree(port) {
+function internalPortFree(port) {
     return new Promise((resolve) => {
         const srv = net.createServer();
         srv.once('error', () => resolve(false));
@@ -108,12 +108,12 @@ function _portFree(port) {
 
 // The kernel's ephemeral port range, i.e. the ports it hands out to OUTBOUND
 // connections. Linux publishes it; elsewhere fall back to the common default.
-function _ephemeralRange() {
+function internalEphemeralRange() {
     try {
         const [lo, hi] = fs.readFileSync('/proc/sys/net/ipv4/ip_local_port_range', 'utf8')
             .trim().split(/\s+/).map(Number);
         if (Number.isInteger(lo) && Number.isInteger(hi) && lo < hi) return { lo, hi };
-    } catch (_) { /* not Linux, or a locked-down /proc */ }
+    } catch (internal) { /* not Linux, or a locked-down /proc */ }
     return { lo: 32768, hi: 60999 };
 }
 
@@ -132,8 +132,8 @@ function _ephemeralRange() {
 // A base inside the range jumps ABOVE it rather than below: below is where the
 // suites' own hand-assigned bases live, and landing on one of those would trade
 // a rare kernel collision for a certain harness collision.
-async function _pickFreePorts(count, base) {
-    const eph = _ephemeralRange();
+async function internalPickFreePorts(count, base) {
+    const eph = internalEphemeralRange();
     const start = (base >= eph.lo && base <= eph.hi) ? eph.hi + 1 : base;
     let p = start;
     const picked = [];
@@ -142,7 +142,7 @@ async function _pickFreePorts(count, base) {
     // read as exhausted after a single skip.
     for (let tries = 0; picked.length < count && tries < 1000 && p < 65535; tries++) {
         if (p >= eph.lo && p <= eph.hi) { p = eph.hi + 1; continue; }
-        if (await _portFree(p)) picked.push(p);
+        if (await internalPortFree(p)) picked.push(p);
         p++;
     }
     if (picked.length < count) throw new Error('MultiValidatorHub: not enough free ports near ' + start);
@@ -159,7 +159,7 @@ async function _pickFreePorts(count, base) {
 // that is green in CI reads red there (policy off-rail file: 20/2 with the rail `.env`,
 // 22/0 with it masked, 2026-09-17). A caller that names `opts.venue` owns its indexer and
 // must pass that URL; this refuses rather than silently reading the standing one.
-function _resolveMeshBtcIndexerUrl(opts, env) {
+function internalResolveMeshBtcIndexerUrl(opts, env) {
     const o = opts || {};
     const e = env || {};
     if (o.venue) {
@@ -178,10 +178,10 @@ function _resolveMeshBtcIndexerUrl(opts, env) {
 // Promise.race with a tagged-error timeout. The slow path (a hub close
 // that gets stuck on a peer drain) gets bounded so the test harness
 // can finish teardown deterministically.
-function _withTimeout(promise, ms, label){
+function internalWithTimeout(promise, ms, label){
     return Promise.race([
         promise,
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout ' + (label || '') + ' after ' + ms + 'ms')), ms))
+        new Promise((internal, reject) => setTimeout(() => reject(new Error('timeout ' + (label || '') + ' after ' + ms + 'ms')), ms))
     ]);
 }
 
@@ -211,7 +211,7 @@ class MultiValidatorHub {
         this.basePort      = opts.basePort || 28000;
         // `opts.venue` names a caller that serves its own indexer; see _resolveMeshBtcIndexerUrl.
         this.venue = opts.venue || null;
-        this.btcIndexerApiUrl = _resolveMeshBtcIndexerUrl(opts, process.env);
+        this.btcIndexerApiUrl = internalResolveMeshBtcIndexerUrl(opts, process.env);
         this.oracleEpochStart = opts.oracleEpochStart || Date.now() - 60_000;
 
         // Subsystem toggles. Attestation is the historical default (the harness was
@@ -253,7 +253,7 @@ class MultiValidatorHub {
         // live on-chain proof where the hubs' signing keys MUST equal the pubkeys staked on BTC.
         // Length must be >= count (extras ignored). A seeded federation run with none given
         // takes the seeded signing roster (_resolvePresetIdentities).
-        this.presetIdentities = _resolvePresetIdentities({ identities: opts.identities, count: this.count },
+        this.presetIdentities = internalResolvePresetIdentities({ identities: opts.identities, count: this.count },
             process.env);
 
         // Full-node tier (NODEPROOF). When `fullnode` is set, each hub receives it as
@@ -308,13 +308,13 @@ class MultiValidatorHub {
                 : ValidatorIdentity.generate());
             this.dbNames.push(this.dbNamePrefix + i);
         }
-        this.ports = await _pickFreePorts(this.count, this.basePort);
+        this.ports = await internalPickFreePorts(this.count, this.basePort);
 
         // The hub's resolveBtcIndexerUrl() reads process.env.BTC_INDEXER_API_URL
         // on every 15s poll (not just at start). Set it for the lifetime of the
         // harness and restore once on stop(); otherwise polls after start()
         // return undefined and the hubs silently never see pending requests.
-        this._savedIndexerUrl = process.env.BTC_INDEXER_API_URL;
+        this['_savedIndexerUrl'] = process.env.BTC_INDEXER_API_URL;
         process.env.BTC_INDEXER_API_URL = this.btcIndexerApiUrl;
 
         // Sequential start so logs interleave cleanly and DB creation doesn't race.
@@ -386,9 +386,9 @@ class MultiValidatorHub {
                 // point it at the offer-book mock now. The byzantine test repoints one
                 // hub's map to a divergent book after start().
                 if(this.crossChainIndexerUrls){
-                    let dex = hub.getCrossChainDex && hub.getCrossChainDex();
+                    const dex = hub.getCrossChainDex && hub.getCrossChainDex();
                     if(dex && dex.indexers){
-                        for(let coin of Object.keys(this.crossChainIndexerUrls)){
+                        for(const coin of Object.keys(this.crossChainIndexerUrls)){
                             dex.indexers[coin] = { url: this.crossChainIndexerUrls[coin], key: '' };
                         }
                     }
@@ -483,7 +483,7 @@ class MultiValidatorHub {
     async stop(){
         for (const hub of this.hubs) {
             try {
-                await _withTimeout(this._stopOne(hub), 10000, 'hub.stop');
+                await internalWithTimeout(this['_stopOne'](hub), 10000, 'hub.stop');
             } catch (e) {
                 console.warn('MultiValidatorHub: stop error:', e);
             }
@@ -492,21 +492,21 @@ class MultiValidatorHub {
 
         // Restore process.env.BTC_INDEXER_API_URL to whatever the host test
         // process had before start(), keeping the harness hermetic.
-        if (this._savedIndexerUrl === undefined) delete process.env.BTC_INDEXER_API_URL;
-        else                                      process.env.BTC_INDEXER_API_URL = this._savedIndexerUrl;
-        this._savedIndexerUrl = undefined;
+        if (this['_savedIndexerUrl'] === undefined) delete process.env.BTC_INDEXER_API_URL;
+        else                                      process.env.BTC_INDEXER_API_URL = this['_savedIndexerUrl'];
+        this['_savedIndexerUrl'] = undefined;
     }
 
-    async _stopOne(hub){
+    async ['_stopOne'](hub){
         // Stop subsystems whose poll timers + message handlers reference peerManager
         // before the WS force-close, to avoid callbacks firing after the socket is gone.
-        if (hub.getCrossChainDex && hub.getCrossChainDex() && typeof hub.getCrossChainDex().stop === 'function') await _withTimeout(hub.getCrossChainDex().stop(), 3000, 'crossChainDex.stop');
+        if (hub.getCrossChainDex && hub.getCrossChainDex() && typeof hub.getCrossChainDex().stop === 'function') await internalWithTimeout(hub.getCrossChainDex().stop(), 3000, 'crossChainDex.stop');
 
-        if (hub.attestationSpotChecker && typeof hub.attestationSpotChecker.stop === 'function') await _withTimeout(hub.attestationSpotChecker.stop(), 3000, 'attestationSpotChecker.stop');
-        if (hub.attestationRound       && typeof hub.attestationRound.stop       === 'function') await _withTimeout(hub.attestationRound.stop(),       3000, 'attestationRound.stop');
-        if (hub.attestationConsensus   && typeof hub.attestationConsensus.stop   === 'function') await _withTimeout(hub.attestationConsensus.stop(),   3000, 'attestationConsensus.stop');
-        if (hub.attestationPublisher   && typeof hub.attestationPublisher.stop   === 'function') await _withTimeout(hub.attestationPublisher.stop(),   3000, 'attestationPublisher.stop');
-        if (hub.getFullNodeChallenge   && hub.getFullNodeChallenge() && typeof hub.getFullNodeChallenge().stop === 'function') await _withTimeout(hub.getFullNodeChallenge().stop(), 3000, 'fullNodeChallenge.stop');
+        if (hub.attestationSpotChecker && typeof hub.attestationSpotChecker.stop === 'function') await internalWithTimeout(hub.attestationSpotChecker.stop(), 3000, 'attestationSpotChecker.stop');
+        if (hub.attestationRound       && typeof hub.attestationRound.stop       === 'function') await internalWithTimeout(hub.attestationRound.stop(),       3000, 'attestationRound.stop');
+        if (hub.attestationConsensus   && typeof hub.attestationConsensus.stop   === 'function') await internalWithTimeout(hub.attestationConsensus.stop(),   3000, 'attestationConsensus.stop');
+        if (hub.attestationPublisher   && typeof hub.attestationPublisher.stop   === 'function') await internalWithTimeout(hub.attestationPublisher.stop(),   3000, 'attestationPublisher.stop');
+        if (hub.getFullNodeChallenge   && hub.getFullNodeChallenge() && typeof hub.getFullNodeChallenge().stop === 'function') await internalWithTimeout(hub.getFullNodeChallenge().stop(), 3000, 'fullNodeChallenge.stop');
 
         // Force-close WS connections before peerManager.stop() so httpServer.close()
         // doesn't block waiting for a graceful drain.
@@ -528,7 +528,7 @@ class MultiValidatorHub {
             }
         }
 
-        await _withTimeout(hub.close(), 5000, 'hub.close');
+        await internalWithTimeout(hub.close(), 5000, 'hub.close');
     }
 
     // Drop the per-hub MariaDB databases. Call after stop() to clean up
@@ -554,6 +554,6 @@ class MultiValidatorHub {
 // only: the rule they encode (never hand back an ephemeral port) is invisible in
 // a passing integration run and only shows itself as a rare EADDRINUSE, so it is
 // pinned directly (test/unit/helpers/multiValidatorHubPorts.test.js).
-module.exports = { MultiValidatorHub, ValidatorIdentity, loadHubModule: _loadHubModule, resolveHubFile: _resolveHubFile,
-    pickFreePorts: _pickFreePorts, ephemeralRange: _ephemeralRange, resolveMeshBtcIndexerUrl: _resolveMeshBtcIndexerUrl,
-    resolvePresetIdentities: _resolvePresetIdentities };
+module.exports = { MultiValidatorHub, ValidatorIdentity, loadHubModule: internalLoadHubModule, resolveHubFile: internalResolveHubFile,
+    pickFreePorts: internalPickFreePorts, ephemeralRange: internalEphemeralRange, resolveMeshBtcIndexerUrl: internalResolveMeshBtcIndexerUrl,
+    resolvePresetIdentities: internalResolvePresetIdentities };

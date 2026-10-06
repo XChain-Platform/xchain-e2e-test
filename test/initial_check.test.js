@@ -1,0 +1,541 @@
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
+// Loads the env file for the requested coin from cwd (helpers/rail/coin_env.js).
+const coinEnv = require('./helpers/rail/coin_env').loadCoinEnv({ dir: process.cwd() })
+if (coinEnv.warning) console.warn('[e2e setup] WARNING: ' + coinEnv.warning)
+else if (coinEnv.reason === 'coin-file')
+    console.log('[e2e setup] env from ' + require('path').basename(coinEnv.file) +
+        (coinEnv.derived.BTC_INDEXER_API_URL ? ' (BTC indexer URL from .env)' : ''))
+
+const fs   = require('fs')
+const path = require('path')
+
+// Vendor-bundle pre-flight: warn loudly when the gitignored ./xchain-sdk or
+// ./xchain-hub directories are absent. These are staged by `xchain-node install`
+// (via LIBRARY_BUNDLES) and are not part of the repo. When missing, `npm install`
+// creates a dangling symlink in node_modules rather than failing, so SDK suites
+// crash at require() time with a cryptic MODULE_NOT_FOUND. Surface the cause here
+// so the operator knows to run `xchain-node install xchain-e2e-test` (or copy the
+// sibling directories in manually) before attempting the SDK test suites.
+const VENDOR_LIBS = ['xchain-sdk', 'xchain-hub'];
+for (const lib of VENDOR_LIBS) {
+    const libPath = path.join(__dirname, '..', lib);
+    if (!fs.existsSync(libPath)) {
+        console.warn(
+            '[e2e setup] WARNING: vendored library directory ./' + lib + ' is absent. ' +
+            'Run `xchain-node install xchain-e2e-test` (or `xchain-node update xchain-e2e-test`) ' +
+            'to stage it. The `npm run test:sdk` suites will fail at require() until it is present.'
+        );
+    }
+}
+
+const BlockchainConnector = require('../src/blockchain_connector.js')
+const XChainUtxoTrackerConnector = require('../src/XChainUtxoTrackerConnector.js')
+const XChainEncoderConnector = require('../src/XChainEncoderConnector.js')
+const XChainDecoderConnector = require('../src/XChainDecoderConnector.js')
+const XChainHubConnector = require('../src/XChainHubConnector.js')
+const XChainIndexerConnector = require('../src/XChainIndexerConnector.js')
+const XChainExplorerConnector = require('../src/XChainExplorerConnector.js')
+const RegtestMinerConnector = require('../src/regtest_miner_connector.js')
+const Database = require('../src/db.js')
+const CryptoNetworks = require('../src/crypto_networks')
+const cryptoHelper = require('./helpers/core/cryptoHelper')
+const issueHelper = require('./helpers/issueHelper')
+const gasHelper = require('./helpers/gasHelper')
+const stakeHelper = require('./helpers/stakeHelper')
+const stakeTeardown = require('./helpers/stakeTeardown')
+
+let perfCollector = null
+try { perfCollector = require('./perf/helpers/perfCollector') } catch(e) {}
+const phase = perfCollector
+    ? (name, fn) => perfCollector.phase(name, fn)
+    : (name, fn) => fn()
+
+const GAS_TICK = "XCHAIN"
+const BOOTSTRAP_ISSUE_WAIT_MS = 240000
+
+global.COIN = process.env.COIN
+global.NETWORK = process.env.NETWORK
+
+if (COIN === null || COIN === undefined){
+    const networkSplit = NETWORK.split("-")
+    global.COIN = networkSplit[0]
+    global.NETWORK = networkSplit[1]
+}
+
+// NETWORK can arrive in combined coin-network form (e.g. "bitcoin-regtest") when COIN is
+// injected separately by xchain-node. Strip the coin prefix so it is the bare network
+// ("regtest") everywhere: otherwise COIN+"-"+NETWORK doubles the coin
+// ("bitcoin-bitcoin-regtest"), getBitcoinJsNetwork misses, and bitcoinjs falls back to
+// MAINNET ("1..." addresses) which a regtest node rejects, so funding never confirms.
+if (COIN && NETWORK && NETWORK.indexOf(COIN + "-") === 0){
+    global.NETWORK = NETWORK.substring((COIN + "-").length)
+}
+
+global.NETWORK_OBJECT = CryptoNetworks.getBitcoinJsNetwork(COIN+"-"+NETWORK)
+
+const COIN_CODE_MAP = { bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' }
+global.COIN_CODE = COIN_CODE_MAP[COIN] || COIN.toUpperCase().slice(0, 3)
+
+
+const HUB_URL =  process.env.HUB_URL
+const HUB_PORT =  process.env.HUB_PORT
+let NODE_URL = process.env.NODE_URL
+let NODE_PORT = process.env.NODE_PORT
+let NODE_USER = process.env.NODE_USER
+let NODE_PASS = process.env.NODE_PASSWORD
+let DATABASE_URL = process.env.DATABASE_URL || "mariadb"
+let DATABASE_PORT = parseInt(process.env.DATABASE_PORT, 10) || 3306
+let UTXO_TRACKER_URL = process.env.UTXO_TRACKER_URL
+let UTXO_TRACKER_PORT = process.env.UTXO_TRACKER_API_PORT
+let ENCODER_URL = process.env.ENCODER_URL
+let ENCODER_PORT = process.env.ENCODER_API_PORT
+let DECODER_URL = process.env.DECODER_URL
+let DECODER_PORT = process.env.DECODER_API_PORT
+let INDEXER_URL = process.env.INDEXER_URL
+let INDEXER_PORT = process.env.INDEXER_API_PORT
+const EXPLORER_URL = process.env.EXPLORER_URL
+const EXPLORER_PORT = process.env.EXPLORER_API_PORT
+let INDEXER_DATABASE_NAME = process.env.INDEXER_DB_NAME
+let INDEXER_DATABASE_USER = process.env.INDEXER_DB_USER
+let INDEXER_DATABASE_PASS = process.env.INDEXER_DB_PASS
+let REGTEST_MINER_URL = process.env.REGTEST_MINER_URL
+let REGTEST_MINER_PORT = process.env.REGTEST_MINER_API_PORT
+
+function checkAllEnvironmentalVariables(){
+    const variableArray = [
+        NODE_URL, 
+        NODE_PORT,
+        NODE_USER,
+        NODE_PASS,
+        DATABASE_URL,
+        DATABASE_PORT,
+        UTXO_TRACKER_URL,
+        UTXO_TRACKER_PORT,
+        ENCODER_URL,
+        ENCODER_PORT,
+        DECODER_URL,
+        DECODER_PORT,
+        INDEXER_URL,
+        INDEXER_PORT,
+        EXPLORER_URL,
+        EXPLORER_PORT,
+        INDEXER_DATABASE_NAME,
+        INDEXER_DATABASE_USER,
+        INDEXER_DATABASE_PASS,
+        REGTEST_MINER_URL,
+        REGTEST_MINER_PORT
+    ]
+    
+    return variableArray.every((variable) => variable !== null && variable !== undefined)
+}
+
+// Logs presence/shape only, never any slice of the actual secret: trailing
+// characters are still the secret, and env-resolution logs land in CI output.
+function maskSecret(value){
+    if (value == null || value === undefined) return '(not set)'
+    // Presence only. A length is still information about the credential, and
+    // this output lands in CI logs.
+    return '(set)'
+}
+
+// One credential out of the hub's config tree, or a named refusal.
+// The oracle serves '[redacted]' for every password unless the getallconfigs
+// call was authorized for its credential tier, and that sentinel authenticates
+// nothing: passing it on surfaces minutes later as ER_ACCESS_DENIED or a 401 on
+// a service that looks misconfigured. An explicitly supplied environment value
+// still wins, because discovery only runs at all when some variable was missing.
+function hubCredential(hubValue, envValue, whatItIsFor){
+    if(hubValue !== XChainHubConnector.REDACTED) return hubValue
+    if(envValue) return envValue
+    return XChainHubConnector.assertUnredactedCredential(hubValue, whatItIsFor)
+}
+
+function printAllEnvironmentalVariables(){
+    console.log({
+      node_url:NODE_URL,
+      node_port:NODE_PORT,
+      node_user:maskSecret(NODE_USER),
+      node_pass:maskSecret(NODE_PASS),
+      database_url:DATABASE_URL,
+      database_port:DATABASE_PORT,
+      utxo_tracker_url:UTXO_TRACKER_URL,
+      utxo_tracker_port:UTXO_TRACKER_PORT,
+      encoder_url:ENCODER_URL,
+      encoder_port:ENCODER_PORT,
+      decoder_url:DECODER_URL,
+      decoder_port:DECODER_PORT,
+      indexer_url:INDEXER_URL,
+      indexer_port:INDEXER_PORT,
+      explorer_url:EXPLORER_URL,
+      explorer_port:EXPLORER_PORT,
+      indexer_database_name:INDEXER_DATABASE_NAME,
+      indexer_database_user:maskSecret(INDEXER_DATABASE_USER),
+      indexer_database_pass:maskSecret(INDEXER_DATABASE_PASS),
+      regtest_miner_url:REGTEST_MINER_URL,
+      regtest_miner_port:REGTEST_MINER_PORT
+    })
+}
+
+exports.mochaHooks = {
+    async beforeAll(){
+        if (perfCollector) perfCollector.startRun()
+
+        if (NETWORK === 'mainnet' && process.env.ALLOW_MAINNET !== 'true'){
+            throw new Error('Refusing to run tests against mainnet. Set ALLOW_MAINNET=true to override.')
+        }
+
+        await phase('env-resolution', async () => {
+            if (!checkAllEnvironmentalVariables()){
+                printAllEnvironmentalVariables()
+
+
+                console.log("Connecting to the hub")
+                const hubEndpoints = XChainHubConnector.parseEndpoints();
+                global.hubConnector = new XChainHubConnector(hubEndpoints)
+                const pingHub = await hubConnector.ping()
+
+                if (pingHub){
+                    const hubConfigs = await hubConnector.getAllConfig()
+
+                    if (hubConfigs){
+                        const coinNet = hubConfigs[COIN] && hubConfigs[COIN][NETWORK]
+                        if (!coinNet) {
+                            throw new Error("Hub returned no config for " + COIN + "/" + NETWORK)
+                        }
+
+                        // Hub schema uses "port" (not "server_port"); DB fields live
+                        // directly in the xchain-indexer entry (db_host/db_port/name/user/pass).
+                        NODE_URL = "localhost"
+                        NODE_PORT = coinNet["node"]["port"]
+                        NODE_USER = coinNet["node"]["user"]
+                        NODE_PASS = hubCredential(coinNet["node"]["pass"], process.env.NODE_PASS,
+                            'the node RPC password (NODE_PASS)')
+
+                        // DB config comes from the indexer's db_host/db_port fields
+                        // (hub has no top-level "database" section).
+                        DATABASE_URL = "127.0.0.1"
+                        DATABASE_PORT = coinNet["xchain-indexer"]["db_port"]
+
+                        UTXO_TRACKER_URL = "localhost"
+                        UTXO_TRACKER_PORT = coinNet["xchain-utxo-tracker"]["port"]
+
+                        ENCODER_URL = "localhost"
+                        ENCODER_PORT = coinNet["xchain-encoder"]["port"]
+
+                        DECODER_URL = "localhost"
+                        DECODER_PORT = coinNet["xchain-decoder"] && coinNet["xchain-decoder"]["port"]
+
+                        INDEXER_URL = "localhost"
+                        INDEXER_PORT = coinNet["xchain-indexer"]["port"]
+                        INDEXER_DATABASE_NAME = coinNet["xchain-indexer"]["name"]
+                        INDEXER_DATABASE_USER = coinNet["xchain-indexer"]["user"]
+                        INDEXER_DATABASE_PASS = hubCredential(coinNet["xchain-indexer"]["pass"],
+                            process.env.INDEXER_DATABASE_PASS, 'the indexer database password (INDEXER_DATABASE_PASS)')
+
+                        REGTEST_MINER_URL = "localhost"
+                        REGTEST_MINER_PORT = coinNet["xchain-regtest-miner"] && coinNet["xchain-regtest-miner"]["port"]
+
+                        // Explorer is not coin-scoped in the hub config tree; it
+                        // must be supplied via EXPLORER_URL / EXPLORER_API_PORT env vars.
+                        if (!EXPLORER_URL || !EXPLORER_PORT) {
+                            throw new Error("EXPLORER_URL and EXPLORER_API_PORT must be set in env; explorer is not hub-discoverable")
+                        }
+                    } else {
+                        throw new Error("There was an error trying to get all the configs from the hub")
+                    }
+                } else {
+                    const failures = (hubConnector.lastFailures && hubConnector.lastFailures.length)
+                        ? ' No hub endpoints reachable: [' + hubConnector.lastFailures.join(', ') + ']'
+                        : ''
+                    throw new Error("Can't connect to the XChain Hub." + failures)
+                }
+
+
+            }
+        })
+
+        await phase('connector-init', async () => {
+            global.nodeConnector = new BlockchainConnector(
+                NODE_URL, NODE_PORT, NODE_USER, NODE_PASS
+            )
+            global.utxoTrackerConnector = new XChainUtxoTrackerConnector(UTXO_TRACKER_URL, UTXO_TRACKER_PORT)
+            global.encoderConnector = new XChainEncoderConnector(ENCODER_URL, ENCODER_PORT, process.env.ENCODER_API_KEY || null)
+            global.decoderConnector = new XChainDecoderConnector(DECODER_URL, DECODER_PORT)
+            global.indexerConnector = new XChainIndexerConnector(INDEXER_URL, INDEXER_PORT, process.env.INDEXER_API_KEY || null)
+            global.explorerConnector = new XChainExplorerConnector(EXPLORER_URL, EXPLORER_PORT)
+            global.indexerDatabase = new Database(DATABASE_URL, DATABASE_PORT, INDEXER_DATABASE_NAME, INDEXER_DATABASE_USER, INDEXER_DATABASE_PASS)
+            global.regtestMinerConnector = new RegtestMinerConnector(REGTEST_MINER_URL, REGTEST_MINER_PORT, process.env.MINER_API_KEY || null)
+        })
+
+        await phase('service-pings', async () => {
+            try {
+                const pingNode = await nodeConnector.getNetworkInfo()
+                if (!pingNode){
+                    throw new Error("Can't connect to the node")
+                }
+            } catch (err){
+                console.log(err)
+                throw new Error("There was an error trying to connect to the node")
+            }
+
+            const pingUtxoTracker = await utxoTrackerConnector.ping()
+            if (!pingUtxoTracker){
+                throw new Error("Can't connect to the XChain Utxo Tracker module")
+            }
+
+            const pingEncoder = await encoderConnector.ping()
+            if (!pingEncoder){
+                throw new Error("Can't connect to the XChain Encoder module")
+            }
+
+            const pingDecoder = await decoderConnector.ping()
+            if (!pingDecoder){
+                throw new Error("Can't connect to the XChain Decoder module")
+            }
+
+            const pingIndexer = await indexerConnector.ping()
+            if (!pingIndexer){
+                throw new Error("Can't connect to the XChain Indexer module")
+            }
+
+            const pingExplorer = await explorerConnector.ping()
+            if (!pingExplorer){
+                throw new Error("Can't connect to the XChain Explorer module")
+            }
+
+            const pingIndexerDatabase = await indexerDatabase.ping()
+            if (!pingIndexerDatabase){
+                throw new Error("Can't connect to the XChain Indexer Database")
+            }
+
+            const pingRegtestMiner = await regtestMinerConnector.waitForReady()
+            if (!pingRegtestMiner){
+                throw new Error("Can't connect to the XChain Regtest Miner module (not ready after wait)")
+            } else {
+                await regtestMinerConnector.setMiningTime(1000, 1000)
+            }
+        })
+
+        await phase('native-fee-price-seed', async () => {
+            // Seed XCHAIN/USD + {COIN}/USD up front on EVERY chain. LTC/DOGE
+            // value the native-coin fee output against these; gas-mode BTC needs
+            // a fresh {COIN}/USD for USD-pegged contract-fee validation. Seeding
+            // here lets the very first ISSUE (incl. the GAS-token bootstrap
+            // below) and any contract action be priced. The per-action paths
+            // refresh during long runs (transactionHelper -> getNativeFeeOutput
+            // for the actions suite, sdkHelper.submit for the SDK suite), so a
+            // run past ORACLE_MAX_PRICE_AGE never ages out. See nativeFeeHelper.js.
+            //
+            // Ask the indexer where its price reads land BEFORE seeding anything. The
+            // HUB_DB_* env this process was handed is a model of the indexer's config, not
+            // the config, and a venue that sets HUB_DB_NAME on the indexer alone (the
+            // cross-chain settle recipe) moves every price lookup to the hub DB while the
+            // fixtures keep writing to the indexer's own. Both databases stay healthy and
+            // every priced action rejects `no current oracle price`. Best-effort: an
+            // indexer that does not disclose priceSource leaves the env model in force.
+            const topology = require('./helpers/hubMirrorTopology')
+            await topology.discoverReadParams()
+            const nativeFeeHelper = require('./helpers/nativeFeeHelper')
+            await nativeFeeHelper.seedGlobalPrices(true)
+        })
+
+        await phase('gas-token-check', async () => {
+            // Ensure the GAS token exists on THIS chain before any tests run. On BTC
+            // that is still a direct ISSUE: xchain-bridge.md's supply-path closure
+            // (D62) leaves BTC alone, it only closes the OFF-BTC paths. On DOGE/LTC
+            // a broadcast ISSUE of the GAS tick is refused unconditionally, even on
+            // regtest, from the commit that lands the bridge (section 4), and the
+            // token row on that chain is instead created lazily by the first
+            // XBRIDGE v2 in-leg (section 9) - so bootstrap asks gasHelper for a
+            // (throwaway) bridged balance instead of broadcasting ISSUE locally.
+            // A leg whose suites pay only native coin (the anchor legs) on a venue with no
+            // bridge relay (the GitHub rail) skips the off-BTC reservoir fill, which waits on
+            // a federation credit that never comes (R-3 attempt 5). Read here, not at load,
+            // because suites call this hook again.
+            if (process.env.E2E_GAS_BOOTSTRAP === "off" && global.COIN_CODE !== "BTC") {
+                console.log("Skipping the GAS token bootstrap on " + global.COIN_CODE + ": E2E_GAS_BOOTSTRAP=off")
+                return
+            }
+            console.log("Checking if GAS token ("+GAS_TICK+") exists...")
+            const gasTokenExists = await indexerDatabase.checkIssue({ tick: GAS_TICK, status: 'valid' })
+            if (gasTokenExists) {
+                console.log("GAS token ("+GAS_TICK+") already exists")
+                return
+            }
+
+            console.log("GAS token not found, creating it...")
+            if (global.COIN_CODE === 'BTC') {
+                // seedGas=false: this is the address that ISSUEs XCHAIN itself. On a
+                // genesis-fresh chain the gas token does not exist yet, so the default
+                // gas-seeding MINT would reject as invalid:TICK(unknown) and hang the
+                // bootstrap. Seed gas only after XCHAIN is issued below.
+                const gasAddressInfo = await cryptoHelper.getNewFundedAddress("GAS.TOKEN", COIN, NETWORK, null, "legacy", 0, 1, false)
+                // XCHAIN is an open-mint GAS faucet on testnet/regtest: anyone MINTs it (no owner
+                // check, no fee) to grab gas to play. Genesis therefore mints NO initial supply
+                // (mintSupply=0) and leaves minting unlocked + open from genesis (lockMint unset,
+                // mintStartBlock unset => 0). MAX_MINT is held high here so the e2e suite
+                // (mints 100-5000 gas per call via gasHelper) is not throttled; the real testnet
+                // bootstrap can impose a tighter per-mint cap separately.
+                await issueHelper.sendIssueV0Waiting(
+                    BOOTSTRAP_ISSUE_WAIT_MS,
+                    gasAddressInfo,
+                    GAS_TICK,
+                    100000000,   // MAX_SUPPLY
+                    100000,      // MAX_MINT (per tx): high for e2e; real faucet may cap tighter
+                    0,           // decimals
+                    "XChain GAS Token",
+                    0            // MINT_SUPPLY: faucet, no pre-minted supply
+                )
+            } else {
+                // Fill this run's gas reservoir: gasHelper mints the GAS tick on BTC
+                // and locks it across with an XBRIDGE v0 (xchain-bridge.md section 4),
+                // and that first in-leg trips the lazy, idempotent token-row creation
+                // on THIS chain (section 9), whose parameters are byte-identical to
+                // injectGasToken regardless of the amount bridged. Every later
+                // ensureGasBalance is then a local SEND from the reservoir.
+                await gasHelper.fillGasReservoir()
+            }
+            console.log("GAS token ("+GAS_TICK+") created successfully")
+        })
+
+        await phase('stake-baseline', async () => {
+            // A fixture STAKE joins the venue's REAL capability set and stays
+            // there unless a run takes it back out: on the shared BTC regtest
+            // that grew oracle_publish from 18 members to 61 and put checkpoint
+            // quorum out of reach. The policy is that a run leaves the set no
+            // larger than it found it, and this is the "found it" half - read
+            // before a single test has run, so the afterAll sweep has something
+            // to be measured against. Best-effort by design: a venue whose
+            // indexer cannot answer the capability read still runs its tests, it
+            // just says the leak check did not run.
+            global.stakeTeardownPolicy   = stakeTeardown.policy(process.env)
+            global.stakeTeardownBaseline = await stakeTeardown.readCapabilitySet({
+                indexer:    indexerConnector,
+                capability: global.stakeTeardownPolicy.capability
+            })
+
+            const b = global.stakeTeardownBaseline
+            if (!b || b.error)
+                console.log('[stake teardown] baseline for ' + global.stakeTeardownPolicy.capability +
+                            ' unreadable' + (b && b.error ? ' (' + b.error + ')' : '') +
+                            ': the end-of-run leak check will not run')
+            else
+                console.log('[stake teardown] baseline: ' + b.pubkeys.length + ' key(s) / ' +
+                            b.sources.length + ' source(s) in ' + b.capability + ' at block ' + b.blockIndex)
+        })
+    },
+
+    // After every test, wait for the regtest stack to be quiescent before
+    // the next test starts. "Quiescent" = node mempool empty AND tracker
+    // committed-height == node height. This eliminates the ordering-dependent
+    // flakes where a previous test leaves a mid-batch state that breaks the
+    // next test's encoder queries with phantom "no utxos" errors.
+    //
+    // A stack that never settled FAILS the run. This hook used to only log,
+    // reasoning that a barrier failure should not mask the real test outcome;
+    // that reasoning was the defect. A non-quiescent stack is not a barrier
+    // nuisance, it is a dirty mempool or a lagging tracker leaking into the next
+    // stateful test, which then fails for a reason that has nothing to do with
+    // what it asserts, or passes when it should not. The 15s timeout is generous
+    // for regtest under load; quiescence usually lands in < 1s on a clean stack,
+    // so reaching the throw means something is genuinely wrong. The message
+    // carries the settlement summary plus quiesce's nudge-failure tally so the
+    // failure is diagnosable rather than merely loud.
+    async afterEach(){
+        let status = null
+        try {
+            status = await utxoTrackerConnector.quiesce({
+                timeoutMs: 15000,
+                pollMs: 250,
+                regtestMiner: regtestMinerConnector,
+            })
+        } catch (err){
+            throw new Error('afterEach barrier: quiesce failed: ' + (err && err.message ? err.message : err))
+        }
+
+        if (!status || !status.ready){
+            const summary = status
+                ? `mempool=${status.mempool_size} tracker=${status.tracker_height} node=${status.node_height} lag=${status.lag}`
+                : 'no-response'
+            const mines = (status && status.mineErrors)
+                ? ` nudgeMineFailures=${status.mineErrors} lastMineError=${status.lastMineError}`
+                : ''
+            throw new Error(`afterEach barrier: stack did not reach quiescence within 15s (${summary})${mines}`)
+        }
+    },
+
+    async afterAll(){
+        await phase('teardown', async () => {
+            try{
+                await regtestMinerConnector.setDefaultMiningTime()
+            } catch (err){
+                console.log("There was a problem setting the default mining time values for the regtest miner")
+            }
+
+            // Give the venue back every stake this run created, BEFORE the wallet
+            // buffers below are zeroed: the release signs an UNSTAKE with the same
+            // source key that signed the STAKE, so it cannot run after the wipe.
+            // Under E2E_STAKE_TEARDOWN_STRICT=1 a leak throws here, which fails the
+            // run after its tests have already reported - the results are kept and
+            // the venue damage is still surfaced.
+            let teardownError = null
+            try {
+                await stakeTeardown.runTeardown({
+                    policy:   global.stakeTeardownPolicy || undefined,
+                    baseline: global.stakeTeardownBaseline || null,
+                    indexer:  global.indexerConnector || null,
+                    unstake:  async (entry) => {
+                        if (entry.contractIndex !== null && entry.contractIndex !== undefined)
+                            await stakeHelper.sendUnstakeV1(entry.addressInfo, entry.signingPubkey,
+                                                            entry.contractIndex, entry.tick)
+                        else
+                            await stakeHelper.sendUnstakeV0(entry.addressInfo, entry.signingPubkey)
+                    },
+                    // Read off `global` rather than the bare identifiers: a
+                    // bootstrap that threw before connector-init leaves these
+                    // unset, and a ReferenceError here would replace whatever
+                    // real failure the run is trying to report.
+                    mine:        async (n) => { await global.regtestMinerConnector.generateBlocks(n) },
+                    requireSync: async ()  => { await global.utxoTrackerConnector.requireSync() }
+                })
+            } catch (err) {
+                teardownError = err
+            }
+
+            if (global.wallets) {
+                for (const label of Object.keys(global.wallets)) {
+                    const w = global.wallets[label]
+                    if (w.seed && Buffer.isBuffer(w.seed)) w.seed.fill(0)
+                    if (w.addresses) {
+                        for (const addr of w.addresses) {
+                            if (addr.privateKey && Buffer.isBuffer(addr.privateKey)) addr.privateKey.fill(0)
+                        }
+                    }
+                }
+                global.wallets = {}
+            }
+
+            try {
+                if (global.indexerDatabase && global.indexerDatabase.pool) {
+                    await global.indexerDatabase.pool.end()
+                }
+            } catch (err) {
+                console.log("There was a problem closing the database connection pool")
+            }
+
+            // Raised last so the key wipe and the pool close still happen: a
+            // strict-mode leak must not leave a process holding a live pool and
+            // a wallet full of unzeroed private keys.
+            if (teardownError) throw teardownError
+        })
+    }
+}

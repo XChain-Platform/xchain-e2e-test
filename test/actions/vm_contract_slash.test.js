@@ -10,7 +10,7 @@
 
 const assert = require('assert')
 const crypto = require('crypto')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
 const stakeTeardown = require('../helpers/stakeTeardown')
 const vmHelper = require('../helpers/vmHelper')
@@ -28,7 +28,7 @@ const gasHelper = require('../helpers/gasHelper')
  */
 // Ed25519 pubkey as a 64-hex string (same pattern as contractStaking.test.js / staking.test.js).
 function newSigningPubkey(){
-    let { publicKey } = crypto.generateKeyPairSync('ed25519')
+    const { publicKey } = crypto.generateKeyPairSync('ed25519')
     return publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
 }
 

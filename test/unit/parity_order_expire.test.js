@@ -32,7 +32,7 @@
 const { expect } = require('chai');
 const {
     FAR_FUTURE, PIN_T0, PIN_STEP, ORDER_EXPIRE_AT, UNMATCHABLE_ORDER_INDEX, corpus,
-} = require('../parity/parityCorpus');
+} = require('../parity/helpers/parityCorpus');
 
 // The decoder's `dispensers.expiration` is a unixtime TIMESTAMP column; values
 // above this truncate. FAR_FUTURE must stay under it (mirrors parityCorpus).

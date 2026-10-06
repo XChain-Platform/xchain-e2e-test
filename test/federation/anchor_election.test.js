@@ -67,9 +67,9 @@ const assert = require('assert');
 const crypto = require('crypto');
 const { encode: wifEncode } = require('wif');
 
-const cryptoHelper   = require('../cryptoHelper');
-const CryptoNetworks = require('../../src/CryptoNetworks');
-const { makeSdk }    = require('../sdk/sdkHelper');
+const cryptoHelper   = require('../helpers/core/cryptoHelper');
+const CryptoNetworks = require('../../src/crypto_networks');
+const { makeSdk }    = require('../sdk/helpers/sdkHelper');
 const { MultiValidatorHub, ValidatorIdentity, loadHubModule } = require('../helpers/multiValidatorHubHelper');
 const anchorVersions = require('../helpers/anchorVersionHelper');
 
@@ -80,11 +80,11 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
     this.timeout(20 * 60 * 1000);
 
     let mvh = null, sdk = null, SAP = null;
-    let wallets   = [];   // funded addressInfo per hub, hub order
+    const wallets   = [];   // funded addressInfo per hub, hub order
     let pubkeys   = [];   // lowercase signing pubkeys, hub order
-    let published = [];   // { hub, payload, txid, phase1_txid, from }
-    let rewards   = [];   // { hub, type, round, pubkey }
-    let cpRows    = [];   // synthetic checkpoints of the FIRST bundle
+    const published = [];   // { hub, payload, txid, phase1_txid, from }
+    const rewards   = [];   // { hub, type, round, pubkey }
+    const cpRows    = [];   // synthetic checkpoints of the FIRST bundle
 
     // The bundle election key (StateAnchorPublisher.bundleElectionKey): ONE per
     // network per cycle, replacing the per-row XANCV0 key. The rank ladder is
@@ -97,7 +97,7 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
     }
 
     async function indexerQuery(sql, params){
-        let conn = await indexerDatabase.getConnection();
+        const conn = await indexerDatabase.getConnection();
         try { return await conn.query(sql, params); }
         finally { await conn.release(); }
     }
@@ -138,7 +138,7 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
         while (Date.now() < deadline) {
             let found = 0;
             for (const row of rows) {
-                let r = await indexerQuery(
+                const r = await indexerQuery(
                     'SELECT action_index FROM anchor_actions WHERE version = 0 AND chain = ? AND network = ? ' +
                     'AND block_index = ? AND checkpoint_seq = ?',
                     [row.chain, row.network, row.block_index, row.checkpoint_seq]);
@@ -173,7 +173,7 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
     // for the decoder/indexer to catch up so failover-window math is exact.
     async function waitForTip(minBlock){
         for (let i = 0; i < 60; i++) {
-            let b = await mvh.hubs[0].resolveBtcLatestBlock();
+            const b = await mvh.hubs[0].resolveBtcLatestBlock();
             if (Number.isFinite(b) && b >= minBlock) return b;
             await sleep(1000);
         }
@@ -215,7 +215,7 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
     // chains carry anchors from prior runs). v0 section rows carry their own
     // per-chain checkpoint_seq, so this reads exactly as it did per row.
     async function nextSeq(chain){
-        let r = await indexerQuery(
+        const r = await indexerQuery(
             'SELECT COALESCE(MAX(checkpoint_seq), -1) + 1 AS s FROM anchor_actions WHERE chain = ? AND network = ?',
             [chain, 'regtest']);
         return Number(r[0].s);

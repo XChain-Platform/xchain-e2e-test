@@ -15,9 +15,9 @@
 'use strict';
 
 const assert            = require('assert');
-const transactionHelper = require('../../../transactionHelper');
-const { transactionState } = require('../../../transactionHelper/lib/01_create_and_send_transaction');
-const fixture           = require('../../../attestMirror/mirrorDrillFixture');
+const transactionHelper = require('../../../helpers/core/transactionHelper');
+const { transactionState } = require('../../../helpers/core/transactionHelper/lib/01_create_and_send_transaction');
+const fixture           = require('../../../attestMirror/helpers/mirrorDrillFixture');
 const {
     listCreateWire,
     policyListsWire,
@@ -67,7 +67,7 @@ function fallbackTicks(label) {
     const space = alphabet.length ** 4;
     let seed = 0;
     for (const c of String(label)) seed = (seed * 33 + c.charCodeAt(0)) % space;
-    return Array.from({ length: 128 }, (_, offset) => {
+    return Array.from({ length: 128 }, (internal, offset) => {
         let n = (seed + offset * 7919) % space;
         let tick = '';
         for (let i = 0; i < 4; i++) { tick = alphabet[n % alphabet.length] + tick; n = Math.floor(n / alphabet.length); }

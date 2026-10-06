@@ -14,9 +14,9 @@ const FOLD_ENV = 'XC_ANCHOR_FOLD_REGTEST_ACTIVATION';
 const priorFoldEnv = process.env[FOLD_ENV];
 process.env[FOLD_ENV] = '0';
 
-const venueHooks = require('../../initialCheck.test.js').mochaHooks;
-const cryptoHelper = require('../../cryptoHelper');
-const CryptoNetworks = require('../../../src/CryptoNetworks');
+const venueHooks = require('../../initial_check.test.js').mochaHooks;
+const cryptoHelper = require('../../helpers/core/cryptoHelper');
+const CryptoNetworks = require('../../../src/crypto_networks');
 const {
     MultiValidatorHub, ValidatorIdentity, loadHubModule, resolveHubFile
 } = require('../../helpers/multiValidatorHubHelper');
@@ -43,7 +43,7 @@ let SAP = null;
 let SCE = null;
 let identities = [];
 let pubkeys = [];
-let broadcasts = [];
+const broadcasts = [];
 let foldRequests = [];
 let faultRestores = [];
 
@@ -97,7 +97,7 @@ function stageProductionSigner(addressInfo){
     for(const dep of ['xchain-sdk', 'dotenv']){
         let target;
         try { target = path.dirname(require.resolve(dep + '/package.json')); }
-        catch(_error){
+        catch(internalError){
             target = path.resolve(__dirname, '../../../../', dep);
             if(!fs.existsSync(target)) throw new Error('cannot resolve ' + dep + ' for the staged signer');
         }
@@ -338,7 +338,7 @@ async function driveAcceptance(){
     await insertCheckpoint(checkpoint);
     await insertPendingMatch();
     const leader = bundleLeader();
-    const cosigners = mvh.hubs.map((_hub, index) => index).filter((index) => index !== leader);
+    const cosigners = mvh.hubs.map((internalHub, index) => index).filter((index) => index !== leader);
     faultRestores = cosigners.map((index) => silenceFoldArchiveCosigner(mvh.hubs[index]));
 
     const flushStartedAt = Date.now();

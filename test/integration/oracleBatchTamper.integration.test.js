@@ -505,7 +505,7 @@ async function resolveLiveIndexerDb(coin, network) {
 async function waitMined(venue, txid, timeoutMs) {
     const got = await waitFor(async () => {
         let block = null;
-        try { block = await venue.blockOf(txid); } catch (_) { block = null; }
+        try { block = await venue.blockOf(txid); } catch (internal) { block = null; }
         return { ok: !!(block && Number.isFinite(Number(block.height))), block: block };
     }, { timeoutMs: timeoutMs || 240_000, intervalMs: 1000 });
     if (!got.ok) throw new Error('AT4: transaction ' + txid + ' was never mined within ' + got.waitedMs + 'ms');
@@ -537,8 +537,8 @@ describe('AT4: a post-signing tamper is refused identically by two nodes, and an
 
     // half one
     let rounds = [], parsed = null, honest = null;
-    let landed = {};                 // name -> { wire, txid, bytes, height, tamper }
-    let liveStatus = {}, replayStatus = {};
+    const landed = {};                 // name -> { wire, txid, bytes, height, tamper }
+    const liveStatus = {}, replayStatus = {};
     let livePriceRows = [], replayPriceRows = [];
     let minBlock = null, targetHeight = null;
     let priceRowDiff = null;
@@ -551,10 +551,10 @@ describe('AT4: a post-signing tamper is refused identically by two nodes, and an
     before(async function () {
         const bail = async (why) => {
             console.log('AT4 unavailable: ' + why);
-            if (signerSet)  { try { signerSet.stop(); } catch (_) { /* teardown is best effort */ } }
+            if (signerSet)  { try { signerSet.stop(); } catch (internal) { /* teardown is best effort */ } }
             if (venue)      await venue.down();
             if (replayNode) await replayNode.down();
-            if (liveConn)   { try { await liveConn.end(); } catch (_) { /* ditto */ } }
+            if (liveConn)   { try { await liveConn.end(); } catch (internal) { /* ditto */ } }
             if (hubDb)      await hubDb.stop();
             if (pinned)     pinned.restore();
             signerSet = venue = replayNode = liveConn = hubDb = pinned = null;
@@ -591,7 +591,7 @@ describe('AT4: a post-signing tamper is refused identically by two nodes, and an
         // arrive in this one and fail their signing round.
         for (const pub of venue.publishers) {
             if (pub.queuePath) pub.bufferPath = String(pub.queuePath).replace(/\.jsonl$/, '') + '.buffer.jsonl';
-            if (pub._buffer && typeof pub._buffer.clear === 'function') pub._buffer.clear();
+            if (pub['_buffer'] && typeof pub['_buffer'].clear === 'function') pub['_buffer'].clear();
         }
 
         // Every hub, not just the leader: OraclePublisher builds a signer lazily and
@@ -823,10 +823,10 @@ describe('AT4: a post-signing tamper is refused identically by two nodes, and an
     });
 
     after(async function () {
-        if (signerSet)  { try { signerSet.stop(); } catch (_) { /* teardown is best effort */ } }
+        if (signerSet)  { try { signerSet.stop(); } catch (internal) { /* teardown is best effort */ } }
         if (venue)      await venue.down();
         if (replayNode) await replayNode.down();
-        if (liveConn)   { try { await liveConn.end(); } catch (_) { /* ditto */ } }
+        if (liveConn)   { try { await liveConn.end(); } catch (internal) { /* ditto */ } }
         if (hubDb)      await hubDb.stop();
         if (pinned)     pinned.restore();
     });

@@ -30,7 +30,7 @@
  *     BRIDGE_RAIL_REPO_ROOT=<the pinned root the venue spawns from> \
  *     BRIDGE_RAIL_MINER_PAUSE_FILE=<flag file the BTC loop honours> \
  *     BRIDGE_RAIL_DOGE_MINER_PAUSE_FILE=<flag file the DOGE loop honours> \
- *     npx mocha --timeout 0 --exit --require ./test/initialCheck.test.js \
+ *     npx mocha --timeout 0 --exit --require ./test/initial_check.test.js \
  *     test/integration/bridge_rail_policy.test.js "test/integration/bridge_rail_policy.test/*.test.js"
  *
  * The federation secret is sourced from the operator's own 0600 store into the environment
@@ -96,7 +96,7 @@ bridgeRailSuite(T0, function () {
         state.evidence.engineEnv = Object.keys(overlay).sort().join(', ');
         state.evidence.btcIndexersPerHub = state.venue.btcVenue.indexers.map((ix) => ix.index + '->hub' + ix.followsHub);
         const settled = await state.venue.waitForRailSettled(GAS_TICK, { timeoutMs: 60 * 60 * 1000 });
-        assert.ok(settled, 'the XCHAIN backlog never drained: ' + JSON.stringify(state.venue._lastSettlePoll) +
+        assert.ok(settled, 'the XCHAIN backlog never drained: ' + JSON.stringify(state.venue['_lastSettlePoll']) +
             '\n' + state.venue.indexerTails(40));
         const dupes = await state.venue.duplicateSourceTransfers();
         assert.deepStrictEqual(dupes, [],

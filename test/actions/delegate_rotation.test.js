@@ -29,10 +29,10 @@
 
 const assert = require('assert')
 const crypto = require('crypto')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 
 const CAPABILITY = 'price'
 // Caller-supplied threshold (the getcapabilityvalidators RPC honours it
@@ -49,16 +49,16 @@ let K3 = null          // otherAddr's stake signing key
 let rotationSetup = null
 
 function newPubkey() {
-    let { publicKey } = crypto.generateKeyPairSync('ed25519')
+    const { publicKey } = crypto.generateKeyPairSync('ed25519')
     // Strip the 12-byte SPKI prefix → 32-byte raw Ed25519 pubkey (64 hex)
     return publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
 }
 
 // The effective signer set for CAPABILITY at the indexer's latest block.
 async function effectivePubkeys() {
-    let health = await indexerConnector.health()
+    const health = await indexerConnector.health()
     assert(health && health.lastIndexedBlock !== null, 'indexer health should report lastIndexedBlock')
-    let result = await indexerConnector.getCapabilityValidators(CAPABILITY, health.lastIndexedBlock, MIN_STAKE)
+    const result = await indexerConnector.getCapabilityValidators(CAPABILITY, health.lastIndexedBlock, MIN_STAKE)
     assert(result, 'getcapabilityvalidators should answer')
     assert(!result.error, 'getcapabilityvalidators should not error; got: ' + result.error)
     return result.validators.map(v => String(v.pubkey).toLowerCase())
@@ -69,7 +69,7 @@ async function effectivePubkeys() {
 // before the boundary is indexed would assert against the OLD set.
 async function syncPast(blockIndex) {
     await regtestMinerConnector.generateBlocks(7)
-    let ok = await indexerConnector.waitForIndexedBlock(Number(blockIndex), 90000)
+    const ok = await indexerConnector.waitForIndexedBlock(Number(blockIndex), 90000)
     assert(ok, 'indexer did not reach block ' + blockIndex + ' in time')
 }
 
@@ -102,22 +102,22 @@ describe('DELEGATE rotation: additive effective signer set (F8) + collision guar
     before(prepareRotation)
 
     it('STAKE v1 puts the stake key in the effective signer set', async function () {
-        let result = await stakeHelper.sendStakeV1(ownerAddr, STAKE_AMOUNT, K1)
+        const result = await stakeHelper.sendStakeV1(ownerAddr, STAKE_AMOUNT, K1)
         assert(result.stake, 'stake record should exist')
         assert.strictEqual(result.stake.status, 'valid')
 
         await syncPast(result.stake.activation_block)
-        let set = await effectivePubkeys()
+        const set = await effectivePubkeys()
         assert(set.includes(K1), 'K1 should be in the effective set after activation')
     })
 
     it('DELEGATE v0 ADDS the delegated key; the original stake key remains effective (additive-until-revoked)', async function () {
-        let result = await stakeHelper.sendDelegateV0(ownerAddr, K2)
+        const result = await stakeHelper.sendDelegateV0(ownerAddr, K2)
         assert(result.delegation, 'delegation record should exist')
         assert.strictEqual(result.delegation.status, 'valid')
 
         await syncPast(result.delegation.activation_block)
-        let set = await effectivePubkeys()
+        const set = await effectivePubkeys()
         assert(set.includes(K1), 'original stake key K1 must REMAIN effective after delegation')
         assert(set.includes(K2), 'delegated key K2 must be effective after activation')
     })
@@ -126,26 +126,26 @@ describe('DELEGATE rotation: additive effective signer set (F8) + collision guar
 describe('DELEGATE rotation: additive effective signer set (F8) + collision guards (F9)', function () {
     before(prepareRotation)
     it('getstakesourcebypubkey resolves both the stake key and the delegated key to the staking source', async function () {
-        let health = await indexerConnector.health()
-        let block = Number(health.lastIndexedBlock)
+        const health = await indexerConnector.health()
+        const block = Number(health.lastIndexedBlock)
 
-        let viaStake = await indexerConnector.getStakeSourceByPubkey(K1, block)
+        const viaStake = await indexerConnector.getStakeSourceByPubkey(K1, block)
         assert(viaStake && !viaStake.error, 'resolution for K1 should answer')
         assert.strictEqual(viaStake.source, ownerAddr.address, 'K1 resolves via its stakes row')
 
-        let viaDelegation = await indexerConnector.getStakeSourceByPubkey(K2, block)
+        const viaDelegation = await indexerConnector.getStakeSourceByPubkey(K2, block)
         assert(viaDelegation && !viaDelegation.error, 'resolution for K2 should answer')
         assert.strictEqual(viaDelegation.source, ownerAddr.address, 'K2 resolves via the delegations fallback')
     })
 
     it('a second source cannot delegate an already-delegated pubkey (F9)', async function () {
         // otherAddr needs its own active stake before it may DELEGATE at all.
-        let staked = await stakeHelper.sendStakeV1(otherAddr, STAKE_AMOUNT, K3)
+        const staked = await stakeHelper.sendStakeV1(otherAddr, STAKE_AMOUNT, K3)
         assert(staked.stake, 'otherAddr stake record should exist')
         assert.strictEqual(staked.stake.status, 'valid')
         await syncPast(staked.stake.activation_block)
 
-        let result = await stakeHelper.sendDelegateInvalid(otherAddr, 0, K2)
+        const result = await stakeHelper.sendDelegateInvalid(otherAddr, 0, K2)
         assert(result.delegation, 'rejected delegation row should still be recorded')
         assert.notStrictEqual(result.delegation.status, 'valid',
             'double-delegation should be rejected; got status=' + result.delegation.status)
@@ -159,9 +159,9 @@ describe('DELEGATE rotation: additive effective signer set (F8) + collision guar
     it('STAKE v1 rejects a pubkey currently held by an active delegation (mirror collision)', async function () {
         // stake-teardown-ok: rejected as "already delegated", so K2 never gains a
         // stake of its own and no capability set grows by it.
-        let msg = "STAKE|1|" + STAKE_AMOUNT + "|" + K2
-        let txHash = await transactionHelper.createAndSendTransaction(ownerAddr, msg)
-        let row = await stakeHelper.waitForAnyStake({
+        const msg = "STAKE|1|" + STAKE_AMOUNT + "|" + K2
+        const txHash = await transactionHelper.createAndSendTransaction(ownerAddr, msg)
+        const row = await stakeHelper.waitForAnyStake({
             source:        ownerAddr.address,
             signingPubkey: K2,
             txHash:        txHash
@@ -174,13 +174,13 @@ describe('DELEGATE rotation: additive effective signer set (F8) + collision guar
     })
 
     it('DELEGATE v2 revokes the ORIGINAL stake key; only the delegated key stays effective (F8)', async function () {
-        let result = await stakeHelper.sendStakeKeyRevoke(ownerAddr, K1)
+        const result = await stakeHelper.sendStakeKeyRevoke(ownerAddr, K1)
         assert(result.revocation, 'stake_key_revocations row should exist')
         assert.strictEqual(result.revocation.status, 'valid')
         assert(Number(result.revocation.deactivation_block) > 0, 'deactivation block should be set')
 
         await syncPast(result.revocation.deactivation_block)
-        let set = await effectivePubkeys()
+        const set = await effectivePubkeys()
         assert(!set.includes(K1), 'revoked stake key K1 must leave the effective set')
         assert(set.includes(K2), 'delegated key K2 must remain effective')
     })
@@ -195,19 +195,19 @@ describe('DELEGATE rotation: additive effective signer set (F8) + collision guar
     // a repeat revoke that recorded anything would be the signer-lifetime extension
     // DEL-1 exists to prevent.
     it('a second revoke of the same stake key is refused and records nothing (already revoked)', async function () {
-        let before = await indexerDatabase.checkStakeKeyRevocation({
+        const before = await indexerDatabase.checkStakeKeyRevocation({
             source: ownerAddr.address, signingPubkey: K1, status: 'valid'
         })
         assert(before, 'the first revocation must be on record before this leg runs')
 
-        let txHash = await transactionHelper.createAndSendTransaction(ownerAddr, "DELEGATE|2|" + K1)
+        const txHash = await transactionHelper.createAndSendTransaction(ownerAddr, "DELEGATE|2|" + K1)
         assert(txHash, 'the repeat revoke should broadcast')
 
         // Nothing lands, so wait the indexer past the revoke's block rather than on a row.
-        let health = await indexerConnector.health()
+        const health = await indexerConnector.health()
         await syncPast(Number(health.lastIndexedBlock) + 1)
 
-        let after = await indexerDatabase.checkStakeKeyRevocation({
+        const after = await indexerDatabase.checkStakeKeyRevocation({
             source: ownerAddr.address, signingPubkey: K1, status: 'valid'
         })
         assert(after, 'the original revocation must survive the refused repeat')
@@ -218,7 +218,7 @@ describe('DELEGATE rotation: additive effective signer set (F8) + collision guar
         assert.strictEqual(await stakeHelper.readDelegation(ownerAddr, K1), null,
             'a refused stake-key revoke must not write a delegations row either')
 
-        let set = await effectivePubkeys()
+        const set = await effectivePubkeys()
         assert(!set.includes(K1), 'K1 must stay out of the effective set')
     })
 })
@@ -229,18 +229,18 @@ describe('DELEGATE rotation: additive effective signer set (F8) + collision guar
         // A revocation suppresses only stake rows with action_index < its own.
         // The re-stake row postdates it, so K1 re-qualifies on the new amount
         // alone (the suppressed original 1000 stays suppressed).
-        let result = await stakeHelper.sendStakeV2(ownerAddr, STAKE_AMOUNT, K1)
+        const result = await stakeHelper.sendStakeV2(ownerAddr, STAKE_AMOUNT, K1)
         assert(result.stake, 're-stake record should exist')
         assert.strictEqual(result.stake.status, 'valid')
 
         await syncPast(result.stake.activation_block)
-        let set = await effectivePubkeys()
+        const set = await effectivePubkeys()
         assert(set.includes(K1), 're-staked key K1 must return to the effective set')
         assert(set.includes(K2), 'delegated key K2 must remain effective')
     })
 
     it('revoking a DELEGATED key removes it and frees the pubkey for re-delegation', async function () {
-        let revoke = await stakeHelper.sendRevokeDelegationV0(ownerAddr, K2)
+        const revoke = await stakeHelper.sendRevokeDelegationV0(ownerAddr, K2)
         assert(revoke.revocation, 'the parent delegation should be stamped deactivated')
         assert.strictEqual(revoke.revocation.status, 'valid')
 
@@ -253,7 +253,7 @@ describe('DELEGATE rotation: additive effective signer set (F8) + collision guar
 
         // The pubkey is freed (getDelegationByPubkey is deactivation-gated),
         // so a different staker can now claim it.
-        let redelegate = await stakeHelper.sendDelegateV0(otherAddr, K2)
+        const redelegate = await stakeHelper.sendDelegateV0(otherAddr, K2)
         assert(redelegate.delegation, 're-delegation record should exist')
         assert.strictEqual(redelegate.delegation.status, 'valid',
             'a revoked pubkey should be re-delegatable; got status=' + redelegate.delegation.status)
@@ -263,8 +263,8 @@ describe('DELEGATE rotation: additive effective signer set (F8) + collision guar
         assert(set.includes(K2), 'K2 must be effective again, now backed by otherAddr')
 
         // The block-scoped source resolution follows the newest delegation.
-        let health = await indexerConnector.health()
-        let resolved = await indexerConnector.getStakeSourceByPubkey(K2, Number(health.lastIndexedBlock))
+        const health = await indexerConnector.health()
+        const resolved = await indexerConnector.getStakeSourceByPubkey(K2, Number(health.lastIndexedBlock))
         assert(resolved && !resolved.error, 'resolution for re-delegated K2 should answer')
         assert.strictEqual(resolved.source, otherAddr.address, 'K2 now resolves to its new delegating source')
     })

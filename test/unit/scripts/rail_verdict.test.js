@@ -85,7 +85,7 @@ describe('rail verdict passing reports', function () {
     })
 
     it('fails the all-pending 35-case trap', function () {
-        const pending = Array.from({ length: 35 }, (_, index) =>
+        const pending = Array.from({ length: 35 }, (internal, index) =>
             testCase('pending case ' + (index + 1), '/checkout/' + ALPHA))
         const value = report([], pending)
         const result = run(value, [ALPHA])
@@ -158,7 +158,7 @@ describe('rail verdict report input', function () {
     it('ignores pending cases from unnamed files', function () {
         const value = report(
             [testCase('alpha passes', '/checkout/' + ALPHA)],
-            [testCase('root hook is pending', '/checkout/test/initialCheck.test.js')]
+            [testCase('root hook is pending', '/checkout/test/initial_check.test.js')]
         )
 
         assertResult(run(value, [ALPHA]), 0, [

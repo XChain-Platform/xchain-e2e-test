@@ -93,7 +93,7 @@ function parsePriceV0Wire(wire) {
 
 let venue = null;
 let rounds = [];
-let indexed = [];   // [{ publication, row, block }]
+const indexed = [];   // [{ publication, row, block }]
 let venueSetup = null;
 let venueFailure = null;
 

@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('./core/transactionHelper')
 const requireRow = require('./requireRow')
 
 module.exports = {
@@ -21,7 +21,7 @@ module.exports = {
       fiatAmount, oracleAddress, expiration, allowList, blockList, memo, giveOwnership,
       customOutputs, expectedStatus
     ){
-        let address = addressInfo["address"]
+        const address = addressInfo["address"]
 
         if (giveCoin == null) giveCoin = ""
         if (giveTick == null) giveTick = ""
@@ -37,12 +37,12 @@ module.exports = {
         if (giveOwnership == null) giveOwnership = ""
         // Wire-format: ownership dispenser carries empty GIVE_AMOUNT and GIVE_ESCROW.
         // The DB stores NULL for those, so waitFor must query with null (not "").
-        let giveAmountWire  = (giveOwnership == 1) ? "" : giveAmount
-        let giveEscrowWire  = (giveOwnership == 1) ? "" : giveEscrow
-        let giveAmountQuery = (giveOwnership == 1) ? null : giveAmount
-        let giveEscrowQuery = (giveOwnership == 1) ? null : giveEscrow
+        const giveAmountWire  = (giveOwnership == 1) ? "" : giveAmount
+        const giveEscrowWire  = (giveOwnership == 1) ? "" : giveEscrow
+        const giveAmountQuery = (giveOwnership == 1) ? null : giveAmount
+        const giveEscrowQuery = (giveOwnership == 1) ? null : giveEscrow
 
-        let dispenserMessage = "DISPENSER|0"
+        const dispenserMessage = "DISPENSER|0"
             +"|"+giveCoin+"|"+giveTick+"|"+giveAmountWire+"|"+giveOwnership+"|"+giveEscrowWire
             +"|"+getCoin+"|"+getTick+"|"+getAmount+"|"+getAddress
             +"|"+fiatCode+"|"+fiatAmount+"|"+oracleAddress
@@ -51,10 +51,10 @@ module.exports = {
         console.log("Creating and sending DISPENSER V0 tx...")
         // customOutputs carries the oracle usage fee output when the dispenser
         // names an ORACLE_ADDRESS whose operator charges a fee.
-        let txHash = await transactionHelper.createAndSendTransaction(
+        const txHash = await transactionHelper.createAndSendTransaction(
             addressInfo, dispenserMessage, null, Array.isArray(customOutputs) ? customOutputs : [])
 
-        let dispenserRow = requireRow(await indexerDatabase.waitForDispenser({
+        const dispenserRow = requireRow(await indexerDatabase.waitForDispenser({
             source: address, txHash: txHash,
             giveCoin: giveCoin, giveTick: giveTick,
             giveAmount: giveAmountQuery, giveEscrow: giveEscrowQuery,
@@ -73,10 +73,10 @@ module.exports = {
     },
 
     async sendDispenserCancelV1(addressInfo, dispenserActionIndex, memo){
-        let msg = "DISPENSER|1|"+dispenserActionIndex+"|"+(memo || "")
+        const msg = "DISPENSER|1|"+dispenserActionIndex+"|"+(memo || "")
 
         console.log("Creating and sending DISPENSER CANCEL V1 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for DISPENSER cancel to be indexed...")
         await new Promise(r => setTimeout(r, 5000))
@@ -90,11 +90,11 @@ module.exports = {
         if (allowList == null) allowList = ""
         if (blockList == null) blockList = ""
 
-        let msg = "DISPENSER|2|"+dispenserActionIndex
+        const msg = "DISPENSER|2|"+dispenserActionIndex
             +"|"+giveEscrow+"|"+expiration+"|"+allowList+"|"+blockList+"|"+(memo || "")
 
         console.log("Creating and sending DISPENSER EDIT V2 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for DISPENSER edit to be indexed...")
         await new Promise(r => setTimeout(r, 5000))

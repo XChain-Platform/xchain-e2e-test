@@ -148,20 +148,19 @@ describe('VM false-green guard', function() {
     });
 
     it('is itself wired into `npm run ci`', function() {
-        // A guard nothing runs is a guard nothing has. `ci` names its unit
-        // specs one by one rather than globbing, so this file is one careless
-        // edit away from never executing again, and that loss looks like green.
         const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
-        assert.ok(String(pkg.scripts.ci || '').includes(SELF),
-            'package.json scripts.ci no longer lists ' + SELF + ', so nothing in CI ' +
-            'checks that the VM-dependent suites still fail rather than skip');
+        const fullGate = fs.readFileSync(path.join(REPO_ROOT, 'bin', 'ci-full.sh'), 'utf8');
+        assert.strictEqual(pkg.scripts.ci, 'npm run ci:full');
+        assert.match(fullGate, /npm run test:unit/);
+        assert.match(pkg.scripts['test:unit'], /test\/unit\/\*\*\/\*\.test\.js/,
+            'the unit tier glob no longer collects ' + SELF);
     });
 
     it('the spvSeed suite fails, rather than skips, on a checkout that will not load', function() {
         // Named explicitly because it is the one suite in this repo that drives
         // a real contract through the real VM, and it is the suite that was
         // measured reporting 0 passing / 8 pending / exit 0 on macOS.
-        const spec = path.join('test', 'unit', 'spvSeedContract.test.js');
+        const spec = path.join('test', 'unit', 'spv_seed_contract.test.js');
         const code = codeOf(spec);
         assert.ok(/require\.resolve/.test(code),
             spec + ' must resolve the xchain-vm checkout separately from loading it, so ' +

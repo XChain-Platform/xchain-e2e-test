@@ -58,7 +58,7 @@ const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract, readContractState,
     readAppliedResponse,
     mineWhile,
-} = require("./mirrorDrillFixture")
+} = require("./helpers/mirrorDrillFixture")
 const {
     APPLIED_FIELDS, untilOrClearDogeStall, diffRows,
     waitForMirrorRowEverywhere, waitForAppliedEverywhere,
@@ -68,9 +68,9 @@ const {
     attestRequestWatermark,
     settleOrReport,
     jsonSafe,
-} = require('./mirrorDrillWaits')
+} = require('./helpers/mirrorDrillWaits')
 const vmHelper     = require('../helpers/vmHelper')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 
 const FIXED_BODY = '{"score":11,"meta":"at4-reorg"}'
 
@@ -216,6 +216,7 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
 
         await settleOrReport('at4')
         const applied = await waitForAppliedEverywhere(venue, requestId)
+        await waitForHeightWithClear(venue, 0, request.blockIndex)
         const local   = await readRequestRow(venue, 0, requestId)
         return {
             tag: tag,
@@ -339,6 +340,7 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
                 const requests = []
                 for (const ix of venue.indexers) {
                     applied.push(await readAppliedResponse(venue, ix.index, driven.requestId))
+                    // request-row-wait-ok: absence after the request block was orphaned is the assertion.
                     requests.push(await readRequestRow(venue, ix.index, driven.requestId))
                 }
                 return {

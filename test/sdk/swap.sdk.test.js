@@ -42,7 +42,7 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, mine, submitOpts, uniqueTick } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mine, submitOpts, uniqueTick } = require('./helpers/sdkHelper');
 
 function swapIndexOf(indexed) {
     const a = indexed && Array.isArray(indexed.actions) ? indexed.actions[0] : null;

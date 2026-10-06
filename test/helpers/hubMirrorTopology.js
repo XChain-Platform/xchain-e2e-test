@@ -68,12 +68,12 @@
 // network namespace while the host/port/credentials are this process's business.
 
 // Pinned by discoverReadParams(); overrides the env model everywhere below.
-let _discovered = null
+let internalDiscovered = null
 // What the indexer said about HAVING a hub database, kept apart from where that
 // database is: on the ordinary regtest stack the indexer's hub database IS its own
 // database (hub_db_sync lands the mirror tables there), so "read equals local" does not
 // mean "no mirror", and assertCoherent must key on this flag rather than on equality.
-let _discoveredHubDb = null
+let internalDiscoveredHubDb = null
 
 // `override` lets a caller that is NOT the mocha harness supply the indexer's own
 // connection directly. The three DOGE setup drivers are plain node scripts with no
@@ -81,7 +81,7 @@ let _discoveredHubDb = null
 // and without this every discovery path below would resolve to null and silently
 // fall back to the env model that mis-seeds a mirror-topology venue.
 function localParams(override){
-    let idb = override || global.indexerDatabase
+    const idb = override || global.indexerDatabase
     if (!idb) return null
     return {
         host:     idb.host,
@@ -99,7 +99,7 @@ function localParams(override){
 // BOTH host and name, or the hubDb connection is never created and the local DB is
 // used instead.
 function readParams(){
-    if (_discovered) return _discovered
+    if (internalDiscovered) return internalDiscovered
     if (process.env.HUB_DB_HOST && process.env.HUB_DB_NAME){
         return {
             host:     process.env.HUB_DB_HOST,
@@ -117,7 +117,7 @@ function readParams(){
 // carrying these tables, so seed upstream of it".
 function seedParams(){
     if (process.env.HUB_SOURCE_DB_NAME){
-        let idb = global.indexerDatabase
+        const idb = global.indexerDatabase
         return {
             host:     process.env.HUB_SOURCE_DB_HOST || process.env.HUB_DB_HOST || (idb && idb.host),
             port:     parseInt(process.env.HUB_SOURCE_DB_PORT || process.env.HUB_DB_PORT) || (idb && idb.port) || 3306,
@@ -150,9 +150,9 @@ function seedParams(){
 // `opts.local` supplies the indexer's own connection for a caller outside the mocha
 // harness (see localParams).
 async function discoverReadParams(connector, opts){
-    let probe = (opts && opts.probe) || probeTarget
-    let local = (opts && opts.local) || null
-    let c = connector || global.indexerConnector
+    const probe = (opts && opts.probe) || probeTarget
+    const local = (opts && opts.local) || null
+    const c = connector || global.indexerConnector
     if (!c || typeof c.call !== 'function') return null
 
     let sched = null
@@ -163,7 +163,7 @@ async function discoverReadParams(connector, opts){
             + ((e && e.message) ? e.message : e) + '); using the HUB_DB_* env model')
         return null
     }
-    let src = sched && !sched.error ? sched.priceSource : null
+    const src = sched && !sched.error ? sched.priceSource : null
     if (!src || typeof src.hubDb !== 'boolean'){
         // An indexer that answers feeschedule without priceSource is older than this
         // disclosure. Say so once: on a venue that sets HUB_DB_NAME this is exactly the
@@ -174,19 +174,19 @@ async function discoverReadParams(connector, opts){
     }
 
     if (!src.hubDb){
-        let own = localParams(local)
+        const own = localParams(local)
         if (!own) return null
-        _discovered = own
-        _discoveredHubDb = false
+        internalDiscovered = own
+        internalDiscoveredHubDb = false
         console.log('hubMirrorTopology: indexer reads prices from its OWN database ('
             + own.database + '); price fixtures pinned there')
-        return _discovered
+        return internalDiscovered
     }
 
     // The indexer named a hub DB. Only the NAME is authoritative: the indexer's host and
     // credentials live in its own network namespace ('mariadb:3306' inside compose is not
     // a thing this process can necessarily dial), so the coordinates stay ours.
-    let database = src.database || process.env.HUB_DB_NAME || null
+    const database = src.database || process.env.HUB_DB_NAME || null
     if (!database){
         console.log('hubMirrorTopology: WARN the indexer reads prices from a hub DB but named '
             + 'no database (mainnet withholds the name) and HUB_DB_NAME is unset, so the price '
@@ -194,31 +194,31 @@ async function discoverReadParams(connector, opts){
         return null
     }
 
-    let candidates = hubCandidates(database, local)
+    const candidates = hubCandidates(database, local)
     if (!candidates.length) return null
-    for (let cand of candidates){
+    for (const cand of candidates){
         let ok = false
         try { ok = await probe(cand) } catch (e){ ok = false }
         if (!ok) continue
-        _discovered = cand
-        _discoveredHubDb = true
+        internalDiscovered = cand
+        internalDiscoveredHubDb = true
         console.log('hubMirrorTopology: indexer reads prices from hub database ' + database
             + '; price fixtures pinned there (' + cand.host + ':' + cand.port
             + ' as ' + (cand.user || 'no user') + ')')
-        return _discovered
+        return internalDiscovered
     }
 
     // Nothing reachable. Pin the first candidate anyway: the seed will fail, and it must
     // fail while NAMING the database the indexer reads, because a silent fall-back to the
     // indexer's own database is exactly the bug this function exists to remove.
-    _discovered = candidates[0]
-    _discoveredHubDb = true
+    internalDiscovered = candidates[0]
+    internalDiscoveredHubDb = true
     console.log('hubMirrorTopology: WARN the indexer reads prices from hub database ' + database
         + ' but none of the ' + candidates.length + ' candidate connection(s) could read '
         + 'price_snapshots there. Pinning it regardless so the failure names the right '
         + 'database; set HUB_DB_HOST/HUB_DB_PORT/HUB_DB_USER/HUB_DB_PASS to credentials that '
         + 'can reach it.')
-    return _discovered
+    return internalDiscovered
 }
 
 // Coordinate sets to try for a hub database the indexer named, most explicit first.
@@ -231,17 +231,17 @@ async function discoverReadParams(connector, opts){
 //   3. the indexer connection outright, for a stack where one MariaDB holds both
 //      databases and one grant covers them.
 function hubCandidates(database, local){
-    let idb = local || global.indexerDatabase
-    let localHost = idb && idb.host
-    let localPort = (idb && idb.port) || 3306
-    let out = []
-    let add = (host, port, user, password) => {
+    const idb = local || global.indexerDatabase
+    const localHost = idb && idb.host
+    const localPort = (idb && idb.port) || 3306
+    const out = []
+    const add = (host, port, user, password) => {
         if (!host) return
-        let p = { host: host, port: port || 3306, database: database, user: user, password: password }
+        const p = { host: host, port: port || 3306, database: database, user: user, password: password }
         if (!out.some(q => sameTarget(q, p) && q.user === p.user)) out.push(p)
     }
-    let envUser = process.env.HUB_DB_USER || (idb && idb.user)
-    let envPass = process.env.HUB_DB_PASS || (idb && idb.pass)
+    const envUser = process.env.HUB_DB_USER || (idb && idb.user)
+    const envPass = process.env.HUB_DB_PASS || (idb && idb.pass)
     add(process.env.HUB_DB_HOST || localHost, parseInt(process.env.HUB_DB_PORT) || localPort, envUser, envPass)
     add(localHost, localPort, envUser, envPass)
     add(localHost, localPort, idb && idb.user, idb && idb.pass)
@@ -252,7 +252,7 @@ function hubCandidates(database, local){
 // priceSnapshotHelper.isAvailable asks, kept here so discovery pins a target it has
 // actually reached rather than one it merely constructed.
 async function probeTarget(params){
-    let mariadb = require('mariadb')
+    const mariadb = require('mariadb')
     let conn = null
     try {
         conn = await mariadb.createConnection(Object.assign({ connectTimeout: 5000 }, params))
@@ -267,10 +267,10 @@ async function probeTarget(params){
 
 // The pinned answer, or null when discovery has not run or found nothing. Exposed so a
 // caller can report which database the fixtures are actually writing to.
-function discoveredReadParams(){ return _discovered }
+function discoveredReadParams(){ return internalDiscovered }
 
 // Drop the pinned answer. For tests, and for a suite that reconfigures a venue mid-run.
-function resetDiscovery(){ _discovered = null; _discoveredHubDb = null }
+function resetDiscovery(){ internalDiscovered = null; internalDiscoveredHubDb = null }
 
 function sameTarget(a, b){
     if (!a || !b) return false
@@ -282,8 +282,8 @@ function sameTarget(a, b){
 // which is the same comparison only while no hub DB is configured, and reports the
 // mirror as "in play" on the shared-DB shortcut where no sync runs at all.
 function seedsThroughMirror(){
-    let seed = seedParams()
-    let read = readParams()
+    const seed = seedParams()
+    const read = readParams()
     if (!seed || !read) return false
     return !sameTarget(seed, read)
 }
@@ -303,8 +303,8 @@ function assertCoherent(){
     // DB) is a mirror all the same, and seeding upstream of it is exactly what the
     // replay-safe fee seed does. Measured 2026-09-08 on that stack: the guard as first
     // written refused every seed there.
-    let hubRead = (_discovered)
-        ? _discoveredHubDb === true
+    const hubRead = (internalDiscovered)
+        ? internalDiscoveredHubDb === true
         : !!(process.env.HUB_DB_HOST && process.env.HUB_DB_NAME)
     if (!hubRead){
         throw new Error(
@@ -324,8 +324,8 @@ function assertCoherent(){
 // consequence of a plain DELETE upstream. Deduped so the single-host stack opens
 // one connection, not two.
 function clearTargets(){
-    let out = []
-    for (let p of [seedParams(), readParams()]){
+    const out = []
+    for (const p of [seedParams(), readParams()]){
         if (p && !out.some(q => sameTarget(q, p))) out.push(p)
     }
     return out
@@ -385,11 +385,11 @@ function clearTargets(){
 const DEFAULT_RELAY_DB = 'XChain_Hub'
 
 function relayHubParams(defaults){
-    let d = defaults || {}
-    let idb = global.indexerDatabase
-    let localName = idb && idb.dbName
-    let envName = process.env.RELAY_HUB_DB_NAME || null
-    let sourceName = process.env.HUB_SOURCE_DB_NAME || null
+    const d = defaults || {}
+    const idb = global.indexerDatabase
+    const localName = idb && idb.dbName
+    const envName = process.env.RELAY_HUB_DB_NAME || null
+    const sourceName = process.env.HUB_SOURCE_DB_NAME || null
     let database = envName
     let source = 'RELAY_HUB_DB_NAME'
     // True once the name came from HUB_SOURCE_DB_NAME: the hub's own coordinates then
@@ -402,7 +402,7 @@ function relayHubParams(defaults){
         fromHubSource = true
     }
     if (!database){
-        let hubName = process.env.HUB_DB_NAME || null
+        const hubName = process.env.HUB_DB_NAME || null
         if (hubName && !(localName && hubName === localName)){
             database = hubName
             source = 'HUB_DB_NAME'
@@ -413,10 +413,10 @@ function relayHubParams(defaults){
                 : 'default'
         }
     }
-    let srcHost = fromHubSource ? process.env.HUB_SOURCE_DB_HOST : null
-    let srcPort = fromHubSource ? process.env.HUB_SOURCE_DB_PORT : null
-    let srcUser = fromHubSource ? process.env.HUB_SOURCE_DB_USER : null
-    let srcPass = fromHubSource ? process.env.HUB_SOURCE_DB_PASS : null
+    const srcHost = fromHubSource ? process.env.HUB_SOURCE_DB_HOST : null
+    const srcPort = fromHubSource ? process.env.HUB_SOURCE_DB_PORT : null
+    const srcUser = fromHubSource ? process.env.HUB_SOURCE_DB_USER : null
+    const srcPass = fromHubSource ? process.env.HUB_SOURCE_DB_PASS : null
     return {
         host:     process.env.RELAY_HUB_DB_HOST || srcHost || process.env.HUB_DB_HOST || d.host || '127.0.0.1',
         port:     parseInt(process.env.RELAY_HUB_DB_PORT || srcPort || process.env.HUB_DB_PORT, 10) || d.port || 3306,
@@ -457,9 +457,9 @@ function relayHubParams(defaults){
 //
 // Returns { host, port, database, user, password, source } - always a usable target.
 async function resolveDriverPriceTarget(opts){
-    let o = opts || {}
-    let envTarget = o.envTarget || null
-    let connector = (typeof o.call === 'function')
+    const o = opts || {}
+    const envTarget = o.envTarget || null
+    const connector = (typeof o.call === 'function')
         ? { call: o.call }
         : rpcConnector(o.indexerUrl)
     let pinned = null
@@ -487,14 +487,14 @@ const RPC_METHOD_NOT_FOUND = -32601
 // a fallback, since that is the one venue-specific port swap known to matter;
 // every other URL resolves to itself alone.
 function indexerRpcUrls(url){
-    let primary = String(url || '').replace(/\/+$/, '')
+    const primary = String(url || '').replace(/\/+$/, '')
     if (!primary) return []
-    let out = [primary]
+    const out = [primary]
     try {
-        let parsed = new URL(primary)
+        const parsed = new URL(primary)
         if (parsed.port === '3124'){
             parsed.port = '3004'
-            let fallback = parsed.toString().replace(/\/+$/, '')
+            const fallback = parsed.toString().replace(/\/+$/, '')
             if (fallback !== primary) out.push(fallback)
         }
     } catch (e){
@@ -508,15 +508,15 @@ function indexerRpcUrls(url){
 // its indexer keeps the env model instead of failing to start.
 function rpcConnector(url){
     if (!url) return null
-    let axios = require('axios')
-    let urls = indexerRpcUrls(url)
+    const axios = require('axios')
+    const urls = indexerRpcUrls(url)
     return { call: async (method, params) => {
         let lastError = null
         for (let i = 0; i < urls.length; i++){
-            let base = urls[i]
-            let isLast = i === urls.length - 1
+            const base = urls[i]
+            const isLast = i === urls.length - 1
             try {
-                let res = await axios.post(base.replace(/\/+$/, '') + '/api',
+                const res = await axios.post(base.replace(/\/+$/, '') + '/api',
                     { jsonrpc: '2.0', method: method, params: params || {}, id: 1 }, { timeout: 8000 })
                 if (res.data && res.data.error){
                     // A reachable indexer that simply does not know this method is not

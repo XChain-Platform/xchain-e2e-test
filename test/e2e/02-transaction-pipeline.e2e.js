@@ -9,8 +9,8 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
-const transactionHelper = require('../transactionHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 const issueHelper = require('../helpers/issueHelper')
 
 // P2WSH embeds payload chunks in the witness scripts of segwit outputs:

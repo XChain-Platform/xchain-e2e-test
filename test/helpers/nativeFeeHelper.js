@@ -74,7 +74,7 @@ const FIXTURE_ROUND_FLOOR = 990000
 
 // At most one displaced-seed re-seed (see nativeFeeSats) per this many milliseconds.
 const DISPLACED_RESEED_MIN_MS = 15000
-let _lastDisplacedReseedMs = 0
+let internalLastDisplacedReseedMs = 0
 
 // What a sender can pay when its balance cannot be read: cryptoHelper's default funding
 // is one coin, which is exactly the 100000000-sat input the encoder refused to stretch
@@ -113,13 +113,13 @@ const OWN_SEED_ROUNDS  = new Set([XCHAIN_ROUND, COIN_ROUND, XCHAIN_ROUND_NOW, CO
 // blocks mined between this check and the action's own block.
 const SEED_CHAIN_DRIFT_SECONDS = 900
 
-let _lastSeedMs = 0
-let _lastSeedAnchor = 0
+let internalLastSeedMs = 0
+let internalLastSeedAnchor = 0
 
 // See seedGlobalPrices: opt-in suppression for a venue that derives XCHAIN/USD.
 // The flag has ONE definition for the whole tree (xchainPriceConstants, imported
 // above), enforced per seed site by the guard test.
-let _noSeedAnnounced = false
+let internalNoSeedAnnounced = false
 
 // Only LTC/DOGE mandate a native fee output; BTC uses the XCHAIN-gas fallback.
 function isFeeChain(){
@@ -213,8 +213,8 @@ async function seedIntoHub(target, rows){
 // Where the last seed actually landed: { direct, hub, hubError }. Read by
 // warnIfSeedInvisible so its diagnosis matches what was written, and exposed so a
 // caller (or a drive report) can say whether this run's prices are replay-safe.
-let _lastSeedReport = null
-function lastSeedReport(){ return _lastSeedReport }
+let internalLastSeedReport = null
+function lastSeedReport(){ return internalLastSeedReport }
 
 // Seed XCHAIN/USD + {COIN}/USD so the indexer can value fees. Runs on EVERY
 // chain: native-fee chains (LTC/DOGE) value the injected fee output against
@@ -248,8 +248,8 @@ async function seedGlobalPrices(force){
     // every venue whose hub does not derive the pair, which today is all of them
     // but one.
     if (NO_PRICE_SEED) {
-        if (!_noSeedAnnounced) {
-            _noSeedAnnounced = true
+        if (!internalNoSeedAnnounced) {
+            internalNoSeedAnnounced = true
             console.log('nativeFeeHelper: XCHAIN_E2E_NO_PRICE_SEED=1; not seeding oracle prices ' +
                 '(the venue is expected to publish them itself)')
             // Suppressing the seed is necessary but NOT sufficient: rows a
@@ -274,15 +274,15 @@ async function seedGlobalPrices(force){
     }
 
     const now = Date.now()
-    const throttled = !force && (now - _lastSeedMs) < SEED_REFRESH_MS
+    const throttled = !force && (now - internalLastSeedMs) < SEED_REFRESH_MS
     // The chain clock, not the wall clock, is what ages a snapshot out. Read it
     // even while throttled so a clock jump re-seeds immediately (the read is one
     // indexed query on the suite's existing pool).
     if (throttled) {
-        if (!_lastSeedAnchor) return
+        if (!internalLastSeedAnchor) return
         let chainNow = 0
         try { chainNow = await priceSnapshotHelper.latestBlockTime() } catch (e) { return }
-        const drift = chainNow - _lastSeedAnchor
+        const drift = chainNow - internalLastSeedAnchor
         // Forward drift inside the budget is the only case that needs no work. A
         // NEGATIVE drift is not a smaller version of the same thing: it puts the
         // anchor in the future of the blocks now being mined, which the H-3 gate
@@ -381,15 +381,15 @@ async function seedGlobalPrices(force){
     await priceSnapshotHelper.clearPair('XCHAIN/USD')
     await priceSnapshotHelper.clearPair(global.COIN_CODE + '/USD')
     for (const row of rows) await priceSnapshotHelper.seedSnapshot(row)
-    _lastSeedMs = now
+    internalLastSeedMs = now
     // The CHAIN anchor is what the drift check compares against: it is the row a
     // frozen or jumped chain actually reads.
-    _lastSeedAnchor = chainTime
+    internalLastSeedAnchor = chainTime
     // Named only for the log and the visibility check below; a stubbed helper need not
     // provide it, so this stays optional rather than becoming a second contract.
     const target = (typeof priceSnapshotHelper.seedTarget === 'function')
         ? priceSnapshotHelper.seedTarget() : null
-    _lastSeedReport = { direct: target || null, hub: hubSeeded, hubError: hubError }
+    internalLastSeedReport = { direct: target || null, hub: hubSeeded, hubError: hubError }
     console.log('nativeFeeHelper: seeded oracle prices XCHAIN/USD=' + XCHAIN_USD +
         ' ' + global.COIN_CODE + '/USD=' + COIN_USD + ' (chain_time=' + chainTime +
         (wallTime > chainTime ? ', wall_time=' + wallTime : '') +
@@ -400,7 +400,7 @@ async function seedGlobalPrices(force){
     // rejects `no current oracle price` while this log says the prices are in place, and
     // the two databases involved both look healthy. Confirm it once at bootstrap, where
     // the cost is one call and the answer is unambiguous.
-    if (force) await warnIfSeedInvisible(target, _lastSeedReport)
+    if (force) await warnIfSeedInvisible(target, internalLastSeedReport)
 }
 
 // Ask the indexer whether the seed just written is the one it prices against, and say
@@ -461,11 +461,11 @@ function discoveryPollMs(){ return parseInt(process.env.NATIVE_FEE_DISCOVERY_POL
 // is spent (post-reset the indexer needs a moment to populate it); non-fee
 // chains keep the single-shot probe since they fall back to gas mode anyway.
 // Returns { enabled, destination }; cached after first resolution.
-let _feeMode = null
+let internalFeeMode = null
 async function discoverFeeMode(){
-    if (_feeMode) return _feeMode
+    if (internalFeeMode) return internalFeeMode
     const envDest = resolveFeeDestination()
-    if (envDest) { _feeMode = { enabled: true, destination: envDest }; return _feeMode }
+    if (envDest) { internalFeeMode = { enabled: true, destination: envDest }; return internalFeeMode }
     if (global.indexerConnector && typeof global.indexerConnector.call === 'function') {
         const deadline = Date.now() + discoveryTimeoutMs()
         let lastError = null
@@ -477,8 +477,8 @@ async function discoverFeeMode(){
                 if (sched && !sched.error) {
                     if (attempts > 1)
                         console.log('nativeFeeHelper: feeschedule became ready after ' + attempts + ' attempts')
-                    _feeMode = { enabled: !!sched.nativeFeeEnabled, destination: sched.feeDestination || null }
-                    return _feeMode
+                    internalFeeMode = { enabled: !!sched.nativeFeeEnabled, destination: sched.feeDestination || null }
+                    return internalFeeMode
                 }
                 lastError = (sched && sched.error) ? String(sched.error) : 'empty feeschedule response'
             } catch (e) {
@@ -503,8 +503,8 @@ async function discoverFeeMode(){
     if (isFeeChain())
         throw new Error('cannot determine native-fee mode on ' + global.COIN_CODE +
             ' (no FEE_DESTINATION env and no indexerConnector.feeschedule)')
-    _feeMode = { enabled: false, destination: null }
-    return _feeMode
+    internalFeeMode = { enabled: false, destination: null }
+    return internalFeeMode
 }
 
 // The two prices the indexer values a native fee against right now, from its own
@@ -617,7 +617,7 @@ async function sizeAt(prices, wire, source){
 }
 
 async function reseedDisplaced(why){
-    _lastDisplacedReseedMs = Date.now()
+    internalLastDisplacedReseedMs = Date.now()
     console.log('nativeFeeHelper: ' + why + '; re-seeding')
     await seedGlobalPrices(true)
     return readFeePrices()
@@ -647,7 +647,7 @@ async function nativeFeeSats(wire, source){
     let reseeded = false
     // Rate-limited: where even a fresh seed stays invisible (warnIfSeedInvisible names
     // that case), re-seeding before every action would only repeat the warning.
-    if (prices && seedDisplaced(prices) && (Date.now() - _lastDisplacedReseedMs) >= DISPLACED_RESEED_MIN_MS) {
+    if (prices && seedDisplaced(prices) && (Date.now() - internalLastDisplacedReseedMs) >= DISPLACED_RESEED_MIN_MS) {
         prices = await reseedDisplaced('the indexer no longer prices off the seed (' +
             describePrices('feeschedule', prices) + ')')
         reseeded = true

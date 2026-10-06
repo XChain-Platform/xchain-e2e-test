@@ -34,7 +34,7 @@
 const fs   = require('fs');
 const path = require('path');
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, mintGas, uniqueTick, mine, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mintGas, uniqueTick, mine, submitOpts } = require('./helpers/sdkHelper');
 
 // Load a template's REAL source from the xchain-contracts repo. That repo is
 // a sibling of the platform monorepo (and, on some venues, a separate tree
@@ -64,7 +64,8 @@ function loadTemplate(name) {
 // regex literals or `//` inside strings), so this preserves semantics exactly.
 function compactSource(src) {
     let out = '';
-    let i = 0, n = src.length;
+    let i = 0;
+    const n = src.length;
     let state = 'code'; // code | line | block | sq | dq | tpl
     while (i < n) {
         const c = src[i], d = src[i + 1];

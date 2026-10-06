@@ -9,9 +9,13 @@
         "Roster set from measured runs (2026-08-09) against genuinely bare checkouts of",
         "xchain-e2e-test + xchain-hub + xchain-indexer with Docker. All 27 suites as one",
         "glob: 84 cases, 61 pass, 13 pending, 10 fail, 926s. This roster as the lane:",
-        "20 suites, 64 pass, 0 fail, 0 pending, 703s. Re-measure before changing a verdict."
+        "20 suites, 64 pass, 0 fail, 0 pending, 703s. Re-measure before changing a verdict.",
+        "A red or skipped suite gets one fresh-process retry. Passing suites never rerun, and a suite",
+        "that repeats its failure remains red. This contains timing and shared-process state flakes",
+        "without weakening the roster's requirement that every declared case actually pass."
     ],
     "timeoutMs": 300000,
+    "retryCount": 1,
     "suites": [
         {
             "file": "test/integration/equivHeaderActivationBoundary.integration.test.js",

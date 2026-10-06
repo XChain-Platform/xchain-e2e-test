@@ -69,16 +69,20 @@ SELF="$(pwd)"
 SIB="$(cd .. && pwd)"
 
 FAILED=""
+# >>> ci-tier timer (generated block; re-run the tier wirer to update) >>>
 run_tier() {
+  if [ "${CI_TIER:-full}" = "fast" ] && [ -n "${FAILED:-}" ]; then echo; echo "ci:full ===== $1 NOT RUN (a push stops at its first red tier, its verdict already red; the full sweep runs it) ====="; return 0; fi  # ci-tier stop (generated)
   local name="$1"; shift
+  local __ci_tier_t0=$SECONDS
   echo; echo "ci:full ===== $name ====="
   if "$@"; then
-    echo "ci:full ----- $name PASS"
+    echo "ci:full ----- $name PASS ($(( SECONDS - __ci_tier_t0 ))s)"
   else
     FAILED="$FAILED [$name]"
-    echo "ci:full ----- $name FAIL"
+    echo "ci:full ----- $name FAIL ($(( SECONDS - __ci_tier_t0 ))s)"
   fi
 }
+# <<< ci-tier timer <<<
 fast_defer() {
   local name="$1"
   DEFERRED="${DEFERRED:-} [$name]"
@@ -187,6 +191,7 @@ run_tier "drift: coin consensus-pin conformance" node -e '
 # constants out of five more siblings, which would be five more deploy-key
 # secrets. The venue has all five, so the gate keeps covering them.
 run_tier "local: sleep-flake lint (lint:sleep-flake)" npm run lint:sleep-flake
+run_tier "local: request-row-wait lint (lint:request-row-wait)" npm run lint:request-row-wait
 run_tier "local: cross-repo parity suites (siblings required)" \
   env XCHAIN_REQUIRE_SIBLINGS=1 \
   ./node_modules/.bin/mocha --no-config --timeout 30000 --exit 'test/integration/parity/**/*.test.js'

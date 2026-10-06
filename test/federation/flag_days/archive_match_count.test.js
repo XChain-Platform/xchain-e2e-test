@@ -12,8 +12,8 @@ const fs = require('fs');
 const path = require('path');
 const { encode: wifEncode } = require('wif');
 
-const cryptoHelper = require('../../cryptoHelper');
-const CryptoNetworks = require('../../../src/CryptoNetworks');
+const cryptoHelper = require('../../helpers/core/cryptoHelper');
+const CryptoNetworks = require('../../../src/crypto_networks');
 const {
     MultiValidatorHub,
     ValidatorIdentity,
@@ -162,7 +162,7 @@ function checkpointFor(caseIndex){
 
 function signedMatches(caseIndex){
     const dex = mvh.hubs[0].getCrossChainDex();
-    return Array.from({ length: MATCHES_LENGTH }, (_, matchIndex) => {
+    return Array.from({ length: MATCHES_LENGTH }, (internal, matchIndex) => {
         const match = {
             match_id: crypto.createHash('sha256')
                 .update('archive-count-' + process.pid + '-' + caseIndex + '-' + matchIndex).digest('hex'),

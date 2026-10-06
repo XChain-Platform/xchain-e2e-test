@@ -8,18 +8,18 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('./core/transactionHelper')
 const requireRow = require('./requireRow')
 
 module.exports = {
     async sendDestroyV0(addressInfo, tick, amount, memo){
-        let destroyMessage = "DESTROY|0|"+tick+"|"+amount+"|"+memo
+        const destroyMessage = "DESTROY|0|"+tick+"|"+amount+"|"+memo
 
         console.log("Creating and sending DESTROY V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, destroyMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, destroyMessage)
 
         console.log("Waiting for DESTROY in the database...")
-        let destroyRow = requireRow(await indexerDatabase.waitForDestroy({
+        const destroyRow = requireRow(await indexerDatabase.waitForDestroy({
             txHash: txHash,
             source: addressInfo["address"],
             tick: tick,
@@ -28,7 +28,7 @@ module.exports = {
         }), "sendDestroyV0: DESTROY of " + amount + " " + tick + " (tx " + txHash
             + ") at status=valid")
 
-        let debitRow = requireRow(await indexerDatabase.waitForDebit({
+        const debitRow = requireRow(await indexerDatabase.waitForDebit({
             address: addressInfo["address"],
             tick: tick,
             txHash: txHash,
@@ -42,20 +42,20 @@ module.exports = {
     async sendDestroyV1(addressInfo, destroys, memo){
         // destroys = [{tick, amount}, {tick, amount}, ...]
         let destroyMessage = "DESTROY|1"
-        for (let d of destroys) {
+        for (const d of destroys) {
             destroyMessage += "|"+d.tick+"|"+d.amount
         }
         if (memo) destroyMessage += "|"+memo
 
         console.log("Creating and sending DESTROY V1 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, destroyMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, destroyMessage)
 
         // Note: indexer createDestroy uses action_index as unique key, so in a
         // multi-destroy only the last entry survives (overwrites previous ones).
         // We check the last destroy until the indexer adds a composite key.
-        let last = destroys[destroys.length - 1]
+        const last = destroys[destroys.length - 1]
         console.log("Waiting for DESTROY in the database...")
-        let destroyRow = requireRow(await indexerDatabase.waitForDestroy({
+        const destroyRow = requireRow(await indexerDatabase.waitForDestroy({
             txHash: txHash,
             source: addressInfo["address"],
             tick: last.tick,
@@ -70,17 +70,17 @@ module.exports = {
     async sendDestroyV2(addressInfo, destroys){
         // destroys = [{tick, amount, memo}, {tick, amount, memo}, ...]
         let destroyMessage = "DESTROY|2"
-        for (let d of destroys) {
+        for (const d of destroys) {
             destroyMessage += "|"+d.tick+"|"+d.amount+"|"+(d.memo || "")
         }
 
         console.log("Creating and sending DESTROY V2 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, destroyMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, destroyMessage)
 
         // Note: same indexer limitation as v1, only last destroy survives.
-        let last = destroys[destroys.length - 1]
+        const last = destroys[destroys.length - 1]
         console.log("Waiting for DESTROY in the database...")
-        let destroyRow = requireRow(await indexerDatabase.waitForDestroy({
+        const destroyRow = requireRow(await indexerDatabase.waitForDestroy({
             txHash: txHash,
             source: addressInfo["address"],
             tick: last.tick,

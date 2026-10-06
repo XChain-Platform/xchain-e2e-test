@@ -50,7 +50,7 @@ describe('attest mirror barrier attribution', function () {
             __dirname,
             '..',
             'attestMirror',
-            'at0b-barrier-attribution.test.js'
+            'at0b_barrier_attribution.test.js'
         ), 'utf8')
         assert.ok(source.includes("require('./helpers/barrierAttribution')"))
         assert.strictEqual(/^const PARKED_CLASSES\s*=/m.test(source), false)

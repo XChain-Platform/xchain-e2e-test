@@ -17,14 +17,14 @@ const assert = require('assert')
 const sinon = require('sinon')
 const fc = require('fast-check')
 
-const BlockchainConnector = require('../../src/BlockchainConnector')
+const BlockchainConnector = require('../../src/blockchain_connector')
 const XChainUtxoTrackerConnector = require('../../src/XChainUtxoTrackerConnector')
 const XChainHubConnector = require('../../src/XChainHubConnector')
-const RegtestMinerConnector = require('../../src/RegtestMinerConnector')
+const RegtestMinerConnector = require('../../src/regtest_miner_connector')
 const XChainEncoderConnector = require('../../src/XChainEncoderConnector')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector')
 
-const gen = require('./fuzz-generators')
+const gen = require('./helpers/fuzz_generators')
 
 const FC_PARAMS = { numRuns: 200 }
 
@@ -205,7 +205,7 @@ describe('Fuzz: Hub _call Response Handling', function () {
             const hub = new XChainHubConnector(['http://localhost:10000'])
 
             // Result is either the extracted value or null; never crashes.
-            await hub._call({ jsonrpc: '2.0', method: 'test', id: 1 })
+            await hub['_call']({ jsonrpc: '2.0', method: 'test', id: 1 })
             postStub.restore()
         }), { numRuns: 100 })
     })
@@ -218,7 +218,7 @@ describe('Fuzz: Hub _call Response Handling', function () {
             const hub = new XChainHubConnector(['http://localhost:10000'])
 
             try {
-                const result = await hub._call({ jsonrpc: '2.0', method: 'test', id: 1 })
+                const result = await hub['_call']({ jsonrpc: '2.0', method: 'test', id: 1 })
                 assert.strictEqual(result, null, '_call should return null on error')
             } catch {
                 // Some fuzz values may cause unexpected behavior in axios stub

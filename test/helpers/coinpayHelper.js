@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('./core/transactionHelper')
 const requireRow = require('./requireRow')
 
 module.exports = {
@@ -18,18 +18,18 @@ module.exports = {
     // @param {payeeAddress}          string  Seller's address to receive native coin
     // @param {coinAmountSatoshis}    integer Native coin amount in satoshis
     async sendCoinpayV0(addressInfo, orderMatchActionIndex, payeeAddress, coinAmountSatoshis){
-        let coinpayMessage = "COINPAY|0|"+orderMatchActionIndex
+        const coinpayMessage = "COINPAY|0|"+orderMatchActionIndex
 
         // The COINPAY transaction must include a native coin payment output
-        let customOutputs = [{ address: payeeAddress, value: coinAmountSatoshis }]
+        const customOutputs = [{ address: payeeAddress, value: coinAmountSatoshis }]
 
         console.log("Creating and sending COINPAY V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(
+        const txHash = await transactionHelper.createAndSendTransaction(
             addressInfo, coinpayMessage, null, customOutputs
         )
 
         console.log("Waiting for COINPAY in the database...")
-        let coinpay = requireRow(await indexerDatabase.waitForCoinpay({
+        const coinpay = requireRow(await indexerDatabase.waitForCoinpay({
             obligationActionIndex: orderMatchActionIndex,
             status: 'valid'
         }), "sendCoinpayV0: COINPAY against obligation " + orderMatchActionIndex

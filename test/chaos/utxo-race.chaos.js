@@ -22,7 +22,7 @@ const bitcoin = require('bitcoinjs-lib')
 const { ECPairFactory } = require('ecpair')
 const ecc = require('tiny-secp256k1')
 const ECPair = ECPairFactory(ecc)
-const { saveGlobals, restoreGlobals, GLOBAL_KEYS } = require('./chaos-helpers')
+const { saveGlobals, restoreGlobals, GLOBAL_KEYS } = require('./helpers/chaos_helpers')
 const XChainUtxoTrackerConnector = require('../../src/XChainUtxoTrackerConnector')
 
 describe('Chaos Experiment 7: UTXO Race Condition @P1', function () {
@@ -60,15 +60,15 @@ describe('Chaos Experiment 7: UTXO Race Condition @P1', function () {
             const cachedUtxos = [{ txid: 'aabb', vout: 0, value: 100000, confirmations: 1 }]
 
             // Simulate: cache populated for addrA
-            let _verifiedUtxos = cachedUtxos
-            let _verifiedUtxosAddress = addrA
+            const internalVerifiedUtxos = cachedUtxos
+            const internalVerifiedUtxosAddress = addrA
 
             // When addrB requests, cache should not match
-            const utxoListForEncoder = (_verifiedUtxosAddress === addrB && _verifiedUtxos) ? _verifiedUtxos : []
+            const utxoListForEncoder = (internalVerifiedUtxosAddress === addrB && internalVerifiedUtxos) ? internalVerifiedUtxos : []
             assert.deepStrictEqual(utxoListForEncoder, [], 'different address must not use cached UTXOs')
 
             // When addrA requests, cache should match
-            const utxoListForA = (_verifiedUtxosAddress === addrA && _verifiedUtxos) ? _verifiedUtxos : []
+            const utxoListForA = (internalVerifiedUtxosAddress === addrA && internalVerifiedUtxos) ? internalVerifiedUtxos : []
             assert.deepStrictEqual(utxoListForA, cachedUtxos, 'same address should use cached UTXOs')
         })
     })
@@ -91,17 +91,17 @@ describe('Chaos Experiment 7: UTXO Race Condition @P1', function () {
     describe('UTXO cache isolation across addresses', function () {
 
         it('cache is cleared after being consumed', function () {
-            let _verifiedUtxos = [{ txid: 'aabb', vout: 0 }]
-            let _verifiedUtxosAddress = 'addr_cached'
+            let internalVerifiedUtxos = [{ txid: 'aabb', vout: 0 }]
+            let internalVerifiedUtxosAddress = 'addr_cached'
 
             // Simulate consumption (as in createAndSendTransaction line 73-74)
-            const consumed = (_verifiedUtxosAddress === 'addr_cached' && _verifiedUtxos) ? _verifiedUtxos : []
-            _verifiedUtxos = null
-            _verifiedUtxosAddress = null
+            const consumed = (internalVerifiedUtxosAddress === 'addr_cached' && internalVerifiedUtxos) ? internalVerifiedUtxos : []
+            internalVerifiedUtxos = null
+            internalVerifiedUtxosAddress = null
 
             assert.strictEqual(consumed.length, 1, 'should have consumed the cached UTXOs')
-            assert.strictEqual(_verifiedUtxos, null, 'cache should be cleared after consumption')
-            assert.strictEqual(_verifiedUtxosAddress, null, 'cache address should be cleared')
+            assert.strictEqual(internalVerifiedUtxos, null, 'cache should be cleared after consumption')
+            assert.strictEqual(internalVerifiedUtxosAddress, null, 'cache address should be cleared')
         })
     })
 })
