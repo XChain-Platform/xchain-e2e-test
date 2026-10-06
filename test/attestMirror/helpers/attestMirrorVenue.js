@@ -88,4 +88,83 @@ function claimOfflineSuite (suite) {
     return claimLegIsolation({ leg: suite + ':offline', label: suite + 'offline' })
 }
 
-module.exports = { claimLegIsolation, claimOfflineSuite, PORT_WINDOW_SPAN }
+const CLAIMER = [
+    'const v = require(process.argv[1])',
+    'const spec = JSON.parse(process.argv[2])',
+    'try {',
+    '    const c = spec.offline ? v.claimOfflineSuite(spec.leg) : v.claimLegIsolation(spec)',
+    "    process.stdout.write('CLAIMED ' + c.file + '\\n')",
+    "    if (spec.hold) { process.stdin.resume(); process.stdin.on('end', () => { c.release(); process.exit(0) }) } else { c.release() }",
+    "} catch (e) { process.stdout.write('REFUSED ' + e.message + '\\n'); process.exit(3) }",
+].join('\n')
+
+function runClaimer (dir, spec) {
+    const child = require('child_process').spawn(process.execPath, ['-e', CLAIMER, __filename, JSON.stringify(spec)], {
+        env: Object.assign({}, process.env, { BF_LEG_CLAIM_DIR: dir }), stdio: ['pipe', 'pipe', 'inherit'],
+    })
+    const first = new Promise((resolve) => {
+        let out = ''
+        child.stdout.on('data', (d) => { out += d; if (out.includes('\n')) resolve(out.trim()) })
+        child.on('exit', () => resolve(out.trim() || 'EXITED'))
+    })
+    const stop = () => new Promise((resolve) => {
+        if (child.exitCode !== null) return resolve()
+        child.on('exit', resolve)
+        child.stdin.end()
+    })
+    return { child, first, stop }
+}
+
+/**
+ * Prove isolation with real concurrent claimers, each a separate process: a live AB leg and a
+ * live BF leg hold their claims while the BF4 and BF6 offline suites register beside them, then
+ * a duplicate label, an overlapping port window and a duplicate offline suite are each refused.
+ * Resolves with the evidence lines and throws on the first violated expectation.
+ *
+ * @param {{basePort?: number}} [opts]
+ * @returns {Promise<string[]>}
+ */
+async function proveConcurrentIsolation (opts) {
+    const base = (opts && opts.basePort) || 18000
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-bf-iso-'))
+    const held = []
+    const evidence = []
+    const count = () => fs.readdirSync(dir).filter((n) => n.endsWith('.json')).length
+    const expect = (cond, msg) => { evidence.push((cond ? 'ok ' : 'FAIL ') + msg); assert.ok(cond, msg) }
+    const attempt = (spec) => runClaimer(dir, spec).first
+    try {
+        const specs = [
+            { leg: 'ab-live', label: 'ablive', basePort: base, hold: true },
+            { leg: 'bf-live', label: 'bflive', basePort: base + PORT_WINDOW_SPAN, hold: true },
+            { leg: 'bf4', offline: true, hold: true },
+            { leg: 'bf6', offline: true, hold: true },
+        ]
+        const runs = specs.map((spec) => runClaimer(dir, spec))
+        held.push(...runs)
+        const firsts = await Promise.all(runs.map((r) => r.first))
+        firsts.forEach((out, i) => expect(out.startsWith('CLAIMED'), specs[i].leg + ' registered beside the others: ' + out))
+        const claims = fs.readdirSync(dir).filter((n) => n.endsWith('.json'))
+            .map((n) => JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')))
+        expect(claims.length === 4 && new Set(claims.map((c) => c.label)).size === 4, 'four concurrent claims on distinct DB labels')
+        expect(new Set(claims.map((c) => c.pid)).size === 4, 'four distinct claimer processes')
+        expect(claims.filter((c) => c.basePort === null).length === 2, 'the BF4 and BF6 claims carry no port window')
+        expect((await attempt({ leg: 'ab-dup', label: 'ablive', basePort: base + 500 })).startsWith('REFUSED'), 'a second leg on the live AB label is refused')
+        expect((await attempt({ leg: 'bf-clash', label: 'bfother', basePort: base + 150 })).startsWith('REFUSED'), 'an overlapping port window is refused')
+        expect((await attempt({ leg: 'bf6', offline: true })).startsWith('REFUSED'), 'a second BF6 offline claim is refused')
+        expect(count() === 4, 'refused claimers left no claim behind')
+        expect((await attempt({ leg: 'bf-free', label: 'bffree', basePort: base + 2 * PORT_WINDOW_SPAN })).startsWith('CLAIMED'), 'a non-overlapping leg is admitted')
+        await Promise.all(held.map((h) => h.stop()))
+        held.length = 0
+        expect(count() === 0, 'every claim released on exit')
+        return evidence
+    } finally {
+        await Promise.all(held.map((h) => h.stop()))
+        fs.rmSync(dir, { recursive: true, force: true })
+    }
+}
+
+if (require.main === module) {
+    proveConcurrentIsolation().then((ev) => { ev.forEach((l) => console.log(l)) }, (e) => { console.error(e.message); process.exit(1) })
+}
+
+module.exports = { claimLegIsolation, claimOfflineSuite, proveConcurrentIsolation, PORT_WINDOW_SPAN }
