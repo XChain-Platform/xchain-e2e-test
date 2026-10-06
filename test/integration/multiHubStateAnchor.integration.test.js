@@ -102,6 +102,27 @@ function crossingPair({ ltcIdx, dogeIdx }){
     };
 }
 
+// Per hub: pin the BTC tip (election + snapshot block), stub the checkpoint
+// engine's indexer view to the SHARED state, scope to BTC, and capture every
+// "on-chain" anchor broadcast instead of hitting DOGE.
+function wireHub(hub, i, members, published) {
+    hub.resolveBtcLatestBlock = async () => BLOCK_INDEX;
+    const cps = hub.stateCheckpoints;
+    cps.network = 'regtest';   // engine cached '' at construction (pre-seed)
+    cps.chains = ['BTC'];
+    cps.confirmations = 0;
+    cps.indexers.BTC = { url: 'http://stubbed', key: '' };
+    cps.indexerCall = async () => Object.assign({}, TIP);
+    const publisher = hub.stateAnchorPublisher;
+    const pinned = publisher.getActiveOraclePublishPubkeys.bind(publisher);
+    publisher.getActiveOraclePublishPubkeys = (block) =>
+        (block === null || block === undefined) ? Promise.resolve(members.slice().sort()) : pinned(block);
+    publisher.setBroadcastHook(async (payload) => {
+        published.push({ hubIndex: i, payload });
+        return { txid: 'e2e-txid-' + published.length };
+    });
+}
+
 describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function () {
     this.timeout(180_000);
 
@@ -154,26 +175,7 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         // stay the authority for who may publish.
         const members = mvh.hubs.map(h => h.stateAnchorPublisher.identity.getPubkeyHex().toLowerCase());
 
-        // Per hub: pin the BTC tip (election + snapshot block), stub the
-        // checkpoint engine's indexer view to the SHARED state, scope to BTC,
-        // and capture every "on-chain" anchor broadcast instead of hitting DOGE.
-        mvh.hubs.forEach((hub, i) => {
-            hub.resolveBtcLatestBlock = async () => BLOCK_INDEX;
-            const cps = hub.stateCheckpoints;
-            cps.network = 'regtest';   // engine cached '' at construction (pre-seed)
-            cps.chains = ['BTC'];
-            cps.confirmations = 0;
-            cps.indexers.BTC = { url: 'http://stubbed', key: '' };
-            cps.indexerCall = async () => Object.assign({}, TIP);
-            const publisher = hub.stateAnchorPublisher;
-            const pinned = publisher.getActiveOraclePublishPubkeys.bind(publisher);
-            publisher.getActiveOraclePublishPubkeys = (block) =>
-                (block === null || block === undefined) ? Promise.resolve(members.slice().sort()) : pinned(block);
-            hub.stateAnchorPublisher.setBroadcastHook(async (payload) => {
-                published.push({ hubIndex: i, payload });
-                return { txid: 'e2e-txid-' + published.length };
-            });
-        });
+        mvh.hubs.forEach((hub, i) => wireHub(hub, i, members, published));
     });
 
     after(async function () {
