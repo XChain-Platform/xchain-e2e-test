@@ -85,7 +85,8 @@ describe('Chaos Experiment 4: Malformed Encoder Response @P1', function () {
         }
 
         await assert.rejects(
-            () => transactionHelper.createAndSendTransaction(addressInfo, 'ISSUE|0|CHAOS'),
+            () => transactionHelper.createAndSendTransaction(
+                addressInfo, 'ISSUE|0|CHAOS', null, [], null, null, true),
             (err) => {
                 assert(err instanceof Error, 'should throw an Error')
                 return true
@@ -103,7 +104,8 @@ describe('Chaos Experiment 4: Malformed Encoder Response @P1', function () {
         }
 
         await assert.rejects(
-            () => transactionHelper.createAndSendTransaction(addressInfo, 'ISSUE|0|CHAOS')
+            () => transactionHelper.createAndSendTransaction(
+                addressInfo, 'ISSUE|0|CHAOS', null, [], null, null, true)
         )
         assert(broadcastStub.notCalled, 'broadcastTx must not be called with truncated PSBT')
     })
@@ -136,7 +138,8 @@ describe('Chaos Experiment 4: Malformed Encoder Response @P1', function () {
         }
 
         await assert.rejects(
-            () => transactionHelper.createAndSendTransaction(addressInfo, 'ISSUE|0|CHAOS')
+            () => transactionHelper.createAndSendTransaction(
+                addressInfo, 'ISSUE|0|CHAOS', null, [], null, null, true)
         )
         assert(broadcastStub.notCalled)
     })
@@ -150,7 +153,8 @@ describe('Chaos Experiment 4: Malformed Encoder Response @P1', function () {
         }
 
         await assert.rejects(
-            () => transactionHelper.createAndSendTransaction(addressInfo, 'ISSUE|0|CHAOS')
+            () => transactionHelper.createAndSendTransaction(
+                addressInfo, 'ISSUE|0|CHAOS', null, [], null, null, true)
         )
         assert(broadcastStub.notCalled)
     })
@@ -180,7 +184,8 @@ describe('Chaos Experiment 4: Malformed Encoder Response @P1', function () {
         }
 
         await assert.rejects(
-            () => transactionHelper.createAndSendTransaction(addressInfo, 'ISSUE|0|CHAOS'),
+            () => transactionHelper.createAndSendTransaction(
+                addressInfo, 'ISSUE|0|CHAOS', null, [], null, null, true),
             /encoder module/
         )
         assert(broadcastStub.notCalled)

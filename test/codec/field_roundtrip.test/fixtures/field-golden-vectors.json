@@ -138,6 +138,22 @@
     }
   },
   {
+    "action": "ANCHOR",
+    "version": 3,
+    "format": "VERSION|NETWORK|SNAPSHOT_BLOCK|SECTION_COUNT|...|ARCHIVE_COUNT|...|PUBLISHER|ATTEST_SIG_COUNT|...",
+    "string": "ANCHOR|3|V27Q0EU|4761388|4761388|V9FMRYG|100|V1TR04V|V1R4V2X|71d806283bdfa56b|VC9PGI8",
+    "fields": {
+      "VERSION": "3",
+      "NETWORK": "V27Q0EU",
+      "SNAPSHOT_BLOCK": "4761388",
+      "SECTION_COUNT": "4761388",
+      "...": "VC9PGI8",
+      "ARCHIVE_COUNT": "100",
+      "PUBLISHER": "V1R4V2X",
+      "ATTEST_SIG_COUNT": "71d806283bdfa56b"
+    }
+  },
+  {
     "action": "ATTEST",
     "version": 0,
     "format": "VERSION|REQUEST_ID|PROVIDER_ID|REQUEST_PAYLOAD|CALLBACK_METHOD|CALLBACK_PARAMS_JSON|REDUNDANCY|DEADLINE_BLOCKS|FEE_TICK|FEE_AMOUNT",
@@ -742,6 +758,20 @@
     }
   },
   {
+    "action": "ISSUE",
+    "version": 7,
+    "format": "VERSION|TICK|BRIDGE_CHAINS|MIN_DEPTH|LOCK_BRIDGE|MEMO",
+    "string": "ISSUE|7|FLD.SUB|VD2ZFFP|V2MD69C|0|field round trip 191183",
+    "fields": {
+      "VERSION": "7",
+      "TICK": "FLD.SUB",
+      "BRIDGE_CHAINS": "VD2ZFFP",
+      "MIN_DEPTH": "V2MD69C",
+      "LOCK_BRIDGE": "0",
+      "MEMO": "field round trip 191183"
+    }
+  },
+  {
     "action": "LINK",
     "version": 0,
     "format": "VERSION|COIN1|COIN1_ACTION_INDEX|COIN2|COIN2_ACTION_INDEX|MEMO",
@@ -1253,6 +1283,58 @@
       "CONTRACT_ACTION_INDEX": "4761388",
       "TICK": "A1B2C3",
       "QUANTITY": "VBFPL8P"
+    }
+  },
+  {
+    "action": "XBRIDGE",
+    "version": 0,
+    "format": "VERSION|DEST_COIN|DEST_ADDRESS|AMOUNT|MEMO",
+    "string": "XBRIDGE|0|VD5FSBE|mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3|12345678901234567890|field round trip 880575",
+    "fields": {
+      "VERSION": "0",
+      "DEST_COIN": "VD5FSBE",
+      "DEST_ADDRESS": "mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3",
+      "AMOUNT": "12345678901234567890",
+      "MEMO": "field round trip 880575"
+    }
+  },
+  {
+    "action": "XBRIDGE",
+    "version": 1,
+    "format": "VERSION|BTC_ADDRESS|AMOUNT|MEMO",
+    "string": "XBRIDGE|1|mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3|1|field round trip 575179",
+    "fields": {
+      "VERSION": "1",
+      "BTC_ADDRESS": "mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3",
+      "AMOUNT": "1",
+      "MEMO": "field round trip 575179"
+    }
+  },
+  {
+    "action": "XBRIDGE",
+    "version": 3,
+    "format": "VERSION|TICK|DEST_COIN|DEST_ADDRESS|AMOUNT|MEMO",
+    "string": "XBRIDGE|3|FLDTOK|VDNQVSX|mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3|10.5|field round trip 641308",
+    "fields": {
+      "VERSION": "3",
+      "TICK": "FLDTOK",
+      "DEST_COIN": "VDNQVSX",
+      "DEST_ADDRESS": "mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3",
+      "AMOUNT": "10.5",
+      "MEMO": "field round trip 641308"
+    }
+  },
+  {
+    "action": "XBRIDGE",
+    "version": 4,
+    "format": "VERSION|TICK|ORIGIN_ADDRESS|AMOUNT|MEMO",
+    "string": "XBRIDGE|4|FLDTOK|n4nbVcRRR5sEHyp2VYuLUvCyDmQmBoonoK|1.234567890123456789|field round trip 270272",
+    "fields": {
+      "VERSION": "4",
+      "TICK": "FLDTOK",
+      "ORIGIN_ADDRESS": "n4nbVcRRR5sEHyp2VYuLUvCyDmQmBoonoK",
+      "AMOUNT": "1.234567890123456789",
+      "MEMO": "field round trip 270272"
     }
   },
   {

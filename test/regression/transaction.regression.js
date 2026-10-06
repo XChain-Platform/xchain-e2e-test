@@ -137,7 +137,7 @@ describe('[regression:p0] Transaction Pipeline', function () {
             try {
                 await transactionHelper.createAndSendTransaction(
                     { address, privateKey: privKey, publicKey: keyPair.publicKey },
-                    { action: 'ISSUE' }
+                    { action: 'ISSUE' }, null, [], null, null, true
                 )
             } finally {
                 dateStub.restore()
@@ -184,7 +184,7 @@ describe('[regression:p0] Transaction Pipeline', function () {
             try {
                 await transactionHelper.createAndSendTransaction(
                     { address, privateKey: privKey, publicKey: keyPair.publicKey },
-                    {}
+                    {}, null, [], null, null, true
                 )
             } finally {
                 dateStub.restore()
