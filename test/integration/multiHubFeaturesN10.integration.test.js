@@ -55,6 +55,17 @@ const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
 const OracleConsensus = loadHubModule('src/oracle/consensus.js');
 const OracleRound     = loadHubModule('src/oracle/round.js');
+const CrossChainCallEngine = loadHubModule('src/cross_chain/call_engine.js');
+
+function defaultDispatchPushGeneration() {
+    const write = CrossChainCallEngine.prototype.writeFinalizedRow;
+    CrossChainCallEngine.prototype.writeFinalizedRow = function (ev) {
+        const row = ev && ev.row;
+        if (row && (row.push_generation === undefined || row.push_generation === null)) row.push_generation = 0;
+        return write.call(this, ev);
+    };
+    return () => { CrossChainCallEngine.prototype.writeFinalizedRow = write; };
+}
 
 const setBook = MockCrossChainOfferBook.prototype.setBook;
 MockCrossChainOfferBook.prototype.setBook = function (name, options = {}) {
@@ -72,7 +83,6 @@ const QUORUM_SIGS  = 7;          // tally > 2S/3 with equal weights => >=7 of 10
 const PEER_WAIT_MS = 60_000;     // 10-node mesh (45 connections)
 const SETTLE_MS    = 60_000;     // COMMIT propagation across 10 hubs
 const BLOCK_INDEX  = 100;
-const BLOCK_TIME   = 1700000000;
 const NETWORK      = 'regtest';
 
 // Equal-weight snapshot over the COUNT live hubs (S = COUNT*1000). No single
@@ -231,7 +241,7 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
         });
 
         it('the weighted quorum (>=7 of 10) finalizes the identical price snapshot on EVERY hub', async function () {
-            await Promise.all(mvh.hubs.map((h) => h['_wtOracle'].finalizeRound(ORACLE_ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
+            await Promise.all(mvh.hubs.map((h) => h['_wtOracle'].finalizeRound(ORACLE_ROUND, BLOCK_INDEX).catch(() => {})));
             // Each hub's own price_snapshots row is the post-condition asserted below.
             await waitFor(async () => {
                 const counts = [];
@@ -261,5 +271,11 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
 });
 
 // Run the split parts in this suite's lane; the stubbed lane ignores their directory.
-require('./multiHubFeaturesN10.integration.test/02_cross_chain_dex_match.test');
-require('./multiHubFeaturesN10.integration.test/03_xcall_dispatch_relay.test');
+describe('split parts', function () {
+    let restore;
+    before(function () { restore = defaultDispatchPushGeneration(); });
+    after(function () { if (restore) restore(); });
+
+    require('./multiHubFeaturesN10.integration.test/02_cross_chain_dex_match.test');
+    require('./multiHubFeaturesN10.integration.test/03_xcall_dispatch_relay.test');
+});
