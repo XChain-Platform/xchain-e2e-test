@@ -1,7 +1,7 @@
 const assert = require('assert')
 const { sinon, mockAxiosPost, BlockchainConnector } = require('./support/environment')
 
-describe('BlockchainConnector', function () {
+void describe('BlockchainConnector', function () {
 
     it('[regression:p0] R-CONN-001 : getNetworkInfo returns parsed JSON-RPC response', async function () {
         const node = new BlockchainConnector('localhost', 18443, 'rpcuser', 'rpcpass')

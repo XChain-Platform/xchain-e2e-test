@@ -1,7 +1,7 @@
 const assert = require('assert')
 const { XChainHubConnector } = require('./support/environment')
 
-describe('XChainHubConnector', function () {
+void describe('XChainHubConnector', function () {
 
     it('[regression:p0] R-CONN-009c : parseEndpoints parses HUB_VALIDATORS', function () {
         const orig = process.env.HUB_VALIDATORS

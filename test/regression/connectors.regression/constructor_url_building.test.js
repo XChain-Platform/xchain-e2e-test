@@ -1,7 +1,7 @@
 const assert = require('assert')
 const { BlockchainConnector, XChainUtxoTrackerConnector, XChainEncoderConnector, XChainIndexerConnector, XChainHubConnector, RegtestMinerConnector } = require('./support/environment')
 
-describe('Constructor URL building', function () {
+void describe('Constructor URL building', function () {
 
     it('[regression:p0] R-CONN-011c : all connectors build URL from host and port', function () {
         const node    = new BlockchainConnector('myhost', 1234, 'u', 'p')

@@ -1,7 +1,7 @@
 const assert = require('assert')
 const { sinon, axios, mockAxiosPost, RegtestMinerConnector } = require('./support/environment')
 
-describe('RegtestMinerConnector', function () {
+void describe('RegtestMinerConnector', function () {
 
     it('[regression:p0] R-CONN-010 : sendFunds returns funding txid', async function () {
         const stub = mockAxiosPost('txid-funded-001')

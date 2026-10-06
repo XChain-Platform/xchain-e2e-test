@@ -1,7 +1,7 @@
 const assert = require('assert')
 const { sinon, axios, mockAxiosPost, XChainIndexerConnector } = require('./support/environment')
 
-describe('XChainIndexerConnector', function () {
+void describe('XChainIndexerConnector', function () {
 
     it('[regression:p0] R-CONN-007 : ping verifies indexer is reachable', async function () {
         const stub = mockAxiosPost(true)

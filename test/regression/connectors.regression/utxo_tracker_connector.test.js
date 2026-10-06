@@ -1,7 +1,7 @@
 const assert = require('assert')
 const { sinon, mockAxiosPost, XChainUtxoTrackerConnector } = require('./support/environment')
 
-describe('XChainUtxoTrackerConnector', function () {
+void describe('XChainUtxoTrackerConnector', function () {
 
     it('[regression:p0] R-CONN-004 : getUtxosFromAddress returns UTXO array', async function () {
         const tracker = new XChainUtxoTrackerConnector('localhost', 3030)

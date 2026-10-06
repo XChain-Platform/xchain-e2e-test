@@ -1,7 +1,7 @@
 const assert = require('assert')
 const { mockAxiosPost, XChainEncoderConnector } = require('./support/environment')
 
-describe('XChainEncoderConnector', function () {
+void describe('XChainEncoderConnector', function () {
 
     it('[regression:p0] R-CONN-006 : createTx returns PSBT with correct encoding type', async function () {
         const psbtResult = { encoding: 'opreturn', psbt: 'deadbeef' }

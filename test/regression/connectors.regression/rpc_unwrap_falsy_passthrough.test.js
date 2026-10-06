@@ -1,7 +1,7 @@
 const assert = require('assert')
 const { sinon, mockAxiosPost, RegtestMinerConnector, XChainUtxoTrackerConnector } = require('./support/environment')
 
-describe('RPC unwrap falsy passthrough (uuid:d944b084)', function () {
+void describe('RPC unwrap falsy passthrough (uuid:d944b084)', function () {
     afterEach(function () { sinon.restore() })
 
     it('[regression:p1] R-CONN-012a : miner unwrap preserves falsy success payloads', async function () {

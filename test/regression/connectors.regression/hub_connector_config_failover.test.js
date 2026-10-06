@@ -1,7 +1,7 @@
 const assert = require('assert')
 const { sinon, axios, mockAxiosPost, XChainHubConnector } = require('./support/environment')
 
-describe('XChainHubConnector', function () {
+void describe('XChainHubConnector', function () {
 
     it('[regression:p0] R-CONN-008 : getAllConfig returns full service configuration', async function () {
         const config = { bitcoin: { regtest: { node: { host: 'n' } } } }

@@ -1,7 +1,7 @@
 const assert = require('assert')
 const { mockAxiosPost, RegtestMinerConnector } = require('./support/environment')
 
-describe('RegtestMinerConnector', function () {
+void describe('RegtestMinerConnector', function () {
 
     // The miner reports failure as a truthy `{error}` result, not an HTTP
     // error, so every method must throw rather than return it as a payload.

@@ -1,7 +1,7 @@
 const assert = require('assert')
 const { sinon, axios, mockAxiosPost, XChainIndexerConnector } = require('./support/environment')
 
-describe('XChainIndexerConnector', function () {
+void describe('XChainIndexerConnector', function () {
 
     // A truthy { error } envelope, a top-level JSON-RPC error and a falsy
     // result must each be handled distinctly; these pin the three legs.
