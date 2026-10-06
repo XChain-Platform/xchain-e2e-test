@@ -47,13 +47,15 @@ export default {
   mochaOptions: {
     spec: [
       'test/unit/**/*.test.js',
-      // Stubbed integration only: the one-directory-deep form skips the top-level
-      // live roots, and `ignore` skips their split-part directories.
-      'test/integration/*/**/*.test.js',
+      // Stubbed integration only: the same pinned hermetic directories as the npm script.
+      'test/integration/database/**/*.test.js',
+      'test/integration/errors/**/*.test.js',
+      'test/integration/helpers/**/*.test.js',
+      'test/integration/parity/**/*.test.js',
+      'test/integration/pipeline/**/*.test.js',
+      'test/integration/setup/**/*.test.js',
+      'test/integration/state/**/*.test.js',
     ],
-    // Same selection as package.json `test:integration:stubbed`, pinned by
-    // test/unit/scripts/stubbed_lane_hermetic.test.js.
-    ignore: ['test/integration/*.test/**'],
   },
   coverageAnalysis: 'perTest',
   timeoutMS: 60000,
