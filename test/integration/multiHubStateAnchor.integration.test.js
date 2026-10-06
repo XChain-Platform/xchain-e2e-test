@@ -56,8 +56,9 @@ const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 const eq = require('../../../xchain-hub/src/consensus/equivocation_header.js');
-const { foldArchiveCanonical } = require('../../../xchain-hub/src/anchor/publisher/canonical_forms.js');
-const { parseAnchorV3 } = require('../helpers/anchor_fold/parse_anchor_v3');
+
+const FOLD_ENV     = 'XC_ANCHOR_FOLD_REGTEST_ACTIVATION';
+const FOLD_UNARMED = '999999999';
 
 const COUNT        = 4;        // quorum 2f+1 = 3
 // Deadlines, not settles: the mesh, the checkpoint rows and the finalized match are
@@ -108,27 +109,26 @@ function crossingPair({ ltcIdx, dogeIdx }){
     };
 }
 
-// The DOGE indexer's answer for a captured broadcast: the row it would serve once the
-// anchor is mined and buried, built from the wire that was broadcast. Anything not
-// broadcast here is reported absent, so the verifier still decides every verdict.
-function servedAnchorAction(published, coin, method, params) {
+// The DOGE indexer's answer for an archive head that was broadcast: the row it serves
+// once the head is mined and buried, read back from the captured wire alone. Anything
+// not broadcast is reported absent, so the hub's own verifier still decides the verdict.
+function servedArchiveHead(published, depth, coin, method, params) {
     if (coin !== 'DOGE' || method !== 'getanchoraction') return { exists: false };
-    const hit = published.find(p => p.txid === params.txid);
-    const parsed = hit && parseAnchorV3(hit.payload);
-    const section = parsed && parsed.sections.find(x => x.chain === params.chain
-        && x.block_index === params.block_index && x.checkpoint_seq === params.checkpoint_seq);
-    if (!section || parsed.network !== params.network) return { exists: false };
+    const hit = published.find(p => p.txid === params.txid && p.payload.split('|')[1] === '1');
+    if (!hit) return { exists: false };
+    const f = hit.payload.split('|');
+    const head = { chain: f[2], network: f[3], block_index: Number(f[4]), checkpoint_seq: Number(f[9]) };
+    if (Object.keys(head).some(k => String(head[k]) !== String(params[k]))) return { exists: false };
     return {
-        exists: true, status: 'valid', confirmations: 1000, txid: hit.txid, version: 3,
-        block_hash: section.block_hash, ledger_hash: section.ledger_hash,
-        actions_hash: section.actions_hash, contract_hash: section.contract_hash
+        exists: true, status: 'valid', confirmations: depth, txid: hit.txid, version: 1,
+        block_hash: f[5], ledger_hash: f[6], actions_hash: f[7], contract_hash: f[8]
     };
 }
 
 describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function () {
     this.timeout(180_000);
 
-    let db, mvh, seed, seedCount, book;
+    let db, mvh, seed, seedCount, book, priorFoldEnv;
     const published = [];          // [{ hubIndex, payload }] captured "on-chain" anchors
 
     before(async function () {
@@ -154,6 +154,10 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
             }
         });
         await mvh.start();
+        // The mesh helper arms the anchor fold from genesis; this suite starts ahead of the
+        // fold height so the v1 archive leg is still live.
+        priorFoldEnv = process.env[FOLD_ENV];
+        process.env[FOLD_ENV] = FOLD_UNARMED;
         await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
 
         // Deterministic oracle_publish/cross_chain sets + BTC anchor block.
@@ -181,21 +185,24 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
             cps.confirmations = 0;
             cps.indexers.BTC = { url: 'http://stubbed', key: '' };
             cps.indexerCall = async () => Object.assign({}, TIP);
+            hub.capabilityRegistry = Object.assign(hub.capabilityRegistry || {}, {
+                getActiveValidators: async () => mvh.identities.map(id => id.pubkeyHex)
+            });
             const publisher = hub.stateAnchorPublisher;
             publisher.setBroadcastHook(async (payload) => {
                 const txid = 'e2e-txid-' + (published.length + 1);
                 published.push({ hubIndex: i, payload, txid });
                 return { txid };
             });
-            hub.capabilityRegistry = Object.assign(hub.capabilityRegistry || {}, {
-                getActiveValidators: async () => mvh.identities.map(id => id.pubkeyHex)
-            });
             publisher.indexers.DOGE = { url: 'http://stubbed', key: '' };
-            publisher.indexerCall = async (coin, method, params) => servedAnchorAction(published, coin, method, params);
+            publisher.indexerCall = async (coin, method, params) =>
+                servedArchiveHead(published, publisher.dogeConfirmations, coin, method, params);
         });
     });
 
     after(async function () {
+        if (priorFoldEnv === undefined) delete process.env[FOLD_ENV];
+        else process.env[FOLD_ENV] = priorFoldEnv;
         if (seed) seed.restore();
         if (seedCount) seedCount.restore();
         if (book) await book.stop();
@@ -277,19 +284,27 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
 
         // Every hub flushes; only the elected publisher proceeds. Followers
         // verify the proposed archive against their own DB and co-sign over P2P.
-        // The archive round starts on match finalization, so it can publish before this
-        // flush; the capture list is kept whole so that publish still counts.
+        // The anchor fold arms mid-chain: the archive leg runs first, ahead of the fold
+        // height, and the checkpoint anchor then publishes as v3 once the fold is armed.
+        published.length = 0;
+        await Promise.all(mvh.hubs.map(h => h.stateAnchorPublisher.startArchiveRound(
+            h.stateAnchorPublisher.resolveSigner(), BLOCK_INDEX, false)));
+        // The archive round finalizes asynchronously: the leader gathers a co-sign
+        // quorum over P2P before publishing inside checkArchiveQuorum, which can
+        // exceed a single SETTLE_MS. Poll for the v1 archive publish rather than
+        // assuming a fixed settle (a 6s window raced the quorum round and saw 0).
+        await waitFor(() => ({ ok: published.some(p => p.payload.split('|')[1] === '1') }),
+            { timeoutMs: 30000, intervalMs: 500 });
+        process.env[FOLD_ENV] = '0';
         await Promise.all(mvh.hubs.map(h => h.stateAnchorPublisher.flush()));
-        // The archive round gathers a co-sign quorum over P2P before the bundle publishes,
-        // and the XANC_FINALIZED back-fill lands behind it. Both are observable (a captured v3
+        // The checkpoint anchor and the XANC_FINALIZED back-fill ride the same round
+        // as the v1 archive and land behind it. Both are observable (a captured v3
         // publish; a batch_seq on every hub's match rows) and both are asserted
         // below, so poll for them instead of betting 500ms that the tail of the
         // round finished. Polling also anchors the "exactly one v3" count on the
         // round having completed rather than on a clock reading.
         await waitFor(async () => {
-            const bundle = published.find(p => p.payload.split('|')[1] === '3');
-            if (!bundle) return { ok: false, stage: 'v3 checkpoint anchor' };
-            if (parseAnchorV3(bundle.payload).archiveCount < 1) return { ok: false, stage: 'folded archive in the v3 bundle' };
+            if (!published.some(p => p.payload.split('|')[1] === '3')) return { ok: false, stage: 'v3 checkpoint anchor' };
             for (const hub of mvh.hubs) {
                 try {
                     const m = await hub.db.doQuery('SELECT batch_seq FROM cross_chain_matches WHERE batch_seq IS NOT NULL');
@@ -314,31 +329,28 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         // `publishers.size === 1` assumed a single publisher for both and flaked
         // ~half the time, whenever the two elections landed on different hubs.)
         assert.strictEqual(v3s.length, 1, 'exactly one v3 checkpoint anchor publishes (SPV roots present, no double-anchor)');
-        // Anchor fold is active on regtest from genesis: the archive rides inside the one
-        // v3 bundle instead of a separate v1 head, so no legacy v1 publishes.
-        assert.strictEqual(v1s.length, 0, 'no separate v1 archive publishes once the archive is folded into the v3 bundle');
+        assert.strictEqual(v1s.length, 1, 'exactly one v1 archive publishes');
 
-        // Folded archive: the wrapper section's quorum sigs cover the extended canonical
-        // that binds the batch seq, count, crc and chunk total; the archive decompresses
-        // to the match.
-        const parsed = parseAnchorV3(v3s[0].payload);
-        assert.strictEqual(parsed.archiveCount, 1, 'the v3 bundle carries the folded archive');
-        const wrapper = parsed.sections[parsed.archive.wrapperSectionIndex];
-        const canonical = foldArchiveCanonical({
-            chain: wrapper.chain, network: parsed.network, block_index: wrapper.block_index,
-            block_hash: wrapper.block_hash, ledger_hash: wrapper.ledger_hash,
-            actions_hash: wrapper.actions_hash, contract_hash: wrapper.contract_hash,
-            checkpoint_seq: wrapper.checkpoint_seq, snapshot_block: wrapper.section_snapshot_block,
-            state_root: wrapper.state_root, state_root_version: wrapper.state_root_version,
-            block_merkle_root: wrapper.block_merkle_root, block_merkle_version: wrapper.block_merkle_version
-        }, parsed.archive.matchBatchSeq, parsed.archive.matchCount, parsed.archive.batchCrc32, parsed.archive.totalChunks);
-        assert.ok(wrapper.sigs.length >= 3, 'the wrapper section carries >= 2f+1 = 3 sigs, got ' + wrapper.sigs.length);
+        // v1: quorum sigs over the extended canonical; archive decompresses to the match.
+        // The v1 archive nests the v0 raw + |batchSeq|count|crc|totalChunks, then (gate on)
+        // wraps it ONCE, and the v1 round id appends batchSeq (the R-4 v0/v1 collision fix)
+        // so v0 and its archive get DISTINCT equivocation keys. f[4]=block_index,
+        // f[9]=checkpoint_seq, f[10]=snapshot_block, f[11]=batchSeq.
+        const f = v1s[0].payload.split('|');
+        const raw = ['XCHECKPOINT', f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9], f[10],
+                   f[11], f[12], f[13], f[14]].join('|');
+        const canonical = eq.isEquivHeaderActive(f[10], 'regtest')
+            ? eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
+                f[2] + '|' + f[3] + '|' + f[4] + '|' + f[9] + '|' + f[11], 0, raw)
+            : raw;
+        const sigCount = Number(f[16]);
+        assert.ok(sigCount >= 3, 'v1 carries >= 2f+1 = 3 sigs, got ' + sigCount);
         const verifying = new Set();
-        for (const s of wrapper.sigs)
-            if (ValidatorIdentity.verify(canonical, s.sig, s.pubkey)) verifying.add(s.pubkey);
-        assert.ok(verifying.size >= 3, 'wrapper sigs must verify over the folded archive canonical');
+        for (let i = 0; i < sigCount; i++)
+            if (ValidatorIdentity.verify(canonical, f[18 + 2 * i], f[17 + 2 * i])) verifying.add(f[17 + 2 * i]);
+        assert.ok(verifying.size >= 3, 'v1 sigs must verify over the extended canonical');
 
-        const archive = JSON.parse(zlib.gunzipSync(Buffer.from(parsed.archive.archiveB64, 'base64')).toString('utf8'));
+        const archive = JSON.parse(zlib.gunzipSync(Buffer.from(f[15], 'base64url')).toString('utf8'));
         assert.ok(archive.matches.length >= 1);
         assert.ok(archive.capability_snapshots.some(s => s.capability === 'cross_chain'));
         assert.ok(archive.capability_snapshots.some(s => s.capability === 'oracle_publish'));
