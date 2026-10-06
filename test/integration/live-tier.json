@@ -108,8 +108,7 @@
         },
         {
             "file": "test/integration/multiHubStateAnchor.integration.test.js",
-            "run": false,
-            "why": "RED on a bare venue checkout: the anchor flush case requires every hub to hold a finalized cross-chain match first, which is the same round that no longer finalizes. Its sibling case passes; it returns with the DEX fix."
+            "run": true
         },
         {
             "file": "test/integration/multiHubStateAnchorN10.integration.test.js",
