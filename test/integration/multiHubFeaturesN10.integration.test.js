@@ -76,6 +76,20 @@ function equalWeights(mvh) {
 
 const ORACLE_ROUND = 100, PAIR = 'BTC/USD', PRICE = '60000';
 
+// The weight seed leaves getActiveValidatorSnapshot on its live path, an
+// indexer getactivevalidators fetch that no in-process hub can answer; serve the
+// same equal-weight set from memory so the oracle round never leaves the process.
+function seedActiveValidators(mvh, weights) {
+    const validators = weights.map((w) => ({ pubkey: w.pubkey, amount: w.weight }));
+    const restores = mvh.hubs.map((hub) => {
+        const cs = hub.capabilitySnapshot;
+        const orig = cs.getActiveValidatorSnapshot;
+        cs.getActiveValidatorSnapshot = async () => ({ validators: validators.slice(), count: validators.length, blockIndex: BLOCK_INDEX, capability: null });
+        return () => { cs.getActiveValidatorSnapshot = orig; };
+    });
+    return { restore() { restores.forEach((r) => r()); restores.length = 0; } };
+}
+
 async function attachOracle(mvh) {
     const stops = [];
     for (const hub of mvh.hubs) {
@@ -194,7 +208,7 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
     });
 
     describe('Price + Fiat oracle round (OracleConsensus) finalizes at N=10', function () {
-        let db, mvh, seed, oracle;
+        let db, mvh, seed, active, oracle;
 
         before(async function () {
             db = await startDisposableHubDb();
@@ -202,13 +216,16 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
             mvh = new MultiValidatorHub({ count: COUNT, basePort: 25000, startAttestation: false });
             await mvh.start();
             await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
-            seed   = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators: equalWeights(mvh) });
+            const weights = equalWeights(mvh);
+            seed   = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators: weights });
+            active = seedActiveValidators(mvh, weights);
             oracle = await attachOracle(mvh);
             injectSubmissions(mvh);
         });
 
         after(async function () {
             if (oracle) oracle.stop();
+            if (active) active.restore();
             if (seed) seed.restore();
             if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
             if (db)  { await db.stop(); }
