@@ -20,7 +20,7 @@
  *
  * The live suites are deliberately OUT: the top-level test/integration/*.test.js
  * roots AND the same-named test/integration/<root>.test/ directories holding
- * their split parts (the `ignore` below). They provision a Docker MariaDB
+ * their split parts (the stubbed spec list excludes them). They provision a Docker MariaDB
  * (test/helpers/disposableHubDb.js) or a regtest rail and skip themselves when
  * it is absent, so including any of them makes this phase's score
  * host-dependent: a Docker-less host silently skips those files and still
@@ -47,7 +47,10 @@ export default {
   mochaOptions: {
     spec: [
       'test/unit/**/*.test.js',
-      // Stubbed integration only: the same pinned hermetic directories as the npm script.
+      // Stubbed integration only: the seven hermetic directories, named one by one
+      // so a new directory (or a live split part) joins only by an explicit edit.
+      // Same selection as package.json `test:integration:stubbed`, pinned by
+      // test/unit/scripts/stubbed_lane_hermetic.test.js.
       'test/integration/database/**/*.test.js',
       'test/integration/errors/**/*.test.js',
       'test/integration/helpers/**/*.test.js',
