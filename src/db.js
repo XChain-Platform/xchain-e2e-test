@@ -67,6 +67,8 @@ function addDispenserGetFilters(database, params, whereClauses, whereValues){
 
 function addDispenserConstraintFilters(database, params, whereClauses, whereValues){
     addDispenserWhereValue(database, whereClauses, whereValues, params.fiatCode, "ifs.code = ?")
+    // Match the fiat amount the caller named; the indexer stores the wire string verbatim
+    addDispenserWhereValue(database, whereClauses, whereValues, params.fiatAmount, "d.fiat_amount = ?")
     addDispenserWhereValue(database, whereClauses, whereValues, params.expiration, "d.expiration = ?")
     addDispenserWhereValue(database, whereClauses, whereValues, params.allowList, "d.allow_list = ?")
     addDispenserWhereValue(database, whereClauses, whereValues, params.blockList, "d.block_list = ?")
@@ -347,9 +349,21 @@ function firstSendRow(rows){
     }
 }
 
+const { AsyncLocalStorage } = require('async_hooks');
 const config = require('./config');
 const { getLogger } = require('./lib/logger');
 const logger = getLogger();
+
+// Set while a _waitFor poll runs its check, per async call chain, so a direct
+// check* caller running at the same moment keeps the null-on-error contract.
+const insideWaitPoll = new AsyncLocalStorage();
+
+// Answer a failed lookup query: rethrow it inside a _waitFor poll, so a wait can
+// tell "the database never answered" from "no row", and return `fallback` elsewhere.
+function rethrowInsideWait(err, fallback = null){
+    if (insideWaitPoll.getStore()) throw err
+    return fallback
+}
 
 function buildBroadcastFilter({blockIndex,txHash,source,message,value,fee,memo,broadcastActionIndex,status}){
     const whereClauses = []
@@ -477,7 +491,7 @@ async function findListRow(database, query, whereValues){
         }
     } catch (err) {
         logger.error('Error with database query (list):', err);
-        return {listRow: null, finished: true}
+        return rethrowInsideWait(err, {listRow: null, finished: true})
     } finally {
         await connection.release()
     }
@@ -537,7 +551,7 @@ async function checkListItems(database, listRow, type, items){
         }
     } catch (err) {
         logger.error('Error with database query (list items):', err);
-        return null;
+        return rethrowInsideWait(err)
     } finally {
         await connection.release()
     }
@@ -782,7 +796,7 @@ class Database {
             }
         } catch (err) {
             logger.error('Error with database query (issue):', err);
-            return null;
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -803,7 +817,7 @@ class Database {
             return firstSendRow(rows)
         } catch (err) {
             logger.error('Error with database query (send):', err);
-            return null;
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -863,7 +877,7 @@ class Database {
             }
         } catch (err) {
             logger.error('Error with database query (credit):', err);
-            return null;
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -958,7 +972,7 @@ class Database {
             }
         } catch (err) {
             logger.error('Error with database query (debit):', err);
-            return null;
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -983,7 +997,7 @@ class Database {
             }
         } catch (err) {
             logger.error('Error with database query (mint):', err);
-            return null;
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -1028,7 +1042,7 @@ class Database {
             }
         } catch (err) {
             logger.error('Error with database query (broadcast):', err);
-            return null;
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -1159,7 +1173,7 @@ class Database {
             }
         } catch (err) {
             logger.error('Error with database query (airdrop):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -1185,7 +1199,7 @@ class Database {
             }
         } catch (err) {
             logger.error('Error with database query (dispenser):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -1266,7 +1280,7 @@ class Database {
             }
         } catch (err) {
             logger.error('Error with database query (dispense):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -1291,7 +1305,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (dispenser_status):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -1356,6 +1370,11 @@ class Database {
         let lastWrites = null
         let writeReason = null
         let writeMoved = null   // when that mark last advanced
+        // Polls whose check answered (row or no row) versus threw, kept so a wait
+        // whose database never answered cannot give up as if the row were absent.
+        let answered   = 0
+        let errored    = 0
+        let lastErr    = null
         // Only waits that were meant to be long can be extended. Short waits are
         // callers polling for something that should be immediate, and probing on
         // their behalf costs more than it can ever save.
@@ -1370,12 +1389,15 @@ class Database {
         while (Date.now() < deadline){
             polls++
             try {
-                const row = await checkFn.call(this, params)
+                const row = await insideWaitPoll.run(true, () => checkFn.call(this, params))
+                answered++
                 if (row) {
                     this['_recordPerfPoll'](label, startMs, polls, true)
                     return row
                 }
             } catch(err) {
+                errored++
+                lastErr = err
                 logger.info(err)
             }
             await this.sleep(1000)
@@ -1447,7 +1469,16 @@ class Database {
                             : writeMoved === null
                                 ? 'idle at index ' + writeMark
                                 : 'last advanced ' + (Date.now() - writeMoved) + 'ms ago (index ' + writeMark + ')'))
-            + ')')
+            + ', ' + errored + ' of ' + polls + ' polls errored)')
+        // Refuse to read "never answered" as "absent": a null here would pass every
+        // assertion that the row does not exist, against a query that never ran.
+        if (answered === 0 && errored > 0){
+            const err = new Error(label + ': no poll answered in ' + (Date.now() - startMs) + 'ms ('
+                + polls + ' polls, all errored); last error: ' + (lastErr && lastErr.message))
+            err.code  = 'WAIT_NO_ANSWER'
+            err.cause = lastErr
+            throw err
+        }
         return null
     }
 
@@ -1568,7 +1599,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (address):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -1605,7 +1636,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (destroy):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -1637,7 +1668,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (message):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -1677,7 +1708,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (price):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -1709,7 +1740,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (file):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -1743,7 +1774,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (sleep):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -1780,7 +1811,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (sweep):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -1815,7 +1846,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (dividend):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -1849,7 +1880,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (callback):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -1905,7 +1936,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (order):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -1939,7 +1970,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (order_match):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -1990,7 +2021,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (swap):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -2024,7 +2055,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (swap_match):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -2053,7 +2084,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (batch):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -2090,7 +2121,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (link):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -2115,7 +2146,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (order_match):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -2143,7 +2174,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (coinpay):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -2172,7 +2203,7 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (coinpay_obligation):', err);
-            return null
+            return rethrowInsideWait(err)
         } finally {
             await connection.release()
         }
@@ -2200,7 +2231,7 @@ class Database {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return null } finally { await connection.release() }
+        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
     }
 
     async waitForExecution(params, timeMax = 60000){ return this['_waitFor'](this.checkExecution, params, timeMax) }
@@ -2225,7 +2256,7 @@ class Database {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return null } finally { await connection.release() }
+        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
     }
 
     async waitForDeposit(params, timeMax = 60000){ return this['_waitFor'](this.checkDeposit, params, timeMax) }
@@ -2252,7 +2283,7 @@ class Database {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return null } finally { await connection.release() }
+        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
     }
 
     async waitForWithdrawal(params, timeMax = 60000){ return this['_waitFor'](this.checkWithdrawal, params, timeMax) }
@@ -2279,7 +2310,7 @@ class Database {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return null } finally { await connection.release() }
+        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
     }
 
     // ── Staking Methods ──
@@ -2306,7 +2337,7 @@ class Database {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return null } finally { await connection.release() }
+        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
     }
 
     // Count currently-active, valid stakes (those still in the validator
@@ -2349,7 +2380,7 @@ class Database {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return null } finally { await connection.release() }
+        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
     }
 
     // ── Attestation Methods ──
@@ -2375,7 +2406,7 @@ class Database {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ this['_warnOnSchemaError']('checkAttestationRequest', err); return null } finally { await connection.release() }
+        } catch(err){ this['_warnOnSchemaError']('checkAttestationRequest', err); return rethrowInsideWait(err) } finally { await connection.release() }
     }
 
     async waitForAttestationResponse(params, timeMax = 60000){ return this['_waitFor'](this.checkAttestationResponse, params, timeMax) }
@@ -2400,7 +2431,7 @@ class Database {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ this['_warnOnSchemaError']('checkAttestationResponse', err); return null } finally { await connection.release() }
+        } catch(err){ this['_warnOnSchemaError']('checkAttestationResponse', err); return rethrowInsideWait(err) } finally { await connection.release() }
     }
 
     async getAttestationValidatorSignatures(responseActionIndex){
@@ -2422,7 +2453,7 @@ class Database {
             // array; guard the shape before mapping it below.
             if(!Array.isArray(parsed)) return []
             return parsed.map(s => ({ validator_pubkey: s.pubkey, validator_sig: s.sig }))
-        } catch(err){ this['_warnOnSchemaError']('getAttestationValidatorSignatures', err); return [] } finally { await connection.release() }
+        } catch(err){ this['_warnOnSchemaError']('getAttestationValidatorSignatures', err); return rethrowInsideWait(err, []) } finally { await connection.release() }
     }
 
     async waitForAttestationRequestCount(params, timeMax = 60000){ return this['_waitFor'](this.checkAttestationRequestCount, params, timeMax) }
@@ -2453,7 +2484,7 @@ class Database {
         const connection = await this.getConnection()
         try {
             return await connection.query(query, [contractIndex])
-        } catch(err){ this['_warnOnSchemaError']('getAttestationRequestsByContract', err); return [] } finally { await connection.release() }
+        } catch(err){ this['_warnOnSchemaError']('getAttestationRequestsByContract', err); return rethrowInsideWait(err, []) } finally { await connection.release() }
     }
 
     // Distinguish a schema drift (missing table / renamed column) from a normal
@@ -2488,7 +2519,7 @@ class Database {
         try {
             const rows = await connection.query(query, [contractIndex, stateKey])
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ this['_warnOnSchemaError']('getContractState', err); return null } finally { await connection.release() }
+        } catch(err){ this['_warnOnSchemaError']('getContractState', err); return rethrowInsideWait(err) } finally { await connection.release() }
     }
 
     async waitForDelegation(params, timeMax = 60000){ return this['_waitFor'](this.checkDelegation, params, timeMax) }
@@ -2521,7 +2552,7 @@ class Database {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return null } finally { await connection.release() }
+        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
     }
 
     // ── Stake-key revocations (DELEGATE v2 against the ORIGINAL stake key) ──
@@ -2551,7 +2582,7 @@ class Database {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return null } finally { await connection.release() }
+        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
     }
 
     // ── Contract-targeted staking (STAKE v3 / UNSTAKE v1 / DELEGATE v1) ──
@@ -2582,7 +2613,7 @@ class Database {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return null } finally { await connection.release() }
+        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
     }
 
     async waitForContractUnstake(params, timeMax = 60000){ return this['_waitFor'](this.checkContractUnstake, params, timeMax) }
@@ -2611,7 +2642,7 @@ class Database {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return null } finally { await connection.release() }
+        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
     }
 
     async waitForContractDelegation(params, timeMax = 60000){ return this['_waitFor'](this.checkContractDelegation, params, timeMax) }
@@ -2637,7 +2668,7 @@ class Database {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return null } finally { await connection.release() }
+        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
     }
 
     async waitForSlashEvent(params, timeMax = 60000){ return this['_waitFor'](this.checkSlashEvent, params, timeMax) }
@@ -2659,7 +2690,7 @@ class Database {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return null } finally { await connection.release() }
+        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
     }
 
     async waitForRewardClaim(params, timeMax = 60000){ return this['_waitFor'](this.checkRewardClaim, params, timeMax) }
@@ -2682,7 +2713,7 @@ class Database {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return null } finally { await connection.release() }
+        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
     }
 }
 

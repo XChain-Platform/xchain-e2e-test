@@ -33,6 +33,10 @@
 // Stryker run, a venue, or the gitignored reports/mutation/*.json artifacts.
 
 const assert = require('assert')
+const fs = require('fs')
+const os = require('os')
+const path = require('path')
+const { spawnSync } = require('child_process')
 const script = require('../../../scripts/mutation-report')
 
 // A tiny file with a known layout, so every column below is countable by hand.
@@ -216,6 +220,45 @@ describe('mutation-report generator fidelity', () => {
             ]))
             assert.strictEqual(killedAndTimeout.allDetected, true)
             assert.match(killedAndTimeout.md, /All mutants were detected by the test suite/)
+        })
+    })
+
+    // A date-only filename let a same-day phase2 report replace phase1's.
+    describe('each mutation lane gets its own report file', () => {
+
+        it('names the output after the input phase and the date', () => {
+            const p1 = script.reportOutPath('reports/mutation/phase1.json', '2026-10-06')
+            const p2 = script.reportOutPath('reports/mutation/phase2.json', '2026-10-06')
+            assert.strictEqual(path.basename(p1), 'report-phase1-2026-10-06.md')
+            assert.strictEqual(path.basename(p2), 'report-phase2-2026-10-06.md')
+            assert.notStrictEqual(p1, p2, 'two lanes on one day must not share a file')
+            assert.match(path.basename(script.reportOutPath('/tmp/x/custom.json', '2026-10-06')),
+                /^report-custom-2026-10-06\.md$/)
+        })
+
+        it('run() writes phase1 and phase2 side by side on the same day', () => {
+            // Drive the real CLI in a scratch cwd, so the test proves run() uses the helper.
+            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mutation-report-'))
+            try {
+                const inDir = path.join(dir, 'reports', 'mutation')
+                fs.mkdirSync(inDir, { recursive: true })
+                const cli = path.resolve(__dirname, '../../../scripts/mutation-report.js')
+                for (const [phase, status] of [['phase1', 'Killed'], ['phase2', 'Survived']]) {
+                    fs.writeFileSync(path.join(inDir, `${phase}.json`),
+                        JSON.stringify(oneFileReport([mutant({ status })])))
+                    const r = spawnSync(process.execPath, [cli, path.join('reports', 'mutation', `${phase}.json`)],
+                        { cwd: dir, encoding: 'utf8' })
+                    assert.strictEqual(r.status, 0, `${r.stdout}\n${r.stderr}`)
+                }
+                const written = fs.readdirSync(inDir).filter((f) => f.endsWith('.md')).sort()
+                assert.strictEqual(written.length, 2, `expected one report per phase, got ${written.join(', ')}`)
+                assert.match(written[0], /^report-phase1-\d{4}-\d{2}-\d{2}\.md$/)
+                assert.match(written[1], /^report-phase2-\d{4}-\d{2}-\d{2}\.md$/)
+                assert.match(fs.readFileSync(path.join(inDir, written[0]), 'utf8'), /phase1/)
+                assert.match(fs.readFileSync(path.join(inDir, written[1]), 'utf8'), /phase2/)
+            } finally {
+                fs.rmSync(dir, { recursive: true, force: true })
+            }
         })
     })
 })

@@ -927,6 +927,29 @@ describe('Protocol size-limit drift guard', () => {
             'SDK market_and_contract LIST_UNION_MAX_MEMBERS drifted from the canonical protocol constant')
         })
 
+        // Pin the LIST metadata byte caps on every bare-literal copy. The full-export block
+        // below reaches only the indexer's vendored module; the LIST action handler, the SDK
+        // validator and the wallet form each re-declare both caps, so one side could accept a
+        // NAME or DESCRIPTION the others refuse.
+        const LIST_META_CAPS = ['LIST_META_NAME_MAX_BYTES', 'LIST_META_DESCRIPTION_MAX_BYTES']
+        LIST_META_CAPS.forEach((name) => {
+            it('[regression:p0] ' + name + ' === canonical across indexer list/meta, SDK field_limits + wallet listMetaInput', () => {
+                const sdkLimits = require('../../../xchain-sdk/src/protocol/validator/field_limits.js')
+                assert.ok(Number.isFinite(protocol[name]),
+                    name + ' is not a finite value on the canonical protocol constants module')
+                assert.strictEqual(readLiteral('xchain-indexer/src/actions/list/meta.js',
+                    new RegExp('^const ' + name + ' = (\\d+);$', 'm'), 'indexer list/meta.js ' + name),
+                protocol[name],
+                'indexer list/meta.js ' + name + ' drifted from the canonical protocol constant; the indexer decides which LIST metadata is valid')
+                assert.strictEqual(sdkLimits[name], protocol[name],
+                    'SDK validator/field_limits.js ' + name + ' drifted from the canonical protocol constant')
+                assert.strictEqual(readLiteral('xchain-wallet/packages/core/src/flows/listMetaInput.js',
+                    new RegExp('^export const ' + name + ' = (\\d+);$', 'm'), 'wallet listMetaInput ' + name),
+                protocol[name],
+                'wallet listMetaInput ' + name + ' drifted from the canonical protocol constant')
+            })
+        })
+
         // Pin the rounds carried in one hourly PRICE wire on the hub's own literal, which
         // sizes every hourly window the publisher plans.
         it('[regression:p0] ORACLE_HOURLY_WINDOW_ROUNDS === canonical in hub oracle window_plan', () => {

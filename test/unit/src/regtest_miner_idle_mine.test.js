@@ -59,3 +59,42 @@ describe('RegtestMinerConnector.setIdleMineInterval', function () {
         await assert.rejects(() => connector.setIdleMineInterval(5000), /Method not found/);
     });
 });
+
+// The suite restores each miner's startup heartbeat at teardown, so the read side
+// must report the miner's real value and never invent one it can be restored to.
+describe('RegtestMinerConnector.getIdleMineInterval', function () {
+
+    let connector, axiosPostStub;
+
+    beforeEach(function () {
+        axiosPostStub = sinon.stub(axios, 'post');
+        connector = new RegtestMinerConnector('localhost', 18444);
+    });
+
+    afterEach(function () {
+        sinon.restore();
+    });
+
+    it('reads idle_mine_interval_ms from the miner status method', async function () {
+        axiosPostStub.resolves({ data: { result: { wallet_ready: true, idle_mine_interval_ms: 60000 } } });
+        assert.strictEqual(await connector.getIdleMineInterval(), 60000);
+        assert.strictEqual(axiosPostStub.firstCall.args[1].method, 'status');
+    });
+
+    it('reports an off heartbeat as 0, not as unknown', async function () {
+        axiosPostStub.resolves({ data: { result: { idle_mine_interval_ms: 0 } } });
+        assert.strictEqual(await connector.getIdleMineInterval(), 0);
+    });
+
+    it('returns null when the status carries no usable interval', async function () {
+        axiosPostStub.resolves({ data: { result: { wallet_ready: true } } });
+        assert.strictEqual(await connector.getIdleMineInterval(), null);
+        axiosPostStub.resolves({ data: { result: { idle_mine_interval_ms: '60000' } } });
+        assert.strictEqual(await connector.getIdleMineInterval(), null);
+    });
+
+    it('throws when the status call itself fails', async function () {
+        axiosPostStub.resolves({ data: { error: { code: -32601, message: 'Method not found' } } });
+        await assert.rejects(() => connector.getIdleMineInterval(), /Method not found/);
+    });
+});

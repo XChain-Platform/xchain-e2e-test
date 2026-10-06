@@ -49,7 +49,7 @@ const PAYLOAD_LITERAL = /["'`]([A-Z][A-Z0-9]{2,})\|(?:\d+|["'`]|\$\{)/g
 const LOCAL_REQUIRE = /require\((['"])(\.[^'"]+)\1\)/g
 
 // Fallback vocabulary, used only when the sibling decoder checkout is absent
-// (a standalone xchain-e2e-test clone). test/unit/actionSuiteCount.test.js
+// (a standalone xchain-e2e-test clone). test/unit/scripts/action_suite_count.test.js
 // asserts this list is identical to the decoder's VALID_ACTION_NAMES whenever
 // the sibling IS present, so the two cannot drift silently.
 const FALLBACK_ACTION_NAMES = [
@@ -62,10 +62,10 @@ const FALLBACK_ACTION_NAMES = [
     'SWEEP', 'UNSTAKE', 'VOTE', 'WITHDRAW', 'XBRIDGE'
 ]
 
-// Fallback alias table, same contract as FALLBACK_ACTION_NAMES: used only when
-// the sibling decoder checkout is absent. Without it a standalone clone folds
-// nothing and drops any suite that spells an action in short form, which is the
-// silent under-count this whole script exists to prevent.
+// Fallback alias table, same contract and same guard test as FALLBACK_ACTION_NAMES:
+// used only when the sibling decoder checkout is absent. Without it a standalone
+// clone folds nothing and drops any suite that spells an action in short form,
+// which is the silent under-count this whole script exists to prevent.
 const FALLBACK_ACTION_ALIASES = {
     TRANSFER: 'SEND',
     ADDR: 'ADDRESS',

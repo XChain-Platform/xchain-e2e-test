@@ -20,22 +20,9 @@
 
 const axios = require('axios');
 const { getLogger } = require('./lib/logger');
+// Reads a non-2xx body so a refusal is not mistaken for a dead socket (see the helper)
+const { serviceRefusal } = require('./lib/service_refusal');
 const logger = getLogger();
-
-// What the SERVICE said, when it said anything at all.
-// The indexer refuses a gated call with a non-2xx status whose body is still a
-// JSON-RPC envelope (api.js: 401 + {error:{code:-32001,message:'Unauthorized...'}}).
-// Axios rejects on any non-2xx, so a catch that never reads err.response cannot
-// tell "the indexer refused this" from "nothing answered the socket".
-// Returns null for a responseless failure (ECONNREFUSED, timeout, DNS), which is
-// the only case the connectors' null/false sentinel is meant to cover.
-function serviceRefusal(err){
-    const res = err && err.response
-    if(!res) return null
-    const body = res.data && res.data.error
-    if(body) return typeof body === 'object' ? (body.message || JSON.stringify(body)) : String(body)
-    return 'HTTP ' + res.status + (res.statusText ? ' ' + res.statusText : '')
-}
 
 // Cap ping/health: waitForIndexedBlock polls health and checks its deadline only
 // between requests, so a silent indexer would otherwise hang it. call() stays unbounded.

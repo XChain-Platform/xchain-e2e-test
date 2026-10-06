@@ -34,11 +34,14 @@ const relay = loadRelayMargin()
 
 // A regtest miner that records every heartbeat setting in order, and can be told
 // to refuse the disable so the restore path is exercised, not just the happy one.
+// startInterval is the heartbeat it booted with, as its status call reports it.
 function fakeMiner(name, opts = {}) {
     return {
         name,
+        url: 'http://' + name + ':1',
         intervals: [],
-        interval: 0,
+        interval: opts.startInterval || 0,
+        async getIdleMineInterval() { return this.interval },
         async setIdleMineInterval(ms) {
             if (ms === 0 && opts.failRestore) throw new Error(name + ' refused the restore')
             this.intervals.push(ms)
@@ -84,6 +87,7 @@ describe('gasHelper', () => {
 
     afterEach(() => {
         sinon.restore()
+        helper['_resetHeartbeatBaselines']()
         delete global.COIN
         delete global.COIN_CODE
         delete global.NETWORK
@@ -579,6 +583,50 @@ describe('gasHelper', () => {
             const a = fakeMiner('btc')
             await helper.withIdleMining([a], async () => {}, 5000)
             assert.deepStrictEqual(a.intervals, [5000, 0])
+        })
+
+        it('keeps the pre-run snapshot of a pinned miner across a withIdleMining run', async () => {
+            const a = fakeMiner('dest', { startInterval: 60000 })
+            await helper.pinHeartbeatOff(a)
+            await helper.withIdleMining([a], async () => {})
+            await helper.restoreHeartbeatBaselines()
+            assert.deepStrictEqual(a.intervals, [0, helper.IDLE_MINE_INTERVAL_MS, 0, 60000],
+                'the in-run 0 must not overwrite the startup value recorded when it was pinned')
+        })
+    })
+
+    describe('run heartbeat baseline', () => {
+        it('pins a miner off once per URL, keeping the first snapshot', async () => {
+            const a = fakeMiner('dest', { startInterval: 60000 })
+            const sameMiner = Object.assign(fakeMiner('dest'), { interval: 0 })
+            await helper.pinHeartbeatOff(a)
+            await helper.pinHeartbeatOff(sameMiner)
+            await helper.restoreHeartbeatBaselines()
+            assert.deepStrictEqual(a.intervals, [0, 60000])
+            assert.deepStrictEqual(sameMiner.intervals, [0], 'a second connector for the same URL is not a new baseline')
+        })
+
+        it('never restores a miner whose interval could not be read', async () => {
+            const a = fakeMiner('btc', { startInterval: 60000 })
+            a.getIdleMineInterval = async () => { throw new Error('status unavailable') }
+            await helper.pinHeartbeatOff(a)
+            assert.deepStrictEqual(await helper.restoreHeartbeatBaselines(), [])
+            assert.deepStrictEqual(a.intervals, [0], 'no guess is written back')
+        })
+
+        it('attempts every miner and returns each restore failure instead of throwing', async () => {
+            const a = fakeMiner('btc', { startInterval: 60000 }), b = fakeMiner('dest', { startInterval: 30000 })
+            a.setIdleMineInterval = async function (ms) {
+                if (ms !== 0) throw new Error('btc would not answer')
+                this.intervals.push(ms)
+            }
+            await helper.pinHeartbeatOff(a)
+            await helper.pinHeartbeatOff(b)
+            const failures = await helper.restoreHeartbeatBaselines()
+            assert.strictEqual(failures.length, 1)
+            assert.match(failures[0], /btc would not answer/)
+            assert.deepStrictEqual(b.intervals, [0, 30000], 'the other miner is still restored')
+            assert.deepStrictEqual(await helper.restoreHeartbeatBaselines(), [], 'the record is cleared after a restore')
         })
     })
 })

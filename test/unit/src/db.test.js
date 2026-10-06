@@ -606,6 +606,32 @@ describe('checkDispenser()', function () {
     })
 })
 
+describe('checkDispenser() fiatAmount filter', function () {
+    // Pin the FIAT_AMOUNT the caller names, so a dispenser indexed with the
+    // right fiat code but the wrong amount no longer satisfies the wait.
+    it('fiatAmount set: adds d.fiat_amount = ? with the value bound in step', async function () {
+        await db.checkDispenser({ txHash: 'hash1', fiatCode: 'USD', fiatAmount: '1.50' })
+        const sql    = mockConnection.query.firstCall.args[0]
+        const params = mockConnection.query.firstCall.args[1]
+        const wherePart = sql.split('WHERE')[1] || ''
+        assert.ok(wherePart.includes('d.fiat_amount = ?'))
+        assert.ok(params.includes('1.50'))
+        assert.strictEqual(countPlaceholders(sql), params.length)
+    })
+
+    // A dispenser with no fiat price passes "" or null, which must add no clause.
+    for (const fiatAmount of [null, '']) {
+        it('fiatAmount ' + JSON.stringify(fiatAmount) + ': adds no d.fiat_amount clause', async function () {
+            await db.checkDispenser({ txHash: 'hash1', fiatAmount })
+            const sql    = mockConnection.query.firstCall.args[0]
+            const params = mockConnection.query.firstCall.args[1]
+            const wherePart = sql.split('WHERE')[1] || ''
+            assert.ok(!wherePart.includes('d.fiat_amount'))
+            assert.strictEqual(countPlaceholders(sql), params.length)
+        })
+    }
+})
+
 describe('checkDispense()', function () {
     it('all-fields: 11 placeholders using isNullOrNullString', async function () {
         await db.checkDispense({
@@ -995,6 +1021,75 @@ describe('_waitFor()', function () {
         assert.strictEqual(checkFn.callCount, 2)
         // sleep should have been called after the error
         assert.ok(db.sleep.calledOnce)
+    })
+})
+
+// A failed query and an absent row must not give a wait the same null, or every
+// "this row must not exist" assertion passes against a query that never ran.
+describe('_waitFor() never-answered vs absent', function () {
+    const TX = 'a'.repeat(64)
+
+    // Pace polls at 10ms so a 50ms wait makes a handful of polls, not thousands.
+    beforeEach(function () {
+        db.sleep = () => new Promise(resolve => setTimeout(resolve, 10))
+    })
+
+    it('throws WAIT_NO_ANSWER when every poll of a real check* query fails', async function () {
+        mockConnection.query.rejects(new Error("ER_BAD_FIELD_ERROR: Unknown column 'x'"))
+        await assert.rejects(db.waitForSend({ txHash: TX }, 50), err => {
+            assert.strictEqual(err.code, 'WAIT_NO_ANSWER')
+            assert.match(err.message, /checkSend: no poll answered/)
+            assert.match(err.message, /Unknown column 'x'/)
+            assert.match(err.cause.message, /Unknown column 'x'/)
+            return true
+        })
+        assert.ok(mockConnection.release.called, 'every failed poll still releases its connection')
+    })
+
+    it('still returns null when the database answered "no row"', async function () {
+        mockConnection.query.resolves([])
+        assert.strictEqual(await db.waitForSend({ txHash: TX }, 50), null)
+    })
+
+    it('returns null once any poll answered, even when later polls failed', async function () {
+        mockConnection.query.onFirstCall().resolves([])
+        mockConnection.query.rejects(new Error('ER_CONNECTION_LOST'))
+        assert.strictEqual(await db.waitForSend({ txHash: TX }, 50), null)
+    })
+
+    it('throws WAIT_NO_ANSWER for a list wait whose list query always fails', async function () {
+        mockConnection.query.rejects(new Error('ER_NO_SUCH_TABLE'))
+        await assert.rejects(db.waitForList({ txHash: TX, type: 1, items: ['A'] }, 50),
+            err => err.code === 'WAIT_NO_ANSWER')
+    })
+
+    it('throws WAIT_NO_ANSWER for a check that only warns on schema drift', async function () {
+        mockConnection.query.rejects(Object.assign(new Error('no such table'), { code: 'ER_NO_SUCH_TABLE' }))
+        await assert.rejects(db.waitForAttestationRequestCount({ contractIndex: 1, count: 1 }, 50),
+            err => err.code === 'WAIT_NO_ANSWER')
+    })
+
+    it('keeps null-on-error for a direct check* call, before and after a strict wait', async function () {
+        mockConnection.query.rejects(new Error('ER_CONNECTION_LOST'))
+        assert.strictEqual(await db.checkSend({ txHash: TX }), null)
+        await assert.rejects(db.waitForSend({ txHash: TX }, 50), err => err.code === 'WAIT_NO_ANSWER')
+        assert.strictEqual(await db.checkSend({ txHash: TX }), null, 'the wait scope must not leak')
+    })
+
+    // Request-scoped, not an instance flag: a direct call whose query fails while a
+    // wait's own query is in flight on the same Database still gets null.
+    it('keeps null-on-error for a direct check* call that overlaps a wait in flight', async function () {
+        // The direct call's query fails first, while the wait's query is still pending.
+        mockConnection.query.callsFake((sql, values) => new Promise((resolve, reject) => {
+            const fail = () => reject(new Error('ER_BAD_FIELD_ERROR'))
+            if (values.includes('OVERLAP')) setImmediate(fail)
+            else setTimeout(fail, 20)
+        }))
+        const wait   = db.waitForSend({ txHash: TX }, 50)
+        const direct = db.checkIssue({ tick: 'OVERLAP' })
+        const [waitErr, directRow] = await Promise.all([wait.then(() => null, err => err), direct])
+        assert.strictEqual(directRow, null)
+        assert.ok(waitErr && waitErr.code === 'WAIT_NO_ANSWER', 'the wait itself still refuses')
     })
 })
 

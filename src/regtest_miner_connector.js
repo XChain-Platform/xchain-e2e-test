@@ -14,7 +14,13 @@
 
 const axios = require('axios');
 const { getLogger } = require('./lib/logger');
+const { serviceRefusal } = require('./lib/service_refusal');
 const logger = getLogger();
+
+// Name the key to check when the miner answers 401: it gates every method but
+// ping/status/health on MINER_API_KEY, so a ready ping says nothing about the key.
+const MINER_KEY_HINT = ' (check that MINER_API_KEY, or the per-chain <CODE>_MINER_API_KEY override,'
+    + " matches the miner's MINER_API_KEY)";
 
 // Per-request cap for the readiness probe. axios defaults to no timeout, so a
 // miner that accepts the socket and never answers left ping() pending forever
@@ -79,6 +85,22 @@ class RegtestMinerConnector {
         return result
     }
 
+    // Send one control call. Axios rejects on any non-2xx before unwrap() can read
+    // the body, so a refusal is rethrown with the miner's own reason and method.
+    async post(data){
+        try {
+            return await axios.post(this.url, data, this.reqConfig)
+        } catch (err) {
+            const refusal = serviceRefusal(err)
+            // Nothing answered (ECONNREFUSED, timeout, DNS): keep the transport error as it was
+            if (!refusal) throw err
+            const hint = err.response.status === 401 ? MINER_KEY_HINT : ''
+            const refused = new Error('Regtest miner refused ' + data.method + ': ' + refusal + hint, { cause: err })
+            refused.response = err.response
+            throw refused
+        }
+    }
+
     async ping(){
         const data = {
             jsonrpc: '2.0',
@@ -139,7 +161,7 @@ class RegtestMinerConnector {
         }
         
         // Make the request to the node
-        const response = await axios.post(this.url, data, this.reqConfig)
+        const response = await this.post(data)
 
         // Verify if there is a result and return it (throws on an {error} envelope)
         return this.unwrap(response)
@@ -154,7 +176,7 @@ class RegtestMinerConnector {
         }
 
         // Make the request to the node
-        const response = await axios.post(this.url, data, this.reqConfig)
+        const response = await this.post(data)
 
         // The controller returns the bare string "ok" on success and an
         // {error: "..."} body on rejected input (uuid:24c35056). Both are
@@ -173,7 +195,7 @@ class RegtestMinerConnector {
         }
 
         // Make the request to the node
-        const response = await axios.post(this.url, data, this.reqConfig)
+        const response = await this.post(data)
 
         // Verify if there is a result and return it (throws on an {error} envelope)
         return this.unwrap(response)
@@ -194,7 +216,7 @@ class RegtestMinerConnector {
 
         let response
         try {
-            response = await axios.post(this.url, data, this.reqConfig)
+            response = await this.post(data)
 
             // "ok" on success, {error:"..."} on refusal (mainnet / bad input); both
             // truthy, so unwrap throws on the error envelope rather than reporting a
@@ -238,7 +260,7 @@ class RegtestMinerConnector {
             id: 1
         }
 
-        const response = await axios.post(this.url, data, this.reqConfig)
+        const response = await this.post(data)
 
         return this.unwrap(response)
     }
@@ -252,7 +274,7 @@ class RegtestMinerConnector {
             id: 1
         }
 
-        const response = await axios.post(this.url, data, this.reqConfig)
+        const response = await this.post(data)
 
         return this.unwrap(response)
     }
@@ -269,7 +291,7 @@ class RegtestMinerConnector {
             id: 1
         }
 
-        const response = await axios.post(this.url, data, this.reqConfig)
+        const response = await this.post(data)
 
         return this.unwrap(response)
     }
@@ -289,9 +311,31 @@ class RegtestMinerConnector {
             id: 1
         }
 
+        const response = await this.post(data)
+
+        return this.unwrap(response)
+    }
+
+    // Read the miner's loop state snapshot (the unauthenticated `status` method).
+    async getStatus(){
+        const data = {
+            jsonrpc: '2.0',
+            method: 'status',
+            params: {},
+            id: 1
+        }
+
         const response = await axios.post(this.url, data, this.reqConfig)
 
         return this.unwrap(response)
+    }
+
+    // Read the current mine-empty heartbeat interval in ms (0 = off). Returns null
+    // when the miner's status carries no usable value, so a caller never restores a guess.
+    async getIdleMineInterval(){
+        const status = await this.getStatus()
+        const ms = status && status.idle_mine_interval_ms
+        return Number.isInteger(ms) && ms >= 0 ? ms : null
     }
 }
 

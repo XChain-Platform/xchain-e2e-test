@@ -52,7 +52,7 @@
 #     ../xchain-hub and ../xchain-indexer for the same reason.
 # Full sweeps skip no ci.yml work; fast runs name every deferred tier.
 #
-# The last two tiers are LOCAL-ONLY additions rather than transcriptions, and
+# The last three tiers are LOCAL-ONLY additions rather than transcriptions, and
 # are marked as such: they are the part of `npm run ci` (the command this gate
 # ran before ci:full) that no GitHub job runs, because GitHub would need five
 # more sibling deploy keys to run it. Replacing the gate command without them
