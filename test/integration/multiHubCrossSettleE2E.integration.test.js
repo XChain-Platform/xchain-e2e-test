@@ -59,16 +59,20 @@ const SETTLE_MS    = 6000;
 const BLOCK_INDEX  = 100;
 const NETWORK      = 'regtest';
 
+function makeSeededOrder(args) {
+    return Object.assign(makeOrder(args), { give_decimals: 8 });
+}
+
 function crossingPair({ ltcIdx, dogeIdx, ltcGive = '90', dogeGive = '40' }) {
     return {
-        LTC: [ makeOrder({
+        LTC: [ makeSeededOrder({
             action_index: ltcIdx,
             give: { coin: 'LTC',  tick: 'TOKA', amount: ltcGive },
             get:  { coin: 'DOGE', tick: 'TOKB', amount: ltcGive },
             get_address: 'addr_ltc_order_' + ltcIdx + '_on_doge',
             block_index: BLOCK_INDEX
         }) ],
-        DOGE: [ makeOrder({
+        DOGE: [ makeSeededOrder({
             action_index: dogeIdx,
             give: { coin: 'DOGE', tick: 'TOKB', amount: dogeGive },
             get:  { coin: 'LTC',  tick: 'TOKA', amount: dogeGive },

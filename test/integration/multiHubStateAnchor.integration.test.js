@@ -83,16 +83,20 @@ const TIP = {
 const ROOT_SUFFIX = '|' + [TIP.state_root.toLowerCase(), String(TIP.state_root_version),
                            TIP.block_merkle_root.toLowerCase(), String(TIP.block_merkle_version)].join('|');
 
+function makeSeededOrder(args) {
+    return Object.assign(makeOrder(args), { give_decimals: 8 });
+}
+
 function crossingPair({ ltcIdx, dogeIdx }){
     return {
-        LTC: [ makeOrder({
+        LTC: [ makeSeededOrder({
             action_index: ltcIdx,
             give: { coin: 'LTC',  tick: 'TOKA', amount: '90' },
             get:  { coin: 'DOGE', tick: 'TOKB', amount: '90' },
             get_address: 'addr_ltc_order_' + ltcIdx + '_on_doge',
             block_index: BLOCK_INDEX
         }) ],
-        DOGE: [ makeOrder({
+        DOGE: [ makeSeededOrder({
             action_index: dogeIdx,
             give: { coin: 'DOGE', tick: 'TOKB', amount: '40' },
             get:  { coin: 'LTC',  tick: 'TOKA', amount: '40' },

@@ -75,6 +75,7 @@ function dispatchRow(roundId, callId) {
         gas_limit:             100000,
         cross_hops:            0,
         effective_time:        1700000000,
+        push_generation:       0,
         result_status:         null,
         return_payload_b64:    null
     };
