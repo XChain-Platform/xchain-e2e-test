@@ -23,7 +23,7 @@ const {
 module.exports = function registerIssuanceCases(){
 
     // ─── A1 ────────────────────────────────────────────────────────────────────
-    describe('A1: one parent plus 50 children in ONE transaction', function () {
+    context('A1: one parent plus 50 children in ONE transaction', function () {
         after(async function () {
             // The native lane below re-prices the shared pair on dust-heavy chains;
             // A2/A3 run next and rely on the standard fixture.

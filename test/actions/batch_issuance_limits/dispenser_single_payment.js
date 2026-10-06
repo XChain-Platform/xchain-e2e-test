@@ -25,7 +25,7 @@ const {
 module.exports = function registerDispenserSinglePaymentCases(){
 
     // ─── Row 23, native-coin trigger ───────────────────────────────────────
-    describe('row 23: one coin payment behind THREE dispensers at one address', function () {
+    context('row 23: one coin payment behind THREE dispensers at one address', function () {
 
         let host = null, hostAddress = null, buyer = null, buyerAddress = null
         let tick = null
@@ -149,7 +149,7 @@ module.exports = function registerDispenserSinglePaymentCases(){
     // The same double-spend lived on the SEND path: util.processDispenserSends
     // builds its own data object per SEND and hands it to the same handler, so
     // several dispensers priced in the sent token all drew on one SEND's amount.
-    describe('row 23: one token SEND behind THREE dispensers at one address', function () {
+    context('row 23: one token SEND behind THREE dispensers at one address', function () {
 
         let host = null, hostAddress = null, buyer = null, buyerAddress = null
         let giveTick = null, payTick = null

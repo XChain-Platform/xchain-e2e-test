@@ -25,7 +25,7 @@ const {
 module.exports = function registerNativeFeeCases(){
 
     // ─── A4 ────────────────────────────────────────────────────────────────────
-    describe('A4: batch-cumulative native-coin fee', function () {
+    context('A4: batch-cumulative native-coin fee', function () {
         // Fixture-priced (the exact output size is computed FROM the seeded pair), so
         // this cannot run on a venue whose hub publishes XCHAIN/USD itself.
         const N = 3
@@ -95,7 +95,7 @@ module.exports = function registerNativeFeeCases(){
     })
 
     // ─── A5 (fee half) ─────────────────────────────────────────────────────────
-    describe('A5: the same one-fee-for-N shape over a batch of ORDERs', function () {
+    context('A5: the same one-fee-for-N shape over a batch of ORDERs', function () {
         const N = 3
         const EXPIRE_DAYS     = 190
         const CHARGEABLE_DAYS = EXPIRE_DAYS - ORDER_FREE_DAYS

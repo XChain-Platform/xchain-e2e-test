@@ -21,7 +21,7 @@ const { chainTipTime } = require('./shared')
 module.exports = function registerCoinpayCases(){
 
     // ─── A5 (settlement half) ──────────────────────────────────────────────────
-    describe('A5: one COINPAY payment settles ONE obligation, not N', function () {
+    context('A5: one COINPAY payment settles ONE obligation, not N', function () {
         it('leaves the second obligation pending', async function () {
             // Runs on every lane: the fee output is suppressed on the batch below, so
             // the only transaction-level value in play is the payment itself.

@@ -31,7 +31,7 @@ module.exports = function registerDispenserBatchCreateCases(){
     // (a second create would collide on the primary key and be read as stored).
     // Two creates therefore exercise the registry AND give the pair evidence - the
     // second payment must reach the dispenser the first one did not fund.
-    describe('row 35: a dispenser created inside a BATCH dispenses on a live chain', function () {
+    context('row 35: a dispenser created inside a BATCH dispenses on a live chain', function () {
 
         let host = null, hostAddress = null, buyer = null, buyerAddress = null
         let tick = null, batchTxHash = null

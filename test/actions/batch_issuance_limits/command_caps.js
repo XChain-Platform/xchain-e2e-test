@@ -19,7 +19,7 @@ const { actionsForTx, issuesForTx, tokenRow, issueCmd } = require('./shared')
 module.exports = function registerCommandCapCases(){
 
     // ─── A2 ────────────────────────────────────────────────────────────────────
-    describe('A2: the top-level ISSUE limit and the global command cap', function () {
+    context('A2: the top-level ISSUE limit and the global command cap', function () {
 
         it('rejects two undotted ISSUEs as ONE record: invalid: ISSUE (limit)', async function () {
             const addr    = await cryptoHelper.getNewFundedAddress("BIL.A2A", COIN, NETWORK, null, "legacy", 0, 1)

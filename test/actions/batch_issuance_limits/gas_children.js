@@ -23,7 +23,7 @@ const {
 module.exports = function registerGasChildrenCases(){
 
     // ─── A6 ────────────────────────────────────────────────────────────────────
-    describe('A6: gas for exactly K children', function () {
+    context('A6: gas for exactly K children', function () {
         it('yields exactly K valid children and K debits from a batch of N', async function () {
             if (!state.GAS_MODE) this.skip()   // gas debits are only consulted in gas mode
 

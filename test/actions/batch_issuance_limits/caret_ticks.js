@@ -20,7 +20,7 @@ const { q, actionsForTx, tokenRow, tickerId, issueCmd } = require('./shared')
 module.exports = function registerCaretTickCases(){
 
     // ─── A3 ────────────────────────────────────────────────────────────────────
-    describe('A3: caret TICKs', function () {
+    context('A3: caret TICKs', function () {
 
         it('rejects a lone ISSUE whose caret TICK contains a dot', async function () {
             const addr    = await cryptoHelper.getNewFundedAddress("BIL.A3A", COIN, NETWORK, null, "legacy", 0, 1)
