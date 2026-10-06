@@ -1069,7 +1069,7 @@ class Database {
     
     async waitForAirdrop(airdropObject, timeMax = 60000){ return this['_waitFor'](this.checkAirdrop, airdropObject, timeMax) }
 
-    async _getListType(listActionIndex){
+    async getListType(listActionIndex){
         const queryList = "SELECT type FROM lists WHERE action_index = ?"
         const connection = await this.getConnection()
 
@@ -1088,7 +1088,7 @@ class Database {
         }
     }
 
-    _getListAddressesQuery(listType){
+    getListAddressesQuery(listType){
         switch (listType){
             case 1: //TICK
                 return `
@@ -1123,11 +1123,11 @@ class Database {
         return null
     }
 
-    async _queryListAddresses(addressesQuery, listActionIndex){
+    async queryListAddresses(addressesQuery, listActionIndex){
         try {
             const connection = await this.getConnection()
             const rows = await connection.query(addressesQuery, [listActionIndex])
-            const addresses = this._addressIdsFromRows(rows)
+            const addresses = this.addressIdsFromRows(rows)
             return { succeeded: true, addresses }
         } catch (err) {
             logger.error("Couldn't get a list of addresses from a list:", err);
@@ -1135,7 +1135,7 @@ class Database {
         }
     }
 
-    _addressIdsFromRows(rows){
+    addressIdsFromRows(rows){
         const result = []
         for (const nextRowIndex in rows){
             result.push(rows[nextRowIndex]["address"])
@@ -1144,12 +1144,12 @@ class Database {
     }
 
     async getListAddresses(listActionIndex){
-        const list = await this._getListType(listActionIndex)
+        const list = await this.getListType(listActionIndex)
         if (!list.found) return null
 
         if (list.listType){
-            const addressesQuery = this._getListAddressesQuery(list.listType)
-            const queryResult = await this._queryListAddresses(addressesQuery, listActionIndex)
+            const addressesQuery = this.getListAddressesQuery(list.listType)
+            const queryResult = await this.queryListAddresses(addressesQuery, listActionIndex)
             if (queryResult.succeeded) return queryResult.addresses
         }
 

@@ -157,9 +157,9 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
             "INSERT INTO price_snapshots (id,round_number,coin_pair,price,reference_block,validator_count,consensus_proof,status) VALUES (?,?,?,?,?,?,?,?)",
             [row.id, row.round_number, row.coin_pair, row.price, row.reference_block, row.validator_count, row.consensus_proof, row.status]);
         broadcaster.broadcastRow({ table: 'price_snapshots', row });
-        const ok = await waitFor(async () => (await count(repPool, 'price_snapshots', 'id=2')) === 1);
+        const ok = await waitFor(async () => (await count(repPool, 'price_snapshots', "round_number=101 AND coin_pair='LTC/USD'")) === 1);
         assert.ok(ok, 'live price_snapshots row never arrived over the WS');
-        const r = await repPool.query("SELECT coin_pair,price FROM price_snapshots WHERE id=2");
+        const r = await repPool.query("SELECT coin_pair,price FROM price_snapshots WHERE round_number=101 AND coin_pair='LTC/USD'");
         assert.strictEqual(r[0].coin_pair, 'LTC/USD');
         assert.strictEqual(r[0].price, '76.00000000');
     });
@@ -203,9 +203,9 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
         const sentinel = { id: 3, round_number: 102, coin_pair: 'IDEM/USD', price: '1.00000000', reference_block: 102,
             validator_count: 4, consensus_proof: 'proof-idem', status: 'finalized' };
         broadcaster.broadcastRow({ table: 'price_snapshots', row: sentinel });
-        assert.ok(await waitFor(async () => (await count(repPool, 'price_snapshots', 'id=3')) === 1),
+        assert.ok(await waitFor(async () => (await count(repPool, 'price_snapshots', "round_number=102 AND coin_pair='IDEM/USD'")) === 1),
             'the sentinel behind the re-broadcast never arrived, so the duplicate was never observed');
-        assert.strictEqual(await count(repPool, 'price_snapshots', 'id=2'), 1, 're-broadcast must not duplicate');
+        assert.strictEqual(await count(repPool, 'price_snapshots', "round_number=101 AND coin_pair='LTC/USD'"), 1, 're-broadcast must not duplicate');
     });
 
     // A DEFERRED retraction (hub-blip path) replays a CLOSED range [from,last]. If the new
@@ -218,21 +218,21 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
 
         // Orphaned row inside the rolled-back range (source_action_index = 50), mirrored to REP.
         await ins(300, 50, 300, 'RETR-A/USD');
-        broadcaster.broadcastRow({ table: 'price_snapshots', row: { id: 300, source_chain: 'BTC', source_action_index: 50 } });
-        assert.ok(await waitFor(async () => (await count(repPool, 'price_snapshots', 'id=300')) === 1), 'orphan row never mirrored');
+        broadcaster.broadcastRow({ table: 'price_snapshots', row: { id: 300, round_number: 300, coin_pair: 'RETR-A/USD', source_chain: 'BTC', source_action_index: 50 } });
+        assert.ok(await waitFor(async () => (await count(repPool, 'price_snapshots', "round_number=300 AND coin_pair='RETR-A/USD'")) === 1), 'orphan row never mirrored');
 
         // Deferred retraction drains as a CLOSED range [50,75] (hub already applied it; mirror it here).
         broadcaster.broadcastDeletion({ table: 'price_snapshots', source_chain: 'BTC', from_action_index: 50, to_action_index: 75 });
-        assert.ok(await waitFor(async () => (await count(repPool, 'price_snapshots', 'id=300')) === 0), 'bounded retraction never removed the orphan on the replica');
+        assert.ok(await waitFor(async () => (await count(repPool, 'price_snapshots', "round_number=300 AND coin_pair='RETR-A/USD'")) === 0), 'bounded retraction never removed the orphan on the replica');
 
         // The new chain re-published at A' = 80 (> 75). It must survive the bounded retraction.
         await ins(301, 80, 301, 'RETR-B/USD');
-        broadcaster.broadcastRow({ table: 'price_snapshots', row: { id: 301, source_chain: 'BTC', source_action_index: 80 } });
-        assert.ok(await waitFor(async () => (await count(repPool, 'price_snapshots', 'id=301')) === 1), 're-published row above the ceiling never mirrored');
+        broadcaster.broadcastRow({ table: 'price_snapshots', row: { id: 301, round_number: 301, coin_pair: 'RETR-B/USD', source_chain: 'BTC', source_action_index: 80 } });
+        assert.ok(await waitFor(async () => (await count(repPool, 'price_snapshots', "round_number=301 AND coin_pair='RETR-B/USD'")) === 1), 're-published row above the ceiling never mirrored');
 
-        await sleep(300); // settle: confirm the bounded delete did not retroactively touch id=301
-        assert.strictEqual(await count(repPool, 'price_snapshots', 'id=301'), 1, 're-published row A\'=80 must survive a [50,75] retraction');
-        assert.strictEqual(await count(repPool, 'price_snapshots', 'id=300'), 0, 'orphan row in [50,75] must stay deleted');
+        await sleep(300); // settle: confirm the bounded delete did not retroactively touch the round 301 row
+        assert.strictEqual(await count(repPool, 'price_snapshots', "round_number=301 AND coin_pair='RETR-B/USD'"), 1, 're-published row A\'=80 must survive a [50,75] retraction');
+        assert.strictEqual(await count(repPool, 'price_snapshots', "round_number=300 AND coin_pair='RETR-A/USD'"), 0, 'orphan row in [50,75] must stay deleted');
     });
 
     // Push-generation reorg fence over the WS mirror.
@@ -256,13 +256,13 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
         // distinguishes stale from fresh.
         const orphan = { id: 600, round_number: 600, coin_pair: 'GENP/USD', source_chain: 'BTC', source_action_index: 50, push_generation: 5 };
         const repub  = { id: 601, round_number: 601, coin_pair: 'GENP/USD', source_chain: 'BTC', source_action_index: 50, push_generation: 6 };
-        assert.ok(await bcastWait([orphan, repub], 'price_snapshots', 'id IN (600,601)'), 'recycle rows never mirrored');
+        assert.ok(await bcastWait([orphan, repub], 'price_snapshots', "round_number IN (600,601) AND coin_pair='GENP/USD'"), 'recycle rows never mirrored');
 
         broadcaster.broadcastDeletion({ table: 'price_snapshots', source_chain: 'BTC', from_action_index: 50, to_action_index: 75, retraction_generation: 5 });
-        assert.ok(await waitFor(async () => (await count(repPool, 'price_snapshots', 'id=600')) === 0), 'gen-5 orphan at recycled index never removed');
+        assert.ok(await waitFor(async () => (await count(repPool, 'price_snapshots', "round_number=600 AND coin_pair='GENP/USD'")) === 0), 'gen-5 orphan at recycled index never removed');
         await sleep(300);
-        assert.strictEqual(await count(repPool, 'price_snapshots', 'id=601'), 1, 'gen-6 re-publish at the SAME recycled index must survive a gen-5 retraction');
-        assert.strictEqual(await count(repPool, 'price_snapshots', 'id=600'), 0, 'gen-5 orphan must stay deleted');
+        assert.strictEqual(await count(repPool, 'price_snapshots', "round_number=601 AND coin_pair='GENP/USD'"), 1, 'gen-6 re-publish at the SAME recycled index must survive a gen-5 retraction');
+        assert.strictEqual(await count(repPool, 'price_snapshots', "round_number=600 AND coin_pair='GENP/USD'"), 0, 'gen-5 orphan must stay deleted');
     });
 
     it('GEN FENCE (oracle_prices): a higher-gen row at a recycled index survives; a stale in-range row still deletes', async function () {
@@ -271,13 +271,13 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
         // gen-5 orphan at index 60 (also inside [50,75]) proves deletion still fires under the fence.
         const survivor = { id: 610, source_address: 'oGenNew', source_chain: 'BTC', coin: 'BTC', tick: 'T', fiat: 'USD', value: '1', block_time: 1, effective_at: 1, action_index: 50, push_generation: 6 };
         const orphan   = { id: 611, source_address: 'oGenOld', source_chain: 'BTC', coin: 'BTC', tick: 'T', fiat: 'USD', value: '1', block_time: 1, effective_at: 1, action_index: 60, push_generation: 5 };
-        assert.ok(await bcastWait([survivor, orphan], 'oracle_prices', 'id IN (610,611)'), 'oracle recycle rows never mirrored');
+        assert.ok(await bcastWait([survivor, orphan], 'oracle_prices', "source_chain='BTC' AND action_index IN (50,60)"), 'oracle recycle rows never mirrored');
 
         broadcaster.broadcastDeletion({ table: 'oracle_prices', source_chain: 'BTC', from_action_index: 50, to_action_index: 75, retraction_generation: 5 });
-        assert.ok(await waitFor(async () => (await count(repPool, 'oracle_prices', 'id=611')) === 0), 'gen-5 oracle orphan never removed');
+        assert.ok(await waitFor(async () => (await count(repPool, 'oracle_prices', "source_chain='BTC' AND action_index=60")) === 0), 'gen-5 oracle orphan never removed');
         await sleep(300);
-        assert.strictEqual(await count(repPool, 'oracle_prices', 'id=610'), 1, 'gen-6 oracle row at recycled index must survive a gen-5 retraction');
-        assert.strictEqual(await count(repPool, 'oracle_prices', 'id=611'), 0, 'gen-5 oracle orphan must stay deleted');
+        assert.strictEqual(await count(repPool, 'oracle_prices', "source_chain='BTC' AND action_index=50"), 1, 'gen-6 oracle row at recycled index must survive a gen-5 retraction');
+        assert.strictEqual(await count(repPool, 'oracle_prices', "source_chain='BTC' AND action_index=60"), 0, 'gen-5 oracle orphan must stay deleted');
     });
 
     it('GEN FENCE (cross_chain_calls, single column): a re-finalized relay row at a recycled source index survives', async function () {
