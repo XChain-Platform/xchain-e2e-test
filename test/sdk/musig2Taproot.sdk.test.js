@@ -12,7 +12,7 @@
  *
  * XChain Platform E2E - SDK MuSig2 taproot key-path spend (on-chain)
  *
- * The SDK's MuSig2 module (xchain-sdk/src/musig2.js) is the signing
+ * The SDK's MuSig2 module (xchain-sdk/src/cosigner/musig2.js) is the signing
  * primitive behind the xchain-wallet `taproot-musig2` multisig custody
  * scheme. Its unit tests only verify aggregate signatures against the
  * SDK's OWN BIP340 verifier, never against a real node. This suite

@@ -88,14 +88,26 @@ function seededRounds(file){
 
 // The unit tree is excluded because it asserts ABOUT these values rather than
 // writing them, so its literals are not seed sites.
+let siteCache = null
+
 function seedSites(){
+    if (!siteCache) siteCache = scanSeedSites()
+    return siteCache
+}
+
+function scanSeedSites(){
     return jsFilesUnder(TEST_ROOT)
         .filter(f => !f.includes(path.sep + 'unit' + path.sep))
         .map(f => ({ file: path.relative(TEST_ROOT, f), rounds: seededRounds(f) }))
         .filter(s => s.rounds.size)
 }
 
-describe('seed-sentinel coverage', () => {
+describe('seed-sentinel coverage', function(){
+
+    before(function(){
+        this.timeout(60000)
+        seedSites()
+    })
 
     it('every synthetic round the suite seeds is one clearSeedSentinels deletes', () => {
         const known   = new Set(SEED_SENTINEL_ROUNDS)

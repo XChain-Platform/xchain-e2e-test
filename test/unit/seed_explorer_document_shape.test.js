@@ -45,9 +45,9 @@ const {
 // checkout that is not always populated). Null when it cannot be resolved, and
 // the tests that need it skip rather than passing vacuously.
 function loadActionWaiter() {
-    for (const c of ['xchain-sdk/src/actionWaiter.js',
-                     '../../xchain-sdk/src/actionWaiter.js',
-                     '../../../xchain-sdk/src/actionWaiter.js']) {
+    for (const c of ['xchain-sdk/src/utils/action_waiter.js',
+                     '../../xchain-sdk/src/utils/action_waiter.js',
+                     '../../../xchain-sdk/src/utils/action_waiter.js']) {
         try {
             return c.startsWith('.') ? require(path.resolve(__dirname, c)) : require(c);
         } catch (e) { /* next */ }
