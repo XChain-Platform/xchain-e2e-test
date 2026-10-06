@@ -55,17 +55,6 @@ const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
 const OracleConsensus = loadHubModule('src/oracle/consensus.js');
 const OracleRound     = loadHubModule('src/oracle/round.js');
-const CrossChainCallEngine = loadHubModule('src/cross_chain/call_engine.js');
-
-function defaultDispatchPushGeneration() {
-    const write = CrossChainCallEngine.prototype.writeFinalizedRow;
-    CrossChainCallEngine.prototype.writeFinalizedRow = function (ev) {
-        const row = ev && ev.row;
-        if (row && (row.push_generation === undefined || row.push_generation === null)) row.push_generation = 0;
-        return write.call(this, ev);
-    };
-    return () => { CrossChainCallEngine.prototype.writeFinalizedRow = write; };
-}
 
 const setBook = MockCrossChainOfferBook.prototype.setBook;
 MockCrossChainOfferBook.prototype.setBook = function (name, options = {}) {
@@ -271,11 +260,5 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
 });
 
 // Run the split parts in this suite's lane; the stubbed lane ignores their directory.
-describe('split parts', function () {
-    let restore;
-    before(function () { restore = defaultDispatchPushGeneration(); });
-    after(function () { if (restore) restore(); });
-
-    require('./multiHubFeaturesN10.integration.test/02_cross_chain_dex_match.test');
-    require('./multiHubFeaturesN10.integration.test/03_xcall_dispatch_relay.test');
-});
+require('./multiHubFeaturesN10.integration.test/02_cross_chain_dex_match.test');
+require('./multiHubFeaturesN10.integration.test/03_xcall_dispatch_relay.test');

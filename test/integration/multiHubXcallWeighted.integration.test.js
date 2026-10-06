@@ -40,22 +40,10 @@ dotenv.config();
 
 const assert = require('assert');
 const crypto = require('crypto');
-const { MultiValidatorHub, ValidatorIdentity, loadHubModule } = require('../helpers/multiValidatorHubHelper');
+const { MultiValidatorHub, ValidatorIdentity } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
-
-const CrossChainCallEngine = loadHubModule('src/cross_chain/call_engine.js');
-
-function defaultDispatchPushGeneration() {
-    const write = CrossChainCallEngine.prototype.writeFinalizedRow;
-    CrossChainCallEngine.prototype.writeFinalizedRow = function (ev) {
-        const row = ev && ev.row;
-        if (row && (row.push_generation === undefined || row.push_generation === null)) row.push_generation = 0;
-        return write.call(this, ev);
-    };
-    return () => { CrossChainCallEngine.prototype.writeFinalizedRow = write; };
-}
 
 // A deadline, not a settle: waitForMesh returns on the first fully-peered poll.
 const PEER_WAIT_MS = 60_000;
@@ -186,10 +174,4 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM XCALL dispatch relay (C.2)', 
 });
 
 // Run the split parts in this suite's lane; the stubbed lane ignores their directory.
-describe('split parts', function () {
-    let restore;
-    before(function () { restore = defaultDispatchPushGeneration(); });
-    after(function () { if (restore) restore(); });
-
-    require('./multiHubXcallWeighted.integration.test/02_healthy_weighted_federation.test');
-});
+require('./multiHubXcallWeighted.integration.test/02_healthy_weighted_federation.test');

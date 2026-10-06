@@ -411,7 +411,7 @@ function liveTierBlocker(env = process.env, options = {}) {
 function mochaEnvironment(env = process.env, options = {}) {
     const childEnv = { ...env }
     if (optionForcesDocker(options))
-        for (const key of HUB_DB_KEYS) childEnv[key] = ''
+        for (const key of HUB_DB_KEYS) delete childEnv[key]
     return childEnv
 }
 
@@ -535,7 +535,7 @@ function main(argv) {
         return 1
     }
 
-    let forceDocker = argv.includes('--force-docker') || argv.includes('--forceDocker')
+    const forceDocker = argv.includes('--force-docker') || argv.includes('--forceDocker')
     const blocker = liveTierBlocker(process.env, { forceDocker })
     if (blocker) {
         console.error('live tier: this host cannot run the tier truthfully: ' + blocker + '.')
@@ -551,19 +551,19 @@ function main(argv) {
 
     console.log('live tier: running ' + expected.length + ' suite(s) on ' + os.hostname()
         + (forceDocker ? ' (--force-docker)' : ''))
-    let run = runMocha(expected, roster, { forceDocker })
-    if (run.error) {
-        console.error('live tier: could not start mocha: ' + run.error.message)
+    const { out, status, error } = runMocha(expected, roster, { forceDocker })
+    if (error) {
+        console.error('live tier: could not start mocha: ' + error.message)
         return 1
     }
 
     let report
     try {
-        report = JSON.parse(fs.readFileSync(run.out, 'utf8'))
+        report = JSON.parse(fs.readFileSync(out, 'utf8'))
     } catch (e) {
         // No parseable report means the run died before the reporter wrote one.
         // Say that, rather than inferring a verdict from the exit code alone.
-        console.error('live tier: mocha exited ' + run.status + ' and wrote no readable report ('
+        console.error('live tier: mocha exited ' + status + ' and wrote no readable report ('
             + e.message + ').')
         console.error('live tier: the tier was NOT evaluated; read the output above for the cause.')
         return 1
@@ -571,29 +571,7 @@ function main(argv) {
 
     const settled = retryRedSuites(report, expected, roster, file => runRetry(file, roster, forceDocker))
     report = settled.report
-    let { tally, problems, outcome } = settled
-
-    if (outcome.exitCode === VENUE_EXIT && !forceDocker
-            && liveTierBlocker(process.env, { forceDocker: true }) === null) {
-        console.error('\nlive tier: provisioned database denied schema privileges; retrying once with disposable Docker MariaDB.')
-        forceDocker = true
-        run = runMocha(expected, roster, { forceDocker })
-        if (run.error) {
-            console.error('live tier: could not start mocha for the Docker retry: ' + run.error.message)
-            return 1
-        }
-        try {
-            report = JSON.parse(fs.readFileSync(run.out, 'utf8'))
-        } catch (e) {
-            console.error('live tier: Docker retry exited ' + run.status + ' and wrote no readable report ('
-                + e.message + ').')
-            console.error('live tier: the tier was NOT evaluated; read the output above for the cause.')
-            return 1
-        }
-        const redocked = retryRedSuites(report, expected, roster, file => runRetry(file, roster, forceDocker))
-        report = redocked.report
-        ;({ tally, problems, outcome } = redocked)
-    }
+    const { tally, problems, outcome } = settled
 
     console.log('')
     for (const line of mochaSummary(report)) console.log(line)
