@@ -28,9 +28,8 @@
  *   3. Anchor flush (StateAnchorPublisher: XANC_SIGN_REQ → XANC_SIGN →
  *      XANC_FINALIZED): the elected publisher proposes the match archive,
  *      followers verify it against their OWN cross_chain_matches before
- *      co-signing, and the leader "publishes" the checkpoint anchor (ANCHOR
- *      v3 post-flag-day, carrying the signed SPV light-client roots; v0 is the
- *      legacy rootless form) + the v1 archive payload via
+ *      co-signing, and the leader "publishes" one ANCHOR v3 bundle (post-flag-day:
+ *      the signed SPV light-client roots plus the folded archive section) via
  *      a captured broadcast hook (no chain in this harness; the on-chain
  *      leg is the regtest e2e's job). Back-fill propagates to every hub.
  *
@@ -56,6 +55,7 @@ const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 const eq = require('../../../xchain-hub/src/consensus/equivocation_header.js');
+require('../attestMirror/helpers/crossChainOfferDecimals').installCrossChainSeeds();
 
 const COUNT        = 4;        // quorum 2f+1 = 3
 // Deadlines, not settles: the mesh, the checkpoint rows and the finalized match are
@@ -100,6 +100,27 @@ function crossingPair({ ltcIdx, dogeIdx }){
             block_index: BLOCK_INDEX
         }) ]
     };
+}
+
+// Per hub: pin the BTC tip (election + snapshot block), stub the checkpoint
+// engine's indexer view to the SHARED state, scope to BTC, and capture every
+// "on-chain" anchor broadcast instead of hitting DOGE.
+function wireHub(hub, i, members, published) {
+    hub.resolveBtcLatestBlock = async () => BLOCK_INDEX;
+    const cps = hub.stateCheckpoints;
+    cps.network = 'regtest';   // engine cached '' at construction (pre-seed)
+    cps.chains = ['BTC'];
+    cps.confirmations = 0;
+    cps.indexers.BTC = { url: 'http://stubbed', key: '' };
+    cps.indexerCall = async () => Object.assign({}, TIP);
+    const publisher = hub.stateAnchorPublisher;
+    const pinned = publisher.getActiveOraclePublishPubkeys.bind(publisher);
+    publisher.getActiveOraclePublishPubkeys = (block) =>
+        (block === null || block === undefined) ? Promise.resolve(members.slice().sort()) : pinned(block);
+    publisher.setBroadcastHook(async (payload) => {
+        published.push({ hubIndex: i, payload });
+        return { txid: 'e2e-txid-' + published.length };
+    });
 }
 
 describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function () {
@@ -147,22 +168,14 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         // so also seed the count snapshot. The two stub disjoint methods.
         seedCount = seedStakeSnapshot(mvh, { blockIndex: BLOCK_INDEX });
 
-        // Per hub: pin the BTC tip (election + snapshot block), stub the
-        // checkpoint engine's indexer view to the SHARED state, scope to BTC,
-        // and capture every "on-chain" anchor broadcast instead of hitting DOGE.
-        mvh.hubs.forEach((hub, i) => {
-            hub.resolveBtcLatestBlock = async () => BLOCK_INDEX;
-            const cps = hub.stateCheckpoints;
-            cps.network = 'regtest';   // engine cached '' at construction (pre-seed)
-            cps.chains = ['BTC'];
-            cps.confirmations = 0;
-            cps.indexers.BTC = { url: 'http://stubbed', key: '' };
-            cps.indexerCall = async () => Object.assign({}, TIP);
-            hub.stateAnchorPublisher.setBroadcastHook(async (payload) => {
-                published.push({ hubIndex: i, payload });
-                return { txid: 'e2e-txid-' + published.length };
-            });
-        });
+        // The FINALIZED back-fill pre-filters its sender on the live (unpinned)
+        // oracle_publish membership, which a hub reads from a gossip-driven capability
+        // registry that is not wired in this harness. Seed it with the booted validators so
+        // followers accept the leader's announcement; the pinned election sets above
+        // stay the authority for who may publish.
+        const members = mvh.hubs.map(h => h.stateAnchorPublisher.identity.getPubkeyHex().toLowerCase());
+
+        mvh.hubs.forEach((hub, i) => wireHub(hub, i, members, published));
     });
 
     after(async function () {
@@ -224,7 +237,7 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         assert.strictEqual(distinct.size, 1, 'all hubs hold the identical checkpoint');
     });
 
-    it('anchor flush: leader publishes v3 checkpoint anchor + quorum-signed v1 archive; back-fill reaches every hub', async function () {
+    it('anchor flush: leader publishes one v3 bundle carrying the quorum-signed archive; back-fill reaches every hub', async function () {
         // A finalized cross-chain match gives the archive something to carry.
         const dexes = mvh.getCrossChainDexes();
         await Promise.all(dexes.map(d => d.discoverAndMatch().catch(() => {})));
@@ -249,20 +262,15 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         // verify the proposed archive against their own DB and co-sign over P2P.
         published.length = 0;
         await Promise.all(mvh.hubs.map(h => h.stateAnchorPublisher.flush()));
-        // The archive round finalizes asynchronously: the leader gathers a co-sign
-        // quorum over P2P before publishing inside checkArchiveQuorum, which can
-        // exceed a single SETTLE_MS. Poll for the v1 archive publish rather than
-        // assuming a fixed settle (a 6s window raced the quorum round and saw 0).
-        await waitFor(() => ({ ok: published.some(p => p.payload.split('|')[1] === '1') }),
-            { timeoutMs: 30000, intervalMs: 500 });
-        // The checkpoint anchor and the XANC_FINALIZED back-fill ride the same round
-        // as the v1 archive and land behind it. Both are observable (a captured v3
-        // publish; a batch_seq on every hub's match rows) and both are asserted
-        // below, so poll for them instead of betting 500ms that the tail of the
-        // round finished. Polling also anchors the "exactly one v3" count on the
-        // round having completed rather than on a clock reading.
-        await waitFor(async () => {
-            if (!published.some(p => p.payload.split('|')[1] === '3')) return { ok: false, stage: 'v3 checkpoint anchor' };
+        // Past the anchor-fold flag-day (regtest: genesis) the match archive rides
+        // INSIDE the one v3 checkpoint bundle: the elected publisher gathers the
+        // archive co-signatures over P2P within the fold sub-deadline, replaces the
+        // wrapper section's signatures with them, and the legacy standalone v1 leg
+        // is suppressed. The bundle publish, the stamped match rows and the
+        // XANC_FINALIZED back-fill are all observable, so poll for them instead of
+        // betting a fixed window on the tail of the round.
+        const settled = await waitFor(async () => {
+            if (!published.some(p => p.payload.split('|')[1] === '3')) return { ok: false, stage: 'v3 bundle' };
             for (const hub of mvh.hubs) {
                 try {
                     const m = await hub.db.doQuery('SELECT batch_seq FROM cross_chain_matches WHERE batch_seq IS NOT NULL');
@@ -271,53 +279,55 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
             }
             return { ok: true };
         }, { timeoutMs: 30000, intervalMs: 250 });
+        assert.ok(settled.ok, 'round did not complete; stuck at ' + JSON.stringify(settled.last));
 
-        // SPV Phase 2 (xchain-hub 08228c8): the checkpoint anchor is published as
-        // ANCHOR v3 (not legacy v0) whenever the checkpoint carries the signed
-        // light-client roots. TIP seeds those roots and regtest's commitment
-        // flag-day is genesis, so every post-flag-day checkpoint here is v3.
         const v3s = published.filter(p => p.payload.split('|')[1] === '3');
         const v1s = published.filter(p => p.payload.split('|')[1] === '1');
-        // The safety invariant is PER-ARTIFACT, not "one hub does everything": the
-        // checkpoint anchor (v3, elected per checkpoint row via _v0ElectionKey) and
-        // the archive (v1, elected per election block via archiveElectionKey) run
-        // INDEPENDENT hash-order elections, so they are routinely paid by two
-        // DIFFERENT hubs (distributed DOGE cost, not a double-anchor). What must
-        // hold is that each artifact publishes exactly once. (A prior
-        // `publishers.size === 1` assumed a single publisher for both and flaked
-        // ~half the time, whenever the two elections landed on different hubs.)
-        assert.strictEqual(v3s.length, 1, 'exactly one v3 checkpoint anchor publishes (SPV roots present, no double-anchor)');
-        assert.strictEqual(v1s.length, 1, 'exactly one v1 archive publishes');
+        // Exactly one publish per flush round: the folded bundle carries the
+        // checkpoint section and the archive, so no hub pays for a second anchor.
+        assert.strictEqual(v3s.length, 1, 'exactly one v3 bundle publishes (no double-anchor)');
+        assert.strictEqual(v1s.length, 0, 'the legacy v1 archive leg is folded into the v3 bundle');
 
-        // v1: quorum sigs over the extended canonical; archive decompresses to the match.
-        // The v1 archive nests the v0 raw + |batchSeq|count|crc|totalChunks, then (gate on)
-        // wraps it ONCE, and the v1 round id appends batchSeq (the R-4 v0/v1 collision fix)
-        // so v0 and its archive get DISTINCT equivocation keys. f[4]=block_index,
-        // f[9]=checkpoint_seq, f[10]=snapshot_block, f[11]=batchSeq.
-        const f = v1s[0].payload.split('|');
-        const raw = ['XCHECKPOINT', f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9], f[10],
-                   f[11], f[12], f[13], f[14]].join('|');
-        const canonical = eq.isEquivHeaderActive(f[10], 'regtest')
+        // ANCHOR|3|NETWORK|SNAPSHOT_BLOCK|SECTION_COUNT, then per section 13 fixed fields
+        // and SIG_COUNT (PUBKEY, SIG) pairs, then ARCHIVE_COUNT and the archive fields.
+        const f = v3s[0].payload.split('|');
+        assert.strictEqual(f[4], '1', 'one BTC section');
+        const sigCount = Number(f[17]);
+        assert.ok(sigCount >= 3, 'wrapper section carries >= 2f+1 = 3 archive sigs, got ' + sigCount);
+        const tail = 18 + 2 * sigCount;
+        assert.strictEqual(f[tail], '1', 'the bundle carries the archive section');
+        const [wrapperIndex, batchSeq, matchCount, crc, totalChunks, b64] = f.slice(tail + 1, tail + 7);
+        assert.strictEqual(wrapperIndex, '0');
+        assert.strictEqual(totalChunks, '1');
+
+        // Wrapper signatures cover the section canonical extended with the archive
+        // fields (batchSeq|count|crc|totalChunks), wrapped once in the uniform header
+        // whose round id appends batchSeq.
+        const raw = ['XCHECKPOINT', f[5], f[2], f[6], f[7], f[8], f[9], f[10], f[11], f[12]].join('|')
+                  + ROOT_SUFFIX + '|' + [batchSeq, matchCount, crc, totalChunks].join('|');
+        const canonical = eq.isEquivHeaderActive(f[12], 'regtest')
             ? eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
-                f[2] + '|' + f[3] + '|' + f[4] + '|' + f[9] + '|' + f[11], 0, raw)
+                f[5] + '|' + f[2] + '|' + f[6] + '|' + f[11] + '|' + batchSeq, 0, raw)
             : raw;
-        const sigCount = Number(f[16]);
-        assert.ok(sigCount >= 3, 'v1 carries >= 2f+1 = 3 sigs, got ' + sigCount);
         const verifying = new Set();
         for (let i = 0; i < sigCount; i++)
-            if (ValidatorIdentity.verify(canonical, f[18 + 2 * i], f[17 + 2 * i])) verifying.add(f[17 + 2 * i]);
-        assert.ok(verifying.size >= 3, 'v1 sigs must verify over the extended canonical');
+            if (ValidatorIdentity.verify(canonical, f[19 + 2 * i], f[18 + 2 * i])) verifying.add(f[18 + 2 * i]);
+        assert.ok(verifying.size >= 3, 'wrapper sigs must verify over the archive-extended canonical');
 
-        const archive = JSON.parse(zlib.gunzipSync(Buffer.from(f[15], 'base64url')).toString('utf8'));
+        const archive = JSON.parse(zlib.gunzipSync(Buffer.from(b64, 'base64url')).toString('utf8'));
         assert.ok(archive.matches.length >= 1);
         assert.ok(archive.capability_snapshots.some(s => s.capability === 'cross_chain'));
         assert.ok(archive.capability_snapshots.some(s => s.capability === 'oracle_publish'));
 
-        // XANC_FINALIZED back-fill: every hub's match rows carry the batch metadata.
-        for (const hub of mvh.hubs) {
-            const m = await hub.db.doQuery('SELECT batch_seq, archived_status FROM cross_chain_matches WHERE batch_seq IS NOT NULL');
+        // XANC_FINALIZED back-fill: every hub's match rows carry the batch seq. The
+        // publisher stamps the terminal status; a follower stamps the sentinel until the
+        // announced head is buried on DOGE, which this chainless harness never provides,
+        // so its rows stay eligible to re-archive rather than being suppressed on trust.
+        for (let i = 0; i < mvh.hubs.length; i++) {
+            const m = await mvh.hubs[i].db.doQuery('SELECT batch_seq, archived_status FROM cross_chain_matches WHERE batch_seq IS NOT NULL');
             assert.ok(m.length >= 1, 'back-fill must reach every hub');
-            assert.strictEqual(String(m[0].archived_status), 'finalized');
+            assert.strictEqual(String(m[0].batch_seq), batchSeq);
+            assert.strictEqual(String(m[0].archived_status), i === v3s[0].hubIndex ? 'finalized' : '__partial__');
         }
     });
 });
