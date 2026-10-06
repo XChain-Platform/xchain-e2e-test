@@ -95,9 +95,7 @@ function seedSites(){
         .filter(s => s.rounds.size)
 }
 
-describe('seed-sentinel coverage', function () {
-    this.timeout(30000)
-
+describe('seed-sentinel coverage', () => {
 
     it('every synthetic round the suite seeds is one clearSeedSentinels deletes', () => {
         const known   = new Set(SEED_SENTINEL_ROUNDS)

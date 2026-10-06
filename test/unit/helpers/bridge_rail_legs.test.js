@@ -88,7 +88,7 @@ describe('bridge rail leg map', function () {
     });
 
     before(function () {
-        this.timeout(600000);
+        this.timeout(120000);
         const allFiles = [...new Set(Object.values(RAIL_DRIVES).flatMap((drive) =>
             Object.values(drive.legs).flatMap((leg) =>
                 leg.files || [...(drive.before || []), drive.root, drive.glob])))];

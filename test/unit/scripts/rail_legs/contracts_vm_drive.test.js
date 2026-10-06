@@ -56,8 +56,6 @@ describe('contracts and VM rail drive', function () {
     })
 
     it('registers every suite as an existing file with a positive dry-run minimum', function () {
-        this.timeout(30000)
-
         const drive = RAIL_DRIVES.contracts_vm
 
         assert.ok(drive)

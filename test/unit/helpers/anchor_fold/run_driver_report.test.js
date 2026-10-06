@@ -16,7 +16,6 @@ const {
 } = require('../../../helpers/anchor_fold/run_driver_report')
 
 describe('child Mocha driver report helpers', function () {
-    this.timeout(60000)
     let scratchDir
     let passingDriver
     let failingDriver

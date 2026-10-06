@@ -61,8 +61,6 @@ function scratchCommit(cwd, message, files){
 }
 
 describe('ci fast selector mappings', function(){
-    this.timeout(60000)
-
     it('maps a changed helper to its unit test and the always-run guards', function(){
         const plan = select(['test/helpers/addressHelper.js'])
         const files = plan.tests.map(test => test.file)

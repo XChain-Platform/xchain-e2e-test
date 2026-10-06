@@ -69,8 +69,6 @@ describe('contracts and price rail drive', function () {
     })
 
     it('registers every suite as an existing file with its dry-run minimum', function () {
-        this.timeout(30000)
-
         const drive = RAIL_DRIVES.contracts_price
 
         assert.ok(drive)
