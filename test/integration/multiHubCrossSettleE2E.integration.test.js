@@ -43,6 +43,7 @@ const { MultiValidatorHub }      = require('../helpers/multiValidatorHubHelper')
 const { startDisposableHubDb }   = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }     = require('../helpers/seededWeightSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
+const { withGiveDecimals } = require('../attestMirror/helpers/crossChainOfferDecimals');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
 const CrossSettle    = require(path.resolve(__dirname, '../../../xchain-indexer/src/actions/cross_settle/index.js'));
@@ -60,7 +61,7 @@ const BLOCK_INDEX  = 100;
 const NETWORK      = 'regtest';
 
 function crossingPair({ ltcIdx, dogeIdx, ltcGive = '90', dogeGive = '40' }) {
-    return {
+    return withGiveDecimals({
         LTC: [ makeOrder({
             action_index: ltcIdx,
             give: { coin: 'LTC',  tick: 'TOKA', amount: ltcGive },
@@ -75,7 +76,7 @@ function crossingPair({ ltcIdx, dogeIdx, ltcGive = '90', dogeGive = '40' }) {
             get_address: 'addr_doge_order_' + dogeIdx + '_on_ltc',
             block_index: BLOCK_INDEX
         }) ]
-    };
+    });
 }
 
 // Inline mock indexer context. Pure stake-weighted-quorum math runs through a

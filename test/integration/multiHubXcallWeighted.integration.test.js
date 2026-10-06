@@ -67,6 +67,7 @@ function dispatchRow(roundId, callId) {
         network:               NETWORK,
         source_chain:          'DOGE',
         source_action_index:   5,
+        push_generation:        0,
         source_contract_index: 1,
         target_chain:          'LTC',
         target_contract_index: 2,
@@ -173,4 +174,5 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM XCALL dispatch relay (C.2)', 
 });
 
 // Run the split parts in this suite's lane; the stubbed lane ignores their directory.
+require('../attestMirror/helpers/crossChainOfferDecimals').installCrossChainSeeds();
 require('./multiHubXcallWeighted.integration.test/02_healthy_weighted_federation.test');

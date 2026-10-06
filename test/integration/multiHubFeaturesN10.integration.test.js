@@ -50,7 +50,8 @@ const { MultiValidatorHub, ValidatorIdentity, loadHubModule } = require('../help
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
-const { waitForMesh, waitFor } = require('../helpers/consensusWait');
+const { withGiveDecimals } = require('../attestMirror/helpers/crossChainOfferDecimals');
+const { waitForMesh, waitFor, nominalOracleRoundTime } = require('../helpers/consensusWait');
 
 const OracleConsensus = loadHubModule('src/oracle/consensus.js');
 const OracleRound     = loadHubModule('src/oracle/round.js');
@@ -63,7 +64,6 @@ const QUORUM_SIGS  = 7;          // tally > 2S/3 with equal weights => >=7 of 10
 const PEER_WAIT_MS = 60_000;     // 10-node mesh (45 connections)
 const SETTLE_MS    = 60_000;     // COMMIT propagation across 10 hubs
 const BLOCK_INDEX  = 100;
-const BLOCK_TIME   = 1700000000;
 const NETWORK      = 'regtest';
 
 // Equal-weight snapshot over the COUNT live hubs (S = COUNT*1000). No single
@@ -105,7 +105,7 @@ function callIdFrom(seed) { return crypto.createHash('sha256').update(String(see
 function dispatchRow(roundId, callId) {
     return {
         round_id: roundId, call_id: callId, phase: 'dispatch', snapshot_block: BLOCK_INDEX,
-        network: NETWORK, source_chain: 'DOGE', source_action_index: 5, source_contract_index: 1,
+        network: NETWORK, source_chain: 'DOGE', source_action_index: 5, push_generation: 0, source_contract_index: 1,
         target_chain: 'LTC', target_contract_index: 2, method: 'ping', params_json: '[]',
         gas_limit: 100000, cross_hops: 0, effective_time: 1700000000,
         result_status: null, return_payload_b64: null
@@ -142,12 +142,12 @@ async function driveDispatch(mvh, validators, seedBase) {
 }
 
 function crossingPair({ ltcIdx, dogeIdx, amount = '40' }) {
-    return {
+    return withGiveDecimals({
         LTC:  [ makeOrder({ action_index: ltcIdx,  give: { coin: 'LTC',  tick: 'TOKA', amount },
                             get: { coin: 'DOGE', tick: 'TOKB', amount }, get_address: 'addr_ltc_' + ltcIdx, block_index: BLOCK_INDEX }) ],
         DOGE: [ makeOrder({ action_index: dogeIdx, give: { coin: 'DOGE', tick: 'TOKB', amount },
                             get: { coin: 'LTC',  tick: 'TOKA', amount }, get_address: 'addr_doge_' + dogeIdx, block_index: BLOCK_INDEX }) ]
-    };
+    });
 }
 
 async function driveDexRound(mvh) {
@@ -215,7 +215,7 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
         });
 
         it('the weighted quorum (>=7 of 10) finalizes the identical price snapshot on EVERY hub', async function () {
-            await Promise.all(mvh.hubs.map((h) => h['_wtOracle'].finalizeRound(ORACLE_ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
+            await Promise.all(mvh.hubs.map((h) => h['_wtOracle'].finalizeRound(ORACLE_ROUND, BLOCK_INDEX, nominalOracleRoundTime(h['_wtOracle'], ORACLE_ROUND)).catch(() => {})));
             // Each hub's own price_snapshots row is the post-condition asserted below.
             await waitFor(async () => {
                 const counts = [];
@@ -245,5 +245,6 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
 });
 
 // Run the split parts in this suite's lane; the stubbed lane ignores their directory.
+require('../attestMirror/helpers/crossChainOfferDecimals').installCrossChainSeeds();
 require('./multiHubFeaturesN10.integration.test/02_cross_chain_dex_match.test');
 require('./multiHubFeaturesN10.integration.test/03_xcall_dispatch_relay.test');

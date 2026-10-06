@@ -48,6 +48,7 @@ const { MultiValidatorHub, ValidatorIdentity } = require('../helpers/multiValida
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
+const { withGiveDecimals } = require('../attestMirror/helpers/crossChainOfferDecimals');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
 const PEER_WAIT_MS = 60_000;   // deadline: waitForMesh returns the moment every socket is open
@@ -61,7 +62,7 @@ const NETWORK      = 'regtest';
 
 // A crossing LTC/DOGE ORDER pair (1:1 price -> always crosses).
 function crossingPair({ ltcIdx, dogeIdx, ltcGive = '90', dogeGive = '40' }) {
-    return {
+    return withGiveDecimals({
         LTC: [ makeOrder({
             action_index: ltcIdx,
             give: { coin: 'LTC',  tick: 'TOKA', amount: ltcGive },
@@ -76,7 +77,7 @@ function crossingPair({ ltcIdx, dogeIdx, ltcGive = '90', dogeGive = '40' }) {
             get_address: 'addr_doge_order_' + dogeIdx + '_on_ltc',
             block_index: BLOCK_INDEX
         }) ]
-    };
+    });
 }
 
 async function driveRound(mvh, settleMs = SETTLE_MS) {
