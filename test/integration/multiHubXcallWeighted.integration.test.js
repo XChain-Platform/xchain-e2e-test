@@ -67,6 +67,7 @@ function dispatchRow(roundId, callId) {
         network:               NETWORK,
         source_chain:          'DOGE',
         source_action_index:   5,
+        push_generation:        0,
         source_contract_index: 1,
         target_chain:          'LTC',
         target_contract_index: 2,
