@@ -25,7 +25,7 @@ const VECTOR_PATHS = [
 ];
 
 const GOLDEN = require(path.join(ROOT, VECTOR_PATHS[0]));
-const sdkLight = require(path.join(ROOT, 'xchain-sdk/src/light.js'));
+const sdkLight = require(path.join(ROOT, 'xchain-sdk/src/protocol/light_client.js'));
 
 function sha256(relativePath) {
     return crypto.createHash('sha256')
