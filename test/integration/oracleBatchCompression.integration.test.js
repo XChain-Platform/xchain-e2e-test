@@ -130,7 +130,6 @@ const BREACH_FILLER_CHAR = 'A';
 // Budgets. Every one is a poll that returns the moment its condition holds.
 const CONFIRM_WAIT_MS  = 300_000;   // one broadcast wire reaching a block
 const PRICE_ROW_WAIT_MS = 180_000;  // a node writing its verdict for that wire
-const SETTLE_MS         = 15_000;   // the push outbox delivering post-commit
 
 // The one verdict a well-formed PRICE can legitimately record on a non-BTC
 // indexer while the price-capability rung is still settling. AT9 is a claim
@@ -378,6 +377,15 @@ async function waitForPriceRow(conn, dbName, txid, label) {
             'action, or the block loop has not reached it.');
     }
     return result.last.rows[0];
+}
+
+async function waitForPushDelivery(node, label) {
+    const drained = await node.waitForPushDrain();
+    if (!drained.ok) {
+        const queue = await node.hubPushQueue();
+        throw new Error('AT9: the ' + label + ' node\'s hub push outbox did not drain; ' +
+            'ghost-absence reads would be inconclusive. Queue: ' + JSON.stringify(queue));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -638,7 +646,7 @@ describe('AT9 PRICE batch compression: round trip, consensus caps, canonical bas
 
         // --- 6. the live node absorbs them, then the federation goes away -----
         await liveNode.waitForHeight(targetHeight);
-        await new Promise((r) => setTimeout(r, SETTLE_MS));
+        await waitForPushDelivery(liveNode, 'live');
 
         conn = await mariadb.createConnection({
             host: hubDb.host, port: parseInt(hubDb.port, 10),
@@ -666,7 +674,7 @@ describe('AT9 PRICE batch compression: round trip, consensus caps, canonical bas
 
         console.log('  AT9: replay node built; replaying the chain to block ' + targetHeight + '...');
         await replayNode.waitForHeight(targetHeight);
-        await new Promise((r) => setTimeout(r, SETTLE_MS));
+        await waitForPushDelivery(replayNode, 'replay');
 
         for (const txid of allTx) replayRows[txid] = await waitForPriceRow(conn, replayNode.indexerDbName, txid, 'replay');
         replayGhostSnaps  = await replayNode.hubPriceSnapshots({ rounds: ghost.rounds });
