@@ -37,7 +37,9 @@
  *      recomputed directly from the live price_snapshots rows, and the quote's
  *      oracleRound equals the round the on-chain validator recorded - proving
  *      client quote, on-chain validator, and dry-run all priced off the ONE
- *      live oracle row.
+ *      live oracle row. The dry-run leg needs the indexer's opt-in
+ *      feequotedryrun (regtest + INDEXER_ENABLE_DRYRUN=true); without it the
+ *      case is marked pending after the live-row band has been checked.
  *
  * VENUE (THE HARD PART):
  *   - DOGE regtest with a validator-mode relay hub running the ORACLE engine
@@ -58,6 +60,7 @@
  *   HUB_DB_HOST/PORT/NAME/USER/PASS  (relay hub DB for the XCHAIN/USD sidecar)
  *   DOGE_IDX_DB_USER/DOGE_IDX_DB_PASS (XChain_DOGE_Regtest_Indexer, reads)
  *   NFO_FEE_DESTINATION              (override the discovered fee destination)
+ *   DOGE_INDEXER_API_KEY / INDEXER_API_KEY (x-api-key for the gated feequotedryrun)
  *
  * Usage: bash ~/action-run-doge.sh test/sdk/nativeFeeOracleLive.sdk.test.js
  *
@@ -67,6 +70,7 @@ const { expect } = require('chai');
 const axios   = require('axios');
 const mariadb = require('mariadb');
 const { XChainSDK } = require('./helpers/sdkHelper');
+const { serviceRefusal } = require('../../src/lib/service_refusal');
 
 const MINER_URL   = process.env.XCALL_DOGE_MINER_URL   || 'http://localhost:3125';
 const INDEXER_URL = process.env.XCALL_DOGE_INDEXER_URL || 'http://127.0.0.1:3124';
@@ -108,9 +112,24 @@ async function minerRpc(method, params) {
     return res.data ? res.data.result : null;
 }
 
+// The indexer gates feequotedryrun behind x-api-key (401, -32001 without it); same key precedence as chainRail.
+const INDEXER_API_KEY = process.env.DOGE_INDEXER_API_KEY || process.env.INDEXER_API_KEY || null;
+
 async function indexerRpc(method, params) {
-    const res = await axios.post(INDEXER_URL + '/api', { jsonrpc: '2.0', method, params: params || {}, id: 1 }, { timeout: 15000 });
-    if (res.data && res.data.error) throw new Error(method + ': ' + JSON.stringify(res.data.error));
+    const cfg = INDEXER_API_KEY ? { timeout: 15000, headers: { 'x-api-key': INDEXER_API_KEY } } : { timeout: 15000 };
+    let res;
+    try {
+        res = await axios.post(INDEXER_URL + '/api', { jsonrpc: '2.0', method, params: params || {}, id: 1 }, cfg);
+    } catch (err) {
+        // Name a non-2xx refusal (axios rejects before the body is read); a responseless failure keeps its own error.
+        const refusal = serviceRefusal(err);
+        if (refusal === null) throw err;
+        const hint = err.response.status === 401 ? ' (set DOGE_INDEXER_API_KEY or INDEXER_API_KEY to the indexer key)' : '';
+        const body = (err.response.data && err.response.data.error) || {};
+        throw Object.assign(new Error('Indexer refused ' + method + ': ' + refusal + hint), { rpcCode: body.code });
+    }
+    if (res.data && res.data.error)
+        throw Object.assign(new Error(method + ': ' + JSON.stringify(res.data.error)), { rpcCode: res.data.error.code });
     return res.data ? res.data.result : null;
 }
 
@@ -318,16 +337,6 @@ function registerNativeFeeQuotes() {
         const fq = await indexerRpc('feequote', { action: 'ISSUE', params, source: maker.address });
         expect(fq.supported && fq.valid, 'feequote: ' + JSON.stringify(fq)).to.equal(true);
 
-        const paidSats = Math.round(Number(fq.requiredFeeSats) * 1.02);
-        const dry = await indexerRpc('feequotedryrun', {
-            action: 'ISSUE', params, source: maker.address,
-            feeOutputs: [{ address: feeDestination, value: paidSats }],
-        });
-        expect(dry.dryRun, 'dryRun:true').to.equal(true);
-        expect(dry.valid, 'dry-run valid: ' + JSON.stringify(dry)).to.equal(true);
-        expect(dry.requiredFeeNative, 'dryrun requiredFeeNative === feequote').to.equal(fq.requiredFeeNative);
-        expect(dry.minAcceptable, 'dryrun minAcceptable === feequote').to.equal(fq.minAcceptable);
-
         // Recompute the band straight from the mirrored price_snapshots rows and
         // assert the quote matches: proves quote == validator == dry-run, all off
         // the one live oracle row.
@@ -347,6 +356,26 @@ function registerNativeFeeQuotes() {
         expect(approxEqual(fq.expectedNative, band.expected), 'expectedNative matches live-row recompute').to.equal(true);
         expect(approxEqual(fq.minAcceptable, band.min), 'minAcceptable matches live-row recompute').to.equal(true);
         expect(approxEqual(fq.maxAcceptable, band.max), 'maxAcceptable matches live-row recompute').to.equal(true);
+
+        // The dry-run leg runs last: an indexer without the opt-in method (-32601) marks
+        // the case pending with its reason, while an auth refusal still fails it.
+        const paidSats = Math.round(Number(fq.requiredFeeSats) * 1.02);
+        let dry;
+        try {
+            dry = await indexerRpc('feequotedryrun', {
+                action: 'ISSUE', params, source: maker.address,
+                feeOutputs: [{ address: feeDestination, value: paidSats }],
+            });
+        } catch (err) {
+            if (err.rpcCode !== -32601) throw err;
+            console.warn('[nativeFeeOracleLive] feequotedryrun is not registered on this indexer ' +
+                '(it needs INDEXER_NETWORK=regtest and INDEXER_ENABLE_DRYRUN=true); the dry-run leg is skipped');
+            this.skip();
+        }
+        expect(dry.dryRun, 'dryRun:true').to.equal(true);
+        expect(dry.valid, 'dry-run valid: ' + JSON.stringify(dry)).to.equal(true);
+        expect(dry.requiredFeeNative, 'dryrun requiredFeeNative === feequote').to.equal(fq.requiredFeeNative);
+        expect(dry.minAcceptable, 'dryrun minAcceptable === feequote').to.equal(fq.minAcceptable);
     });
 }
 
