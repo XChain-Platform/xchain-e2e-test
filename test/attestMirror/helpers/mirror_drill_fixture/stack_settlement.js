@@ -16,9 +16,9 @@ const pathx = require('path')
 
 const stakeHelper = require('../../../helpers/stakeHelper')
 const { loadHubModule } = require('../../../helpers/multiValidatorHubHelper')
+const { DRILL_KEYS_DIR } = require('../../../helpers/rail/drill_keys_dir')
 
 const MINE_WHILE_MAX_LAG = 3
-const DRILL_KEYS_DIR = pathx.resolve(__dirname, '../../../../drill-keys')
 
 function recordStakerKey (label, entry) {
     try {

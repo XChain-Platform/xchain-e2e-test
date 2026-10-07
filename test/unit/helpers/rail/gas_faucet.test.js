@@ -4,7 +4,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 const assert = require('assert')
+const path = require('path')
 const faucet = require('../../../helpers/rail/gas_faucet')
+const { DRILL_KEYS_DIR } = require('../../../helpers/rail/drill_keys_dir')
 
 const SPENT = { supply: '99999796', maxSupply: '100000000' }
 const FRESH = { supply: '0', maxSupply: '100000000' }
@@ -81,6 +83,7 @@ describe('gas_faucet file and chain reads', function () {
     it('honours E2E_GAS_FAUCET_FILE', function () {
         assert.strictEqual(faucet.faucetFile({ E2E_GAS_FAUCET_FILE: '/x.json' }), '/x.json')
         assert.strictEqual(faucet.faucetFile({}), faucet.DEFAULT_FAUCET_FILE)
+        assert.strictEqual(faucet.DEFAULT_FAUCET_FILE, path.join(DRILL_KEYS_DIR, 'gas-faucet.json'))
     })
 
     it('reads the gas supply off the tokens row, and null when it cannot', async function () {
