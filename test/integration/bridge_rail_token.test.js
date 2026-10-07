@@ -14,8 +14,8 @@
  *
  * THE TOKEN BRIDGE ACCEPTANCE DRIVE: token AT1 to AT8, over the base drive's venue shape (a harness federation of the seated roster
  * keys, a venue BTC clone, a venue DOGE indexer REPLAYED from genesis under this tree's
- * bridge code). AT9 is the gate run plus the activation parity test and is not a drive:
- * this file runs both as child processes after the drive (see the AT9 section at its foot).
+ * bridge code). AT9 is the gate run, the activation parity test and the genesis replay pin and is not a drive:
+ * this file runs all three as child processes after the drive (see the AT9 section at its foot).
  *
  * ── ONE SUITE IN TWO PLACES ────────────────────────────────────────────────────────
  * This root holds the venue bring-up, the T0 precondition and the arming case; the legs
@@ -93,6 +93,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const { journalCase } = require('../helpers/bridgeRailVenue');
 const loadRailGateContract = require('./lib/rail_gate_contract');
+const { runReplayPin } = require('../helpers/rail_preflight/token_replay_pin_run');
 const {
     assert,
     GAS_TICK,
@@ -188,7 +189,7 @@ const GATE_ENV_MASK_KEYS = [
     'P2P_MAX_CONNECTIONS_PER_IP',
 ];
 
-const at9 = { record: null, drive: null, ordinaryCi: null, parity: null };
+const at9 = { record: null, drive: null, ordinaryCi: null, parity: null, replayPin: null };
 let gitShim = null;
 
 function executableOnPath(name) {
@@ -465,15 +466,23 @@ describe('token AT9: the gates, and the dated acceptance record', function () {
         assert.ok(ordering >= 1, 'the parity run never passed "' + PARITY_ORDERING_TITLE + '"');
     });
 
+    it('token AT9: the genesis replay pin and the case-folded reserved guard hold, so pre-activation hashes are unchanged', function () {
+        this.timeout(0);
+        const result = runReplayPin(INDEXER_ROOT, gateEnv({ XCHAIN_REQUIRE_SIBLINGS: '1' }));
+        at9.replayPin = { files: result.files, cwd: result.cwd, exit: result.exit, counts: result.counts,
+            missingCases: result.missing, problems: result.problems };
+        assert.ok(result.ok, 'the replay pin run is red:\n' + result.problems.join('\n'));
+    });
+
     it('prints the dated acceptance record', function () {
         assert.ok(at9.record, 'AT9 took no record header');
         const record = Object.assign({ rail: 'BTC/DOGE regtest', drive: at9.drive,
-            ordinaryCi: at9.ordinaryCi, activationConstantsParity: at9.parity }, at9.record);
+            ordinaryCi: at9.ordinaryCi, activationConstantsParity: at9.parity, replayPin: at9.replayPin }, at9.record);
         console.log('\n=== token bridge acceptance record ' + record.date + ' ===\n' +
             JSON.stringify(record, null, 2) + '\n');
         journalCase({ suite: TOKEN_DRIVE.journalSuite, title: '=== acceptance record ===', state: 'evidence',
             evidence: record });
-        for (const part of ['drive', 'ordinaryCi', 'activationConstantsParity'])
+        for (const part of ['drive', 'ordinaryCi', 'activationConstantsParity', 'replayPin'])
             assert.ok(record[part], 'the record has no ' + part + ' reading: its case failed before measuring');
     });
 });
