@@ -510,6 +510,30 @@ async function seedMirrors (venue, seeds) {
     return written
 }
 
+/**
+ * Seed the stake-derived (or, past the tip, synthetic) cross_chain capability snapshots a
+ * set of joined rows needs, ahead of the rows themselves. Reached-ness is judged on the
+ * buried snapshot block. Refuses when the seeds leave any joined block uncovered.
+ *
+ * @returns {Promise<Array>} the snapshot seeds that were written
+ */
+async function seedSnapshotsFromStake (venue, i, members, reachedTip, opts) {
+    const o = opts || {}
+    const network = o.network || 'regtest'
+    const srb = o.reorgBuffer || require('../../helpers/multiValidatorHubHelper')
+        .loadHubModule('src/consensus/snapshot_reorg_buffer.js')
+    const weightsAt = o.weightsAt || stakeWeightsAt(venue, i)
+    const snapshots = await rows.requiredSnapshotSeeds(members, reachedTip, weightsAt,
+        (block) => srb.buriedSnapshotBlock(block, network))
+    const coverage = rows.snapshotCapabilityCoverage(members.concat(snapshots))
+    if (!coverage.satisfied) {
+        throw new Error('barrierFamilyDrive: capability snapshots leave blocks uncovered: ' +
+            JSON.stringify(coverage.missingBlocks) + (coverage.refusal ? ' (' + coverage.refusal + ')' : ''))
+    }
+    await seedMirrors(venue, snapshots)
+    return snapshots
+}
+
 /** Wait until indexer `i`'s mirror holds `n` rows of `table` (the seeds arrived). */
 async function waitForMirrorRows (venue, i, table, n, timeoutMs) {
     const ix = venue.indexers[i]
@@ -699,6 +723,7 @@ module.exports = {
     levelAtTip,
     holdBaseline,
     seedMirrors,
+    seedSnapshotsFromStake,
     waitForMirrorRows,
     assertFederationQuiet,
     mirrorReadableSet,

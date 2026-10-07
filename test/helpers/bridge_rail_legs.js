@@ -106,7 +106,7 @@ const RAIL_DRIVES = {
                     'token AT8 \\((?:cap|invariant)\\):'].join('|'),
                 minPassed: 9,
             },
-            full: { grep: null, minPassed: 27 },
+            full: { grep: null, minPassed: 28 },
         },
     },
     list_share: {
