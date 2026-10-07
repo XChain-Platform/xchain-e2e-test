@@ -325,7 +325,7 @@ class RegtestMinerConnector {
             id: 1
         }
 
-        const response = await axios.post(this.url, data, this.reqConfig)
+        const response = await this.post(data)
 
         return this.unwrap(response)
     }

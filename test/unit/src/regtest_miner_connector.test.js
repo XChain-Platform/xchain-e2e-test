@@ -353,6 +353,17 @@ describe('RegtestMinerConnector', function () {
             });
         });
 
+        it('names the refusal on a non-2xx status read, through getIdleMineInterval too', async function () {
+            axiosPostStub.rejects(httpRefusal(503, { error: 'Service Unavailable' }));
+            await assert.rejects(() => connector.getStatus(), (err) => {
+                assert.match(err.message, /refused status: Service Unavailable/);
+                assert.doesNotMatch(err.message, /MINER_API_KEY/);
+                assert.strictEqual(err.response.status, 503);
+                return true;
+            });
+            await assert.rejects(() => connector.getIdleMineInterval(), /refused status: Service Unavailable/);
+        });
+
         it('rethrows a responseless failure unchanged', async function () {
             const dead = new Error('connect ECONNREFUSED 127.0.0.1:18444');
             axiosPostStub.rejects(dead);

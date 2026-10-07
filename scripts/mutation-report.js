@@ -34,8 +34,6 @@ const path = require('path')
 const CRITICAL_PATH_PATTERNS = [
   'src/db.js',
   'test/helpers/',
-  'test/transactionHelper.js',
-  'test/cryptoHelper.js',
 ]
 
 function isCriticalPath(filePath) {

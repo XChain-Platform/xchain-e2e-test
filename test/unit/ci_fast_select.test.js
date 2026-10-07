@@ -8,7 +8,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const { execFileSync, spawnSync } = require('node:child_process')
-const { resolveBase, selectFastTests } = require('../../bin/ci_fast_select')
+const { CONSENSUS, resolveBase, selectFastTests } = require('../../bin/ci_fast_select')
 
 const ROOT = path.resolve(__dirname, '..', '..')
 const ALWAYS = [
@@ -74,6 +74,29 @@ describe('ci fast selector mappings', function(){
         const plan = select(['src/coins/BTC.js'])
         assert.strictEqual(plan.consensus, true)
         assert.ok(plan.reasons.some(reason => reason.includes('src/coins/BTC.js')))
+    })
+
+    it('widens a changed core transaction or crypto helper', function(){
+        for(const file of [
+            'test/helpers/core/transactionHelper.js',
+            'test/helpers/core/cryptoHelper.js',
+            'test/helpers/core/transactionHelper/lib/01_create_and_send_transaction.js',
+        ]){
+            const plan = select([file])
+            assert.strictEqual(plan.consensus, true, file)
+            assert.ok(plan.reasons.includes('consensus: ' + file), file)
+        }
+    })
+
+    // Fail on a moved file, which would otherwise drop its consensus widening silently.
+    it('resolves every consensus prefix to a tracked file', function(){
+        const tracked = git(['ls-files']).split('\n').filter(Boolean)
+        for(const prefix of CONSENSUS){
+            const resolves = prefix.endsWith('/')
+                ? tracked.some(file => file.startsWith(prefix))
+                : tracked.includes(prefix)
+            assert.ok(resolves, 'consensus prefix matches no tracked file: ' + prefix)
+        }
     })
 
     it('keeps a documentation-only change to the always-run guards', function(){

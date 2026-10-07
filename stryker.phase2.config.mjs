@@ -40,8 +40,6 @@ export default {
   mutate: [
     'src/**/*.js',
     'test/helpers/**/*.js',
-    'test/transactionHelper.js',
-    'test/cryptoHelper.js',
   ],
   testRunner: 'mocha',
   mochaOptions: {
