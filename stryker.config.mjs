@@ -13,8 +13,8 @@
  **********************************************************************
  * Stryker Mutation Testing: Phase 1 Configuration
  *
- * Targets test infrastructure (src/ connectors, test/helpers/, transactionHelper,
- * cryptoHelper) and runs unit tests to detect mutations.
+ * Targets test infrastructure (src/ connectors, test/helpers/ including the
+ * core transaction and crypto helpers) and runs unit tests to detect mutations.
  *
  * Usage:
  *   npm run test:mutate            # full mutation run
@@ -26,8 +26,6 @@ export default {
   mutate: [
     'src/**/*.js',
     'test/helpers/**/*.js',
-    'test/transactionHelper.js',
-    'test/cryptoHelper.js',
   ],
   testRunner: 'mocha',
   mochaOptions: {

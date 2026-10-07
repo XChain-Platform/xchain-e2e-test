@@ -27,8 +27,15 @@ const MINER_KEY_HINT = ' (check that MINER_API_KEY, or the per-chain <CODE>_MINE
 // and waitForReady ran past its advertised deadline without ever returning:
 // a hung miner stalled CI instead of failing it. Only ping carries this cap;
 // mining calls keep the unbounded config because generatetoaddress legitimately
-// runs long.
+// runs long. waitForReady lowers it to the budget left, never raises it.
 const PING_TIMEOUT_MS = 5000;
+
+// Clamp a per-ping budget to [1, PING_TIMEOUT_MS]: axios reads a timeout of 0 as
+// "no timeout", so a spent budget must still leave a bound in place.
+function pingTimeout(budgetMs) {
+    if (!Number.isFinite(budgetMs)) return PING_TIMEOUT_MS;
+    return Math.max(1, Math.min(PING_TIMEOUT_MS, Math.floor(budgetMs)));
+}
 
 class RegtestMinerConnector {
     constructor(url, port, apiKey = null) {
@@ -101,7 +108,7 @@ class RegtestMinerConnector {
         }
     }
 
-    async ping(){
+    async ping(timeoutMs = PING_TIMEOUT_MS){
         const data = {
             jsonrpc: '2.0',
             method: 'ping',
@@ -115,7 +122,7 @@ class RegtestMinerConnector {
             // method, which must stay unbounded. The catch below already turns a
             // timed-out request into a plain false, so a hung miner reads as
             // not-ready instead of never answering.
-            response = await axios.post(this.url, data, { ...this.reqConfig, timeout: PING_TIMEOUT_MS })
+            response = await axios.post(this.url, data, { ...this.reqConfig, timeout: pingTimeout(timeoutMs) })
         } catch (err) {
             return false
         }
@@ -142,10 +149,11 @@ class RegtestMinerConnector {
     async waitForReady(timeoutMs = 30000, intervalMs = 1000){
         const deadline = Date.now() + timeoutMs;
         while (true) {
-            if (await this.ping()) return true;
-            // Clamp the wait to what is left of the budget: a full intervalMs at
-            // the tail overshot the advertised deadline by up to one interval on
-            // every call, so the number the caller passed was never the bound.
+            // Give each ping only the budget left, so a hung miner cannot hold the
+            // last probe a full PING_TIMEOUT_MS past the caller's deadline.
+            if (await this.ping(deadline - Date.now())) return true;
+            // Clamp the wait to what is left of the budget too, so timeoutMs (plus
+            // the 1 ms floor on a final probe) is the bound the caller gets.
             const remaining = deadline - Date.now();
             if (remaining <= 0) return false;
             await this.sleep(Math.min(intervalMs, remaining));
@@ -325,7 +333,7 @@ class RegtestMinerConnector {
             id: 1
         }
 
-        const response = await axios.post(this.url, data, this.reqConfig)
+        const response = await this.post(data)
 
         return this.unwrap(response)
     }
