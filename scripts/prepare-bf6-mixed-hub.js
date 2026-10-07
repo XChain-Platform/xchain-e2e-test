@@ -66,7 +66,8 @@ function createMixedCheckout (config) {
 
     fs.mkdirSync(paths.parent, { recursive: true })
     try {
-        git(['clone', '--no-checkout', '--quiet', source, paths.hub])
+        // Persisted in the clone so no detached auto-gc writes into the tree while it is removed.
+        git(['clone', '--config', 'gc.auto=0', '--config', 'maintenance.auto=false', '--no-checkout', '--quiet', source, paths.hub])
         // A shallow source (the CI venue's depth-1 sibling clone) lacks the pinned
         // commit, so fetch that one commit from the hub's declared upstream.
         if (!hasCommit(paths.hub, MIXED_HUB_REVISION)) {
@@ -91,7 +92,11 @@ function removeMixedCheckout (config) {
     const marker = JSON.parse(fs.readFileSync(paths.marker, 'utf8'))
     assert.strictEqual(marker.stack, config.stack, paths.marker + ' belongs to a different stack')
     assert.strictEqual(marker.revision, MIXED_HUB_REVISION, paths.marker + ' names an unexpected revision')
-    fs.rmSync(paths.root, { recursive: true })
+    // Delete the checkout first and the marker last. A recursive delete that fails
+    // midway (a late git writer, a busy filesystem) must leave the marker so the
+    // retry still passes the safety check instead of failing as an unmarked tree.
+    fs.rmSync(paths.hub, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+    fs.rmSync(paths.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     return true
 }
 
