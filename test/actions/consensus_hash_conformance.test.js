@@ -173,9 +173,11 @@ describe('consensus hash conformance: sync BlockHasher == indexer committed hash
             }
         }
         assert.strictEqual(mismatches.length, 0,
-            'sync BlockHasher diverged from indexer committed hashes (conformance pair drifted). ' +
-            'Update BOTH xchain-sync/src/client/block_hasher.js and xchain-indexer/src/db/actions.js getBlockHashes + ' +
-            'regenerate the golden, and bump CONSENSUS_VERSION:\n' +
+            'sync BlockHasher diverged from indexer committed hashes (conformance pair drifted): a live sync/indexer fork. ' +
+            'Restore byte-identity between xchain-sync/src/client/block_hasher.js and xchain-indexer/src/db/actions.js ' +
+            'getBlockHashes by fixing whichever side drifted (xchain-sync test/unit/blockhash_conformance_twin.test.js must pass first). ' +
+            'This test reads no fixture: do not regenerate xchain-sync test/fixtures/block-hash-vectors.json (a sync self-lock) ' +
+            'or bump BLOCK_HASH_VERSION (a coordinated consensus break) to clear this failure:\n' +
             JSON.stringify(mismatches.slice(0, 10), null, 2));
     });
 });
@@ -274,9 +276,12 @@ describe('state commitment conformance: sync block_merkle_root == indexer commit
             }
         }
         assert.strictEqual(mismatches.length, 0,
-            'sync block_merkle_root diverged from indexer committed roots (block-content conformance pair drifted). ' +
-            'Update BOTH xchain-sync/src/db/actions.js getBlockLeafRows / src/state_commitment/index.js and the indexer side, then ' +
-            'regenerate the golden:\n' + JSON.stringify(mismatches.slice(0, 10), null, 2));
+            'sync block_merkle_root diverged from indexer committed roots (block-content conformance pair drifted): a live sync/indexer fork. ' +
+            'Restore byte-identity between xchain-sync/src/db/actions.js getBlockLeafRows / src/state_commitment/index.js and the ' +
+            'indexer side (xchain-indexer/src/db/actions.js, src/state_commitment/) by fixing whichever side drifted ' +
+            '(xchain-sync test/unit/blockhash_conformance_twin.test.js must pass first). This test reads no fixture: do not ' +
+            'regenerate the xchain-sync test/fixtures/*-vectors.json goldens or bump BLOCK_HASH_VERSION to clear this failure:\n' +
+            JSON.stringify(mismatches.slice(0, 10), null, 2));
     });
 });
 
