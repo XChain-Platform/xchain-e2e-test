@@ -64,4 +64,25 @@ describe('barrierFamilyRows: stake-derived capability snapshots', () => {
             satisfied: true, missingBlocks: [], refusal: null,
         })
     })
+
+    it('judges reached-ness on the buried snapshot block and reads weights there', async () => {
+        const buriedOf = (block) => block - 6
+        const asked = []
+        const weightsAt = async (block) => { asked.push(block); return [{ pubkey: 'aa', source: 's', weight: 5 }] }
+        const reached = await rows.requiredSnapshotSeeds(joinedSeeds(110), 104, weightsAt, buriedOf)
+        assert.deepStrictEqual(asked, [104])
+        assert.deepStrictEqual(reached.map((seed) => seed.row.snapshot_block), [110])
+        assert.strictEqual(reached[0].row.signing_pubkey, 'aa')
+
+        asked.length = 0
+        const unreached = await rows.requiredSnapshotSeeds(joinedSeeds(111), 104, weightsAt, buriedOf)
+        assert.deepStrictEqual(asked, [])
+        assert.deepStrictEqual(unreached, rows.requiredCapabilitySnapshots(joinedSeeds(111)))
+    })
+
+    it('names the buried height when a reached buried block has no weights', async () => {
+        await assert.rejects(
+            rows.requiredSnapshotSeeds(joinedSeeds(110), 104, async () => [], (block) => block - 6),
+            (error) => /110/.test(error.message) && /buried height 104/.test(error.message))
+    })
 })
