@@ -11,9 +11,9 @@ const { execFileSync, spawnSync } = require('node:child_process')
 const CONSENSUS = [
     'src/coins/',
     'src/crypto_networks.js',
-    'test/transactionHelper.js',
-    'test/cryptoHelper.js',
-    'test/transactionHelper/',
+    'test/helpers/core/transactionHelper.js',
+    'test/helpers/core/cryptoHelper.js',
+    'test/helpers/core/transactionHelper/',
     'test/parity/',
     'test/integration/parity/',
 ]
@@ -354,6 +354,6 @@ function main(){
     return runPlan(plan)
 }
 
-module.exports = { replayPlans, resolveBase, selectFastTests }
+module.exports = { CONSENSUS, replayPlans, resolveBase, selectFastTests }
 
 if(require.main === module) process.exitCode = main()
