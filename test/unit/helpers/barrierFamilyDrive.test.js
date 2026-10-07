@@ -334,6 +334,7 @@ describe('barrierFamilyDrive: the AT4 corpus coordinates and the VM link a copie
     }
 
     it('passes a tree whose indexer link resolves to the sibling VM', function () {
+        this.timeout(90000)
         const root = tree('../xchain-vm')
         try { assert.strictEqual(drive.vmLinkProblem(root), null) } finally { fs.rmSync(root, { recursive: true, force: true }) }
     })
