@@ -181,9 +181,10 @@ function requiredCapabilitySnapshots (seeds) {
     return joinedSnapshotBlocks(seeds).map(syntheticSnapshotSeed)
 }
 
-function stakeSnapshotSeeds (block, weights) {
+function stakeSnapshotSeeds (block, weights, buried) {
     if (!Array.isArray(weights) || weights.length === 0) {
-        throw new Error('barrierFamilyRows: cross_chain capability has no stake weights at block ' + block)
+        throw new Error('barrierFamilyRows: cross_chain capability has no stake weights at block ' + block +
+            (buried !== undefined && buried !== block ? ' (buried height ' + buried + ')' : ''))
     }
     return weights.map((entry) => ({
         table: 'capability_snapshots',
@@ -195,13 +196,22 @@ function stakeSnapshotSeeds (block, weights) {
     }))
 }
 
-async function requiredSnapshotSeeds (seeds, reachedTip, weightsAt) {
+/**
+ * Capability snapshots for every joined block. A block whose BURIED height the indexer
+ * has reached takes its stake weights read at that buried height, the height a verifier
+ * resolves the set at; any other block keeps the synthetic row. The row keeps the declared
+ * snapshot_block. `buriedOf` maps a declared block to its buried height (identity when
+ * burial is inert).
+ */
+async function requiredSnapshotSeeds (seeds, reachedTip, weightsAt, buriedOf) {
+    const bury = typeof buriedOf === 'function' ? buriedOf : (block) => block
     const out = []
     for (const block of joinedSnapshotBlocks(seeds)) {
-        if (block > Number(reachedTip)) {
+        const buried = Number(bury(block))
+        if (!Number.isFinite(buried) || buried > Number(reachedTip)) {
             out.push(syntheticSnapshotSeed(block))
         } else {
-            out.push(...stakeSnapshotSeeds(block, await weightsAt(block)))
+            out.push(...stakeSnapshotSeeds(block, await weightsAt(buried), buried))
         }
     }
     return out
