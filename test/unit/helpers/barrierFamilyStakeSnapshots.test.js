@@ -65,7 +65,7 @@ describe('barrierFamilyRows: stake-derived capability snapshots', () => {
         })
     })
 
-    it('judges reached-ness on the buried snapshot block and reads weights there', async () => {
+    it('judges reached-ness on the burial-adjusted snapshot block and reads weights there', async () => {
         const buriedOf = (block) => block - 6
         const asked = []
         const weightsAt = async (block) => { asked.push(block); return [{ pubkey: 'aa', source: 's', weight: 5 }] }
