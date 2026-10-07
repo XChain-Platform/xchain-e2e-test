@@ -329,9 +329,7 @@ describe('XCHECKPOINT canonical: all seven checkpoint-family builders', function
 
 describe('XCHECKPOINT canonical: builder roster', function () {
 
-    // Every inline builder opens its array with the 'XCHECKPOINT' tag; a new copy added
-    // anywhere in the pipeline must join the parity cases above or this roster fails.
-    const BUILDER_OPENER = "['XCHECKPOINT',";
+    const BUILDER_PATTERN = /\[\s*['"]XCHECKPOINT['"]\s*,/;
     const SCAN_DIRS = ['src', 'bin'];
     const SERVICES = ['xchain-hub', 'xchain-sdk', 'xchain-sync', 'xchain-explorer', 'xchain-indexer',
         'xchain-decoder', 'xchain-encoder', 'xchain-utxo-tracker', 'xchain-wallet', 'xchain-contracts', 'xchain-vm'];
@@ -362,7 +360,7 @@ describe('XCHECKPOINT canonical: builder roster', function () {
                 const dir = path.join(ROOT, svc, sub);
                 if (!fs.existsSync(dir)) continue;
                 for (const file of walk(dir, [])) {
-                    if (fs.readFileSync(file, 'utf8').includes(BUILDER_OPENER))
+                    if (BUILDER_PATTERN.test(fs.readFileSync(file, 'utf8')))
                         found.push(path.relative(ROOT, file).split(path.sep).join('/'));
                 }
             }
