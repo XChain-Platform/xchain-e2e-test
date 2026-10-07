@@ -2,6 +2,7 @@ const assert  = require('assert')
 const fs      = require('fs')
 const path    = require('path')
 const bitcoin = require('bitcoinjs-lib')
+const Module  = require('module')
 const { moduleEntry } = require('../../../support/sibling_source.js')
 
 const protocol = require('../../../../../xchain-documentation/protocol/constants.js')
@@ -31,8 +32,19 @@ function readIndexerHandler(handlerPath) {
     return fs.existsSync(handlerPath) ? fs.readFileSync(handlerPath, 'utf8') : null
 }
 
-const XChainVM          = require('../../../../../xchain-vm/src/index.js')
-const explorerVmQuery   = require('../../../../../xchain-explorer/src/contract/vm_query.js')
+let XChainVM
+let explorerVmQuery
+const sharedIvm = path.join(__dirname, '../../../../../xchain-vm/node_modules/isolated-vm')
+const resolveFilename = Module._resolveFilename
+Module._resolveFilename = function (request, ...rest) {
+    return resolveFilename.call(this, request === 'isolated-vm' ? sharedIvm : request, ...rest)
+}
+try {
+    XChainVM        = require('../../../../../xchain-vm/src/index.js')
+    explorerVmQuery = require('../../../../../xchain-explorer/src/contract/vm_query.js')
+} finally {
+    Module._resolveFilename = resolveFilename
+}
 
 // The indexer's EXECUTE handler re-validates VM_MAX_CALL_DEPTH/VM_MIN_CALL_GAS host-side
 // as un-exported `const`s. Those consts derive from the vendored
