@@ -2,16 +2,7 @@ const assert  = require('assert')
 const fs      = require('fs')
 const path    = require('path')
 const bitcoin = require('bitcoinjs-lib')
-const Module  = require('module')
 const { moduleEntry } = require('../../../support/sibling_source.js')
-
-// Two services each carry their own isolated-vm build; loading both native addons in one
-// process aborts the runtime. Every require of it resolves to the xchain-vm copy.
-const sharedIvm = path.join(__dirname, '../../../../../xchain-vm/node_modules/isolated-vm')
-const resolveFilename = Module._resolveFilename
-Module._resolveFilename = function (request, ...rest) {
-    return resolveFilename.call(this, request === 'isolated-vm' ? sharedIvm : request, ...rest)
-}
 
 const protocol = require('../../../../../xchain-documentation/protocol/constants.js')
 
