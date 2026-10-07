@@ -14,10 +14,10 @@
  * Shared eslint flat config for the xchain-* service repos: the file-level
  * half of the code-style rules, for editors and `npm run lint`.
  *
- * This is the platform's master copy. A repo vendors it by COPY as its own
- * eslint.config.js (a public clone has no ../claude to import from), and
- * adds eslint ^9 to devDependencies in the same commit. Core rules only, no
- * plugins, so the vendored file has one dependency.
+ * This is a vendored copy of the platform's shared preset, taken by copy
+ * because a public clone has no platform tree beside it to import from. Core
+ * rules only, no plugins, so its one dependency is eslint ^9. Refresh it by
+ * re-copying the preset; a local edit here is drift.
  *
  * The pre-push gate (check-code-structure.js) does not depend on eslint or
  * on this file; the two agree on the rules but the gate is what binds.
