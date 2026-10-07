@@ -326,3 +326,59 @@ describe('XCHECKPOINT canonical: all seven checkpoint-family builders', function
             assert.strictEqual(s, suffixed, name + ' must append the root suffix unconditionally below the flag day');
     });
 });
+
+describe('XCHECKPOINT canonical: builder roster', function () {
+
+    // Every inline builder opens its array with the 'XCHECKPOINT' tag; a new copy added
+    // anywhere in the pipeline must join the parity cases above or this roster fails.
+    const BUILDER_OPENER = "['XCHECKPOINT',";
+    const SCAN_DIRS = ['src', 'bin'];
+    const SERVICES = ['xchain-hub', 'xchain-sdk', 'xchain-sync', 'xchain-explorer', 'xchain-indexer',
+        'xchain-decoder', 'xchain-encoder', 'xchain-utxo-tracker', 'xchain-wallet', 'xchain-contracts', 'xchain-vm'];
+    const ROSTER = [
+        'xchain-explorer/src/explorer/proofs.js',
+        'xchain-hub/src/anchor/checkpoint_engine/canonical_forms.js',
+        'xchain-indexer/bin/recovery.js',
+        'xchain-indexer/src/actions/anchor/index.js',
+        'xchain-indexer/src/consensus/bridge_proof_client/checkpoint_source.js',
+        'xchain-sdk/src/checkpoint.js',
+        'xchain-sync/src/checkpoint.js'
+    ];
+
+    function walk(dir, out) {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (entry.name === 'node_modules') continue;
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) walk(full, out);
+            else if (entry.name.endsWith('.js')) out.push(full);
+        }
+        return out;
+    }
+
+    function discoverBuilders() {
+        const found = [];
+        for (const svc of SERVICES) {
+            for (const sub of SCAN_DIRS) {
+                const dir = path.join(ROOT, svc, sub);
+                if (!fs.existsSync(dir)) continue;
+                for (const file of walk(dir, [])) {
+                    if (fs.readFileSync(file, 'utf8').includes(BUILDER_OPENER))
+                        found.push(path.relative(ROOT, file).split(path.sep).join('/'));
+                }
+            }
+        }
+        return found.sort();
+    }
+
+    it('the seven inline builders are the only files that open a checkpoint canonical', function () {
+        assert.deepStrictEqual(discoverBuilders(), ROSTER.slice().sort(),
+            'a checkpoint canonical builder appeared or vanished; add it to the parity cases and this roster');
+    });
+
+    it('the roster covers every builder the parity cases exercise', function () {
+        assert.strictEqual(ROSTER.length, 7);
+        assert.strictEqual(Object.keys(gatedCanonicals(fixtures('regtest', 100, true).cp)).length
+            + Object.keys(unconditionalCanonicals(fixtures('regtest', 100, true).cp, fixtures('regtest', 100, true).d)).length,
+            ROSTER.length);
+    });
+});
