@@ -321,6 +321,7 @@ exports.mochaHooks = {
             if (!pingRegtestMiner){
                 throw new Error("Can't connect to the XChain Regtest Miner module (not ready after wait)")
             } else {
+                await gasHelper.pinHeartbeatOff(regtestMinerConnector)
                 await regtestMinerConnector.setMiningTime(1000, 1000)
             }
         })
@@ -474,7 +475,7 @@ exports.mochaHooks = {
     },
 
     async afterAll(){
-        await phase('teardown', async () => {
+        const teardown = phase('teardown', async () => {
             try{
                 await regtestMinerConnector.setDefaultMiningTime()
             } catch (err){
@@ -537,5 +538,21 @@ exports.mochaHooks = {
             // a wallet full of unzeroed private keys.
             if (teardownError) throw teardownError
         })
+
+        let afterAllError = null
+        try {
+            await teardown
+        } catch (err) {
+            afterAllError = err
+        }
+
+        const heartbeatFailures = await gasHelper.restoreHeartbeatBaselines()
+        if (heartbeatFailures.length) {
+            const heartbeatError = new Error('Could not restore regtest miner heartbeat baseline(s): ' +
+                heartbeatFailures.join('; '))
+            if (afterAllError) console.log(heartbeatError.message)
+            else afterAllError = heartbeatError
+        }
+        if (afterAllError) throw afterAllError
     }
 }
