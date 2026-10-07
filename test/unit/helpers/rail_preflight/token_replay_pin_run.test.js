@@ -86,19 +86,22 @@ describe('replayPinArgs', function () {
 });
 
 describe('runReplayPin', function () {
-    function fakeSpawn(status, json) {
+    function fakeSpawn(status, json, onReport) {
         return (cmd, args) => {
             const output = args.find(a => a.startsWith('output=')).slice('output='.length);
             if (json) fs.writeFileSync(output, JSON.stringify(json));
+            if (onReport) onReport(output);
             return { status, signal: null, stdout: '', stderr: 'tail text' };
         };
     }
 
     it('is ok when mocha exits 0 with a clean report', function () {
-        const result = runReplayPin('/idx', {}, fakeSpawn(0, report()));
+        let reportFile;
+        const result = runReplayPin('/idx', {}, fakeSpawn(0, report(), output => { reportFile = output; }));
 
         assert.strictEqual(result.ok, true);
         assert.strictEqual(result.exit, 0);
+        assert.strictEqual(fs.existsSync(reportFile), false);
     });
 
     it('is not ok when mocha exits nonzero even with a clean report', function () {

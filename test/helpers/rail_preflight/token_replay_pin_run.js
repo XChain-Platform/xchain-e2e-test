@@ -57,7 +57,7 @@ function runReplayPin(indexerRoot, env, spawn = spawnSync){
         { cwd: indexerRoot, env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     let json = null;
     try { json = JSON.parse(fs.readFileSync(report, 'utf8')); } catch(error) { json = null; }
-    try { removeReport(report); } catch(error) { /* never written */ }
+    try { fs.unlinkSync(report); } catch(error) {}
     const out = String(res.stdout || '') + String(res.stderr || '');
     const verdict = judgeReplayPinReport(json);
     if(res.status !== 0) verdict.problems.unshift('the replay pin run exited ' + res.status +
