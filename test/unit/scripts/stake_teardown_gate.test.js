@@ -142,6 +142,19 @@ describe('check-stake-teardown gate: payload delimiters', () => {
     })
 })
 
+describe('check-stake-teardown gate: unresolved transaction payloads', () => {
+    it('catches a bare payload identifier passed directly to the transaction helper', () => {
+        const hits = scan('await transactionHelper.createAndSendTransaction(tx, payload)')
+        assert.deepStrictEqual(hits.map(h => h.line), [1])
+    })
+
+    it('keeps established non-stake opaque wrappers clean', () => {
+        const hits = scan('await transactionHelper.createAndSendTransaction(tx, payload)',
+            'test/helpers/rollcall_helper/chain_driving.js')
+        assert.strictEqual(hits.length, 0)
+    })
+})
+
 const markedPayload = (reason) => scan([
     '// stake-teardown-ok:' + reason,
     "let msg = 'STAKE|1|1000|' + pubkey"

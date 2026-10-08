@@ -71,6 +71,25 @@ const NON_STAKE_BUILDERS = new Set([
     'issueCmd', 'issueBindWire', 'issueMessage', 'lockWireV0', 'lockWireV3', 'burnWireV1',
     'buildAttestationResponseAction', 'responseWire',
 ])
+const NON_STAKE_OPAQUE_PAYLOADS = new Map([
+    ['test/actions/controller_policy.test.js', new Set(['wire'])],
+    ['test/actions/nft_parity.test.js', new Set(['wire'])],
+    ['test/federation/llm_attestation.test.js', new Set(['wirePayload'])],
+    ['test/federation/multi_hub_attestation.test.js', new Set(['wirePayload'])],
+    ['test/federation/multi_hub_llm_attestation.test.js', new Set(['wirePayload'])],
+    ['test/federation/multi_hub_llm_outage.test.js', new Set(['wirePayload'])],
+    ['test/federation/multi_hub_node_proof.test.js', new Set(['wirePayload'])],
+    ['test/helpers/envelopeHelper.js', new Set(['action'])],
+    ['test/helpers/oracleBatchDrive.js', new Set(['wire'])],
+    ['test/helpers/oracleBatchVenue.js', new Set(['wire'])],
+    ['test/helpers/rollcall_helper/chain_driving.js', new Set(['payload'])],
+    ['test/integration/bridge_rail_base.test/support/index.js', new Set(['wire'])],
+    ['test/integration/bridge_rail_list_share.test/07_at7_hub_stopped.test.js', new Set(['wire'])],
+    ['test/integration/bridge_rail_list_share.test/support/index.js', new Set(['wire'])],
+    ['test/integration/bridge_rail_policy.test/support/policy.js', new Set(['wire'])],
+    ['test/integration/bridge_rail_token.test/support/token.js', new Set(['wire'])],
+    ['test/rail/custody_guard/withdraw.test.js', new Set(['wire'])],
+])
 
 // Accept a marker only when its reason is a sentence (shared rule, see scripts/lib).
 const hasOptOut = optOutMarker('stake-teardown-ok')
@@ -349,6 +368,13 @@ function isStakeHelperBuilt(tokens, bindings, start, end, seen = new Set()){
     return tokens.slice(start, open).some((token) => token.type === 'identifier' && token.value === 'stakeHelper')
 }
 
+function isKnownNonStakePayload(tokens, rel, start, end){
+    ({ start, end } = stripParens(tokens, start, end))
+    if (tokens[start]?.value === '{') return rel === 'test/regression/transaction.regression.js'
+    if (end !== start + 1 || tokens[start]?.type !== 'identifier') return false
+    return NON_STAKE_OPAQUE_PAYLOADS.get(rel)?.has(tokens[start].value) || false
+}
+
 function registrationCount(tokens){
     let count = 0
     for (let i = 0; i + 3 < tokens.length; i++){
@@ -387,9 +413,11 @@ function scanLines(lines, rel){
             add(originFor(tokens, bindings, payload.start, payload.end))
         else if (tokens[payload.start]?.value === '[')
             add(joinedStake(tokens, bindings, payload.start))
-        else if (value === UNKNOWN && !isStakeHelperBuilt(tokens, bindings, payload.start, payload.end)){
+        else if (value === UNKNOWN &&
+            !isStakeHelperBuilt(tokens, bindings, payload.start, payload.end) &&
+            !isKnownNonStakePayload(tokens, rel, payload.start, payload.end)){
             const builder = calledBuilder(tokens, bindings, payload.start, payload.end)
-            if (builder && !NON_STAKE_BUILDERS.has(builder))
+            if (!builder || !NON_STAKE_BUILDERS.has(builder))
                 add(originFor(tokens, bindings, payload.start, payload.end))
         }
     }
