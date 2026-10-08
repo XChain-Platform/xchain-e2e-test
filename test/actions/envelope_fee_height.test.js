@@ -46,6 +46,7 @@ const assert = require('assert')
 const cryptoHelper = require('../helpers/core/cryptoHelper')
 const nativeFeeHelper = require('../helpers/nativeFeeHelper')
 const envelopeHelper = require('../helpers/envelopeHelper')
+const envelopeRevealHeight = require('../helpers/envelopeRevealHeight')
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
 const { NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
 
@@ -167,13 +168,13 @@ async function seedFeeSpike(commitHeight){
 async function publishSplit(pair){
     await nodeConnector.broadcastTx(pair.commitHex)
     await regtestMinerConnector.generateBlocks(1)
-    const commitHeight = await nodeConnector.getBlockCount()
+    const commitHeight = await envelopeRevealHeight(nodeConnector, pair.commitTxid)
 
     await regtestMinerConnector.generateBlocks(GAP_BLOCKS)
 
     await nodeConnector.broadcastTx(pair.revealHex)
     await regtestMinerConnector.generateBlocks(1)
-    const revealHeight = await nodeConnector.getBlockCount()
+    const revealHeight = await envelopeRevealHeight(nodeConnector, pair.revealTxid)
 
     assert(revealHeight - commitHeight >= GAP_BLOCKS,
         'the reveal must land well after the commit (' + commitHeight + ' -> ' + revealHeight + ')')
@@ -301,7 +302,7 @@ describe('Taproot Envelope fee lifecycle across a block gap (§3.5)', function (
         try {
             await nodeConnector.broadcastTx(pair.commitHex)
             await regtestMinerConnector.generateBlocks(1)
-            commitHeight = await nodeConnector.getBlockCount()
+            commitHeight = await envelopeRevealHeight(nodeConnector, pair.commitTxid)
 
             // The requirement moves, between the two halves.
             // Seeded as an ADDITIONAL row at a higher round rather than a replacement:
@@ -314,7 +315,7 @@ describe('Taproot Envelope fee lifecycle across a block gap (§3.5)', function (
             await regtestMinerConnector.generateBlocks(GAP_BLOCKS)
             await nodeConnector.broadcastTx(pair.revealHex)
             await regtestMinerConnector.generateBlocks(1)
-            const revealHeight = await nodeConnector.getBlockCount()
+            const revealHeight = await envelopeRevealHeight(nodeConnector, pair.revealTxid)
             assert(revealHeight - commitHeight >= GAP_BLOCKS, 'the reveal must land well after the commit')
 
             const rows = await waitForActionRow(pair.revealTxid)
