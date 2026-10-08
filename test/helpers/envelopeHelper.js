@@ -18,6 +18,7 @@
 
 const crypto = require('crypto')
 const zlib = require('zlib')
+const assert = require('assert')
 const transactionHelper = require('./core/transactionHelper')
 const requireRow = require('./requireRow')
 
@@ -45,6 +46,20 @@ function decompile(script){
 
 module.exports = {
     sha256(buf){ return crypto.createHash('sha256').update(buf).digest('hex') },
+
+    async confirmingHeight(node, txid){
+        const tx = await node.getTransaction(String(txid))
+        assert(tx, 'the node has no transaction ' + txid)
+        assert(tx.blockhash, 'transaction ' + txid + ' is not confirmed')
+
+        const block = await node.getBlock(tx.blockhash)
+        assert(block, 'the node has no confirming block ' + tx.blockhash + ' for transaction ' + txid)
+
+        const height = Number(block.height)
+        assert(Number.isSafeInteger(height) && height >= 0,
+            'transaction ' + txid + ' has an invalid confirming block height: ' + String(block.height))
+        return height
+    },
 
     // The explorer's coin path segment: R/T prefix by network, mirroring the SDK's
     // endpoint mapping (RBTC on bitcoin regtest, TLTC on litecoin testnet, ...).

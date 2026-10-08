@@ -11,9 +11,9 @@
  ********************************************************************/
 
 const assert = require('assert')
-const envelopeRevealHeight = require('../../helpers/envelopeRevealHeight')
+const envelopeHelper = require('../../helpers/envelopeHelper')
 
-describe('envelopeRevealHeight', function () {
+describe('envelopeHelper.confirmingHeight', function () {
     it('reads the height from the transaction confirming block, not the node tip', async function () {
         const calls = []
         const node = {
@@ -30,7 +30,7 @@ describe('envelopeRevealHeight', function () {
             }
         }
 
-        assert.strictEqual(await envelopeRevealHeight(node, 'reveal-txid'), 412)
+        assert.strictEqual(await envelopeHelper.confirmingHeight(node, 'reveal-txid'), 412)
         assert.deepStrictEqual(calls, [
             ['getTransaction', 'reveal-txid'],
             ['getBlock', 'confirming-block']
@@ -43,25 +43,25 @@ describe('envelopeRevealHeight', function () {
             async getBlock(){ return { height: '9' } }
         }
 
-        assert.strictEqual(await envelopeRevealHeight(node, 'commit-txid'), 9)
+        assert.strictEqual(await envelopeHelper.confirmingHeight(node, 'commit-txid'), 9)
     })
 
     it('fails loud when the transaction is unknown or unconfirmed', async function () {
         await assert.rejects(
-            envelopeRevealHeight({ getTransaction: async () => null }, 'missing'),
+            envelopeHelper.confirmingHeight({ getTransaction: async () => null }, 'missing'),
             /node has no transaction missing/)
         await assert.rejects(
-            envelopeRevealHeight({ getTransaction: async () => ({ txid: 'pending' }) }, 'pending'),
+            envelopeHelper.confirmingHeight({ getTransaction: async () => ({ txid: 'pending' }) }, 'pending'),
             /transaction pending is not confirmed/)
     })
 
     it('fails loud when the confirming block or its height is unreadable', async function () {
         const transaction = async () => ({ blockhash: 'block-x' })
         await assert.rejects(
-            envelopeRevealHeight({ getTransaction: transaction, getBlock: async () => null }, 'reveal'),
+            envelopeHelper.confirmingHeight({ getTransaction: transaction, getBlock: async () => null }, 'reveal'),
             /no confirming block block-x/)
         await assert.rejects(
-            envelopeRevealHeight({ getTransaction: transaction, getBlock: async () => ({ height: 'unknown' }) }, 'reveal'),
+            envelopeHelper.confirmingHeight({ getTransaction: transaction, getBlock: async () => ({ height: 'unknown' }) }, 'reveal'),
             /invalid confirming block height: unknown/)
     })
 })
