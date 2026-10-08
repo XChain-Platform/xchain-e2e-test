@@ -67,6 +67,9 @@ const REGISTRAR = path.join('test', 'helpers', 'stakeHelper.js')
 
 const COMMENT_LINE  = /^\s*(?:\/\/|\*)/
 const UNKNOWN       = '\u0000'
+const NON_STAKE_BUILDERS = new Set([
+    'issueCmd', 'issueBindWire', 'issueMessage', 'lockWireV0', 'lockWireV3', 'burnWireV1',
+])
 
 // Accept a marker only when its reason is a sentence (shared rule, see scripts/lib).
 const hasOptOut = optOutMarker('stake-teardown-ok')
@@ -314,6 +317,21 @@ function joinedStake(tokens, bindings, start){
     return null
 }
 
+function calledBuilder(tokens, start, end){
+    ({ start, end } = stripParens(tokens, start, end))
+    let open = start
+    while (tokens[open] && tokens[open].value !== '(') open++
+    if (open === start || matching(tokens, open, '(', ')') !== end - 1) return null
+    for (let i = start; i < open; i++){
+        if (tokens[i].type !== 'identifier' && tokens[i].value !== '.' && tokens[i].value !== '?.') return null
+    }
+    return tokens[open - 1].type === 'identifier' ? tokens[open - 1].value : null
+}
+
+function isKnownNonStakeBuilder(name){
+    return NON_STAKE_BUILDERS.has(name)
+}
+
 function registrationCount(tokens){
     let count = 0
     for (let i = 0; i + 3 < tokens.length; i++){
@@ -347,10 +365,16 @@ function scanLines(lines, rel){
         const args = splitTopLevel(tokens, i + 2, close, ',')
         if (args.length < 2) continue
         const payload = args[1]
-        if (isStake(expressionValue(tokens, bindings, payload.start, payload.end)))
+        const value = expressionValue(tokens, bindings, payload.start, payload.end)
+        if (isStake(value))
             add(originFor(tokens, bindings, payload.start, payload.end))
         else if (tokens[payload.start]?.value === '[')
             add(joinedStake(tokens, bindings, payload.start))
+        else if (value === UNKNOWN){
+            const builder = calledBuilder(tokens, payload.start, payload.end)
+            if (builder && !isKnownNonStakeBuilder(builder))
+                add(originFor(tokens, bindings, payload.start, payload.end))
+        }
     }
 
     const sites = [...sitesByLine.values()].sort((a, b) => a.line - b.line)
