@@ -69,6 +69,7 @@ const COMMENT_LINE  = /^\s*(?:\/\/|\*)/
 const UNKNOWN       = '\u0000'
 const NON_STAKE_BUILDERS = new Set([
     'issueCmd', 'issueBindWire', 'issueMessage', 'lockWireV0', 'lockWireV3', 'burnWireV1',
+    'buildAttestationResponseAction', 'responseWire',
 ])
 
 // Accept a marker only when its reason is a sentence (shared rule, see scripts/lib).
@@ -317,8 +318,14 @@ function joinedStake(tokens, bindings, start){
     return null
 }
 
-function calledBuilder(tokens, start, end){
+function calledBuilder(tokens, bindings, start, end, seen = new Set()){
     ({ start, end } = stripParens(tokens, start, end))
+    if (end === start + 1 && tokens[start]?.type === 'identifier' && bindings.has(tokens[start].value) &&
+        !seen.has(tokens[start].value)){
+        const nextSeen = new Set(seen); nextSeen.add(tokens[start].value)
+        const bound = bindings.get(tokens[start].value)
+        return calledBuilder(tokens, bindings, bound.start, bound.end, nextSeen)
+    }
     let open = start
     while (tokens[open] && tokens[open].value !== '(') open++
     if (open === start || matching(tokens, open, '(', ')') !== end - 1) return null
@@ -328,8 +335,18 @@ function calledBuilder(tokens, start, end){
     return tokens[open - 1].type === 'identifier' ? tokens[open - 1].value : null
 }
 
-function isKnownNonStakeBuilder(name){
-    return NON_STAKE_BUILDERS.has(name)
+function isStakeHelperBuilt(tokens, bindings, start, end, seen = new Set()){
+    ({ start, end } = stripParens(tokens, start, end))
+    if (end === start + 1 && tokens[start]?.type === 'identifier' && bindings.has(tokens[start].value) &&
+        !seen.has(tokens[start].value)){
+        const nextSeen = new Set(seen); nextSeen.add(tokens[start].value)
+        const bound = bindings.get(tokens[start].value)
+        return isStakeHelperBuilt(tokens, bindings, bound.start, bound.end, nextSeen)
+    }
+    let open = start
+    while (tokens[open] && tokens[open].value !== '(') open++
+    if (open === start || matching(tokens, open, '(', ')') !== end - 1) return false
+    return tokens.slice(start, open).some((token) => token.type === 'identifier' && token.value === 'stakeHelper')
 }
 
 function registrationCount(tokens){
@@ -370,9 +387,9 @@ function scanLines(lines, rel){
             add(originFor(tokens, bindings, payload.start, payload.end))
         else if (tokens[payload.start]?.value === '[')
             add(joinedStake(tokens, bindings, payload.start))
-        else if (value === UNKNOWN){
-            const builder = calledBuilder(tokens, payload.start, payload.end)
-            if (builder && !isKnownNonStakeBuilder(builder))
+        else if (value === UNKNOWN && !isStakeHelperBuilt(tokens, bindings, payload.start, payload.end)){
+            const builder = calledBuilder(tokens, bindings, payload.start, payload.end)
+            if (builder && !NON_STAKE_BUILDERS.has(builder))
                 add(originFor(tokens, bindings, payload.start, payload.end))
         }
     }
