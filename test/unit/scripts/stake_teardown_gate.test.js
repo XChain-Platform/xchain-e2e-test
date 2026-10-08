@@ -143,6 +143,10 @@ describe('check-stake-teardown gate: payload delimiters', () => {
 })
 
 describe('check-stake-teardown gate: unresolved transaction payloads', () => {
+    const scanPayload = (payload) => gate.scanLines([
+        `await transactionHelper.createAndSendTransaction(tx, ${payload})`,
+    ], 'test/actions/opaque_payload.test.js')
+
     it('catches a bare payload identifier passed directly to the transaction helper', () => {
         const hits = scan('await transactionHelper.createAndSendTransaction(tx, payload)')
         assert.deepStrictEqual(hits.map(h => h.line), [1])
@@ -151,6 +155,27 @@ describe('check-stake-teardown gate: unresolved transaction payloads', () => {
     it('keeps established non-stake opaque wrappers clean', () => {
         const hits = scan('await transactionHelper.createAndSendTransaction(tx, payload)',
             'test/helpers/rollcall_helper/chain_driving.js')
+        assert.strictEqual(hits.length, 0)
+    })
+
+    for (const payload of ['payload', 'context.payload', 'payloads[index]',
+        'usePrimary ? primaryPayload : fallbackPayload', 'primaryPayload || fallbackPayload']){
+        it(`flags unresolved payload expression: ${payload}`, () => {
+            const hits = scanPayload(payload)
+            assert.strictEqual(hits.length, 1)
+            assert.strictEqual(hits[0].line, 1)
+        })
+    }
+
+    it('accepts a payload demonstrably built by stakeHelper', () => {
+        assert.strictEqual(scanPayload('stakeHelper.sendStakeV1(tx, amount, pubkey)').length, 0)
+    })
+
+    it('accepts a bound payload demonstrably built by stakeHelper', () => {
+        const hits = gate.scanLines([
+            'const payload = stakeHelper.sendStakeV2(tx, amount, pubkey)',
+            'await transactionHelper.createAndSendTransaction(tx, payload)',
+        ], 'test/actions/helper_payload.test.js')
         assert.strictEqual(hits.length, 0)
     })
 })
