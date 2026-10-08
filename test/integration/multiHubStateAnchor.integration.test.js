@@ -102,11 +102,12 @@ function crossingPair({ ltcIdx, dogeIdx }){
     };
 }
 
-// Per hub: pin the BTC tip (election + snapshot block), stub the checkpoint
+// Per hub: pin the BTC snapshot/election and DOGE fold tips, stub the checkpoint
 // engine's indexer view to the SHARED state, scope to BTC, and capture every
 // "on-chain" anchor broadcast instead of hitting DOGE.
 function wireHub(hub, i, members, published) {
     hub.resolveBtcLatestBlock = async () => BLOCK_INDEX;
+    hub.resolveDogeLatestBlock = async () => BLOCK_INDEX;
     const cps = hub.stateCheckpoints;
     cps.network = 'regtest';   // engine cached '' at construction (pre-seed)
     cps.chains = ['BTC'];
