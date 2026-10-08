@@ -17,8 +17,9 @@
 
 const fs = require('fs')
 const path = require('path')
+const { DRILL_KEYS_DIR } = require('./drill_keys_dir')
 
-const DEFAULT_FAUCET_FILE = path.resolve(__dirname, '../../../drill-keys/gas-faucet.json')
+const DEFAULT_FAUCET_FILE = path.join(DRILL_KEYS_DIR, 'gas-faucet.json')
 
 // Base units per whole XCHAIN, for exact balance comparisons.
 const SCALE = 10n ** 8n
