@@ -100,10 +100,13 @@ async function seedDivergingRow (ctx) {
     const tip = held.tip
     ctx.B = tip + 1
     const now = Math.floor(Date.now() / 1000)
-    // Snapshot at B, not the reached tip: a fresh node's stake re-derivation rejects a synthetic capability row at a reached height.
     const base = { network: ctx.venue.network, coin: ctx.coin, snapshotBlock: ctx.B }
     const row = rows.inertRow(TABLE, Object.assign({ tag: 'bf5|' + tip, effectiveTime: now - 10, admitBlocks: { BTC: ctx.B + 2 } }, base))
-    await drive.seedMirrors(ctx.venue, [rows.inertRow('capability_snapshots', Object.assign({ tag: 'bf5|snap|' + tip, effectiveTime: now }, base)), row])
+    const members = [row]
+    const snapshots = await rows.requiredSnapshotSeeds(members, tip, drive.stakeWeightsAt(ctx.venue, ARMED))
+    const coverage = rows.snapshotCapabilityCoverage(members.concat(snapshots))
+    assert.ok(coverage.satisfied, coverage.refusal || 'missing capability snapshot blocks ' + JSON.stringify(coverage.missingBlocks) + ' in the BF5 snapshot seed set')
+    await drive.seedMirrors(ctx.venue, snapshots.concat(members))
     await drive.waitForMirrorRows(ctx.venue, ARMED, TABLE, 1)
     await drive.waitForMirrorRows(ctx.venue, INERT, TABLE, 1)
     ctx.key = row.row.match_id

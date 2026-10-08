@@ -202,12 +202,14 @@ async function seedRows (ctx) {
   ctx.tips = { [BTC]: btcTip, [LTC]: ltcTip }
   ctx.plan = planEntries(btcTip, ltcTip)
   const now = Math.floor(Date.now() / 1000)
-  // Snapshot at BTC's planned entry, not the reached tip: a fresh node's stake re-derivation rejects a synthetic capability row at a reached height.
   const base = { network: ctx.venue.network, coin: BTC, otherChain: LTC, snapshotBlock: ctx.plan[BTC], effectiveTime: now - 10 }
   const seeded = bf8Rows(ctx.plan, base)
   ctx.keys = { A: seeded.A.row.match_id, N: seeded.N.row.match_id }
-  const snap = rows.inertRow('capability_snapshots', Object.assign({ tag: 'bf8|snap|' + btcTip, effectiveTime: now }, base))
-  await drive.seedMirrors(ctx.venue, [snap, seeded.A, seeded.N])
+  const members = [seeded.A, seeded.N]
+  const snapshots = await rows.requiredSnapshotSeeds(members, btcTip, drive.stakeWeightsAt(ctx.venue, ARMED[0]))
+  const coverage = rows.snapshotCapabilityCoverage(members.concat(snapshots))
+  assert.ok(coverage.satisfied, coverage.refusal || 'missing capability snapshot blocks ' + JSON.stringify(coverage.missingBlocks) + ' in the BF8 snapshot seed set')
+  await drive.seedMirrors(ctx.venue, snapshots.concat(members))
   for (const ix of ctx.ltcVenue.indexers) ix.mirrorProxy.dropSockets()
   for (const i of ARMED) {
     await drive.waitForMirrorRows(ctx.venue, i, TABLE, 2)
