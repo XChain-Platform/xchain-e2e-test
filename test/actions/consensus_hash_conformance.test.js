@@ -12,11 +12,11 @@
  * LIVE cross-repo drift-lock for the consensus hash CONFORMANCE PAIR.
  *
  * xchain-sync validators independently recompute each block's ledger/actions/
- * contract hashes via src/BlockHasher.js, and HALT if they disagree with the
+ * contract hashes via src/client/block_hasher.js, and HALT if they disagree with the
  * source. That only stays correct while BlockHasher is byte-identical to the
- * indexer's xchain-indexer/src/db.js getBlockHashes(). The unit golden in each
+ * indexer's xchain-indexer/src/db/actions.js getBlockHashes(). The unit golden in each
  * repo locks the serialization, but only THIS test exercises the full pipeline
- * (the 8 gathering queries + chaining + getDataHash) against REAL indexer-
+ * (the 11 gathering queries + chaining + getDataHash) against REAL indexer-
  * produced data on the running stack.
  *
  * For every block the e2e stack has indexed, recompute the three hashes with

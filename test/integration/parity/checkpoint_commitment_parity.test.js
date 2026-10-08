@@ -97,6 +97,17 @@ function anchorSectionCanonical(d) {
     return Anchor.prototype.canonical.call({}, d);
 }
 
+// Name the indexer shared-rows part that declares the CHECKPOINT_COMMITMENT row, found by
+// its addGate call so the byte compare follows the row if a re-slice moves it.
+function checkpointRowPart() {
+    const dir = path.join(ROOT, 'xchain-indexer/src/protocol_changes');
+    const decl = "addGate('" + CKPT_KEY + "'";
+    const hits = fs.readdirSync(dir).filter((f) => /^shared_rows(_\d+)?\.js$/.test(f)
+        && fs.readFileSync(path.join(dir, f), 'utf8').includes(decl));
+    assert.strictEqual(hits.length, 1, 'expected exactly one indexer shared-rows part declaring ' + CKPT_KEY + ', found ' + JSON.stringify(hits));
+    return hits[0];
+}
+
 // One logical checkpoint, expressed in BOTH the hub/SDK row shape and the indexer
 // wire-parse `d` shape, so a single fixture drives all three builders.
 function fixtures(net, snapshotBlock, withRoots) {
@@ -222,20 +233,16 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
     });
 
     it('checkpoint_commitment_activation.js executable code is byte-identical across all five copies', function () {
-        // The predicate-only module is gone since W5: the map is the registry row
-        // and the predicate is the registry's own activeAt, so this compares the
-        // registry core every consumer carries as a byte twin of the indexer's
-        // (the platform twin reconcile holds those). The row itself is what can
-        // still drift: the value case above holds its values, and this case pins
-        // its SHAPE (every network the canonical map names, and no other) in
-        // every registry, so a slot added on one side only is caught even when
-        // the probed heights read the same verdict.
-        const canonical = Object.keys(protocolConstants.CHECKPOINT_COMMITMENT_ACTIVATION).sort();
-        for (const [name, mod] of [['hub', hubCkpt], ['sdk', sdkCkpt], ['explorer', expCkpt], ['sync', syncCkpt]]) {
-            assert.deepStrictEqual(Object.keys(mod.copy(CKPT_KEY)).sort(), Object.keys(idxCkpt.copy(CKPT_KEY)).sort(),
-                name + ' checkpoint_commitment_activation row names a different network set from the indexer row');
-            assert.deepStrictEqual(Object.keys(mod.copy(CKPT_KEY)).sort(), canonical,
-                name + ' checkpoint_commitment_activation row names a different network set from the canonical map');
+        // The predicate-only module is gone since W5. Its executable code is now the
+        // indexer-owned registry part that declares the row, carried byte for byte in
+        // every consumer's gate_registry/, so compare that part's bytes in all five
+        // repos (the value case above already pins the row's values and network set).
+        const part = checkpointRowPart();
+        const idx = fs.readFileSync(path.join(ROOT, 'xchain-indexer/src/protocol_changes', part), 'utf8');
+        for (const repo of ['xchain-hub', 'xchain-sdk', 'xchain-explorer', 'xchain-sync']) {
+            const rel = path.join(repo, 'src/consensus/gate_registry', part);
+            assert.strictEqual(fs.readFileSync(path.join(ROOT, rel), 'utf8'), idx,
+                rel + ' drifted from the indexer registry part that declares ' + CKPT_KEY);
         }
     });
 
