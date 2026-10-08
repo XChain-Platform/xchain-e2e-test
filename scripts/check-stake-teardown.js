@@ -65,16 +65,31 @@ const SKIP_TOP_LEVEL = new Set(['unit', 'codec'])
 // The one file allowed to build STAKE payloads raw: it is the registrar.
 const REGISTRAR = path.join('test', 'helpers', 'stakeHelper.js')
 
-// A STAKE payload literal: "STAKE|1|... , 'STAKE|3|... . Version-agnostic on
-// purpose, so a STAKE v4 is caught the day it is written. Any opening delimiter
-// counts (a template literal too, its version interpolated or not), and so does a
-// quoted STAKE joined to a '|'.
-const STAKE_PAYLOAD = /['"`]STAKE(?:\|[\d'"`$]|['"`]\s*\+\s*['"`]\|)/
-// Also catch a bare quoted STAKE that opens an array (the .join('|') form) or is bound
-// to a name; an object key such as `action: 'STAKE'` and an === comparison stay out.
-const STAKE_TOKEN   = /(?:\[\s*|^\s*|(?<![=!<>])=\s*)['"`]STAKE['"`]\s*(?:[,;]|$)/
 const COMMENT_LINE  = /^\s*(?:\/\/|\*)/
-const REGISTERS     = /stakeTeardown\.registerStake\s*\(/
+const UNKNOWN       = '\u0000'
+const NON_STAKE_BUILDERS = new Set([
+    'issueCmd', 'issueBindWire', 'issueMessage', 'lockWireV0', 'lockWireV3', 'burnWireV1',
+    'buildAttestationResponseAction', 'responseWire',
+])
+const NON_STAKE_OPAQUE_PAYLOADS = new Map([
+    ['test/actions/controller_policy.test.js', new Set(['wire'])],
+    ['test/actions/nft_parity.test.js', new Set(['wire'])],
+    ['test/federation/llm_attestation.test.js', new Set(['wirePayload'])],
+    ['test/federation/multi_hub_attestation.test.js', new Set(['wirePayload'])],
+    ['test/federation/multi_hub_llm_attestation.test.js', new Set(['wirePayload'])],
+    ['test/federation/multi_hub_llm_outage.test.js', new Set(['wirePayload'])],
+    ['test/federation/multi_hub_node_proof.test.js', new Set(['wirePayload'])],
+    ['test/helpers/envelopeHelper.js', new Set(['action'])],
+    ['test/helpers/oracleBatchDrive.js', new Set(['wire'])],
+    ['test/helpers/oracleBatchVenue.js', new Set(['wire'])],
+    ['test/helpers/rollcall_helper/chain_driving.js', new Set(['payload'])],
+    ['test/integration/bridge_rail_base.test/support/index.js', new Set(['wire'])],
+    ['test/integration/bridge_rail_list_share.test/07_at7_hub_stopped.test.js', new Set(['wire'])],
+    ['test/integration/bridge_rail_list_share.test/support/index.js', new Set(['wire'])],
+    ['test/integration/bridge_rail_policy.test/support/policy.js', new Set(['wire'])],
+    ['test/integration/bridge_rail_token.test/support/token.js', new Set(['wire'])],
+    ['test/rail/custody_guard/withdraw.test.js', new Set(['wire'])],
+])
 
 // Accept a marker only when its reason is a sentence (shared rule, see scripts/lib).
 const hasOptOut = optOutMarker('stake-teardown-ok')
@@ -104,23 +119,313 @@ function optedOut(lines, idx){
     return false
 }
 
-// Count only live registerStake calls; a comment naming one books nothing.
-function registrationCount(lines){
-    return lines.filter((l) => REGISTERS.test(l) && !COMMENT_LINE.test(l)).length
+function quotedToken(source, start, quote, line){
+    let i = start + 1, value = '', tokenLine = line
+    while (i < source.length){
+        if (source[i] === quote) return { end: i + 1, line: tokenLine, value }
+        if (source[i] === '\n') tokenLine++
+        if (source[i] === '\\' && i + 1 < source.length){
+            const escaped = source[i + 1]
+            const simple = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', v: '\v' }
+            if (simple[escaped] !== undefined) value += simple[escaped]
+            else if (escaped === 'x' && /^[0-9a-f]{2}$/i.test(source.slice(i + 2, i + 4))){
+                value += String.fromCharCode(parseInt(source.slice(i + 2, i + 4), 16)); i += 2
+            } else if (escaped === 'u' && /^[0-9a-f]{4}$/i.test(source.slice(i + 2, i + 6))){
+                value += String.fromCharCode(parseInt(source.slice(i + 2, i + 6), 16)); i += 4
+            } else value += escaped
+            i += 2
+            continue
+        }
+        value += source[i++]
+    }
+    return { end: i, line: tokenLine, value }
+}
+
+function templateToken(source, start, line){
+    let i = start + 1, raw = '', tokenLine = line
+    while (i < source.length){
+        if (source[i] === '`'){
+            const value = raw.replace(/\$\{[\s\S]*?\}/g, UNKNOWN)
+            return { end: i + 1, line: tokenLine, value }
+        }
+        if (source[i] === '\n') tokenLine++
+        if (source[i] === '\\' && i + 1 < source.length){
+            raw += source[i] + source[i + 1]
+            i += 2
+        } else raw += source[i++]
+    }
+    return { end: i, line: tokenLine, value: raw }
+}
+
+// A deliberately small lexer is enough here and keeps this gate runnable before
+// npm install. It removes comments and makes newlines irrelevant to expressions.
+function tokensFor(source){
+    const tokens = []
+    let i = 0, line = 1
+    while (i < source.length){
+        if (/\s/.test(source[i])){
+            if (source[i++] === '\n') line++
+            continue
+        }
+        if (source.slice(i, i + 2) === '//'){
+            while (i < source.length && source[i] !== '\n') i++
+            continue
+        }
+        if (source.slice(i, i + 2) === '/*'){
+            i += 2
+            while (i < source.length && source.slice(i, i + 2) !== '*/'){
+                if (source[i++] === '\n') line++
+            }
+            i += source.slice(i, i + 2) === '*/' ? 2 : 0
+            continue
+        }
+        const start = i
+        if (source[i] === "'" || source[i] === '"'){
+            const parsed = quotedToken(source, i, source[i], line)
+            tokens.push({ type: 'string', value: parsed.value, line, endLine: parsed.line, start })
+            i = parsed.end; line = parsed.line
+            continue
+        }
+        if (source[i] === '`'){
+            const parsed = templateToken(source, i, line)
+            tokens.push({ type: 'template', value: parsed.value, line, endLine: parsed.line, start })
+            i = parsed.end; line = parsed.line
+            continue
+        }
+        const identifier = /^[A-Za-z_$][\w$]*/.exec(source.slice(i))
+        if (identifier){
+            tokens.push({ type: 'identifier', value: identifier[0], line, endLine: line, start })
+            i += identifier[0].length
+            continue
+        }
+        const operator = /^(?:===|!==|=>|==|!=|<=|>=|\+\+|--|&&|\|\||\?\?|\+=|-=|\*\*|\?\.)/.exec(source.slice(i))
+        const value = operator ? operator[0] : source[i]
+        tokens.push({ type: 'punctuator', value, line, endLine: line, start })
+        i += value.length
+    }
+    return tokens
+}
+
+function matching(tokens, start, open, close){
+    let depth = 0
+    for (let i = start; i < tokens.length; i++){
+        if (tokens[i].value === open) depth++
+        if (tokens[i].value === close && --depth === 0) return i
+    }
+    return -1
+}
+
+function expressionEnd(tokens, start){
+    const opens = { '(': ')', '[': ']', '{': '}' }, closes = new Set(Object.values(opens))
+    const stack = []
+    const continues = new Set(['+', '-', '*', '/', '%', '&&', '||', '??', '?', ':', '.', '?.', ',', '='])
+    for (let i = start; i < tokens.length; i++){
+        const value = tokens[i].value
+        if (opens[value]) stack.push(opens[value])
+        else if (closes.has(value)){
+            if (!stack.length) return i
+            if (stack[stack.length - 1] === value) stack.pop()
+        }
+        if (!stack.length && (value === ';' || value === ',')) return i
+        const next = tokens[i + 1]
+        if (!stack.length && next && next.line > tokens[i].endLine &&
+            !continues.has(value) && !continues.has(next.value) && next.value !== '(' && next.value !== '[')
+            return i + 1
+    }
+    return tokens.length
+}
+
+function bindingMap(tokens){
+    const bindings = new Map()
+    for (let i = 0; i + 3 < tokens.length; i++){
+        if (!['const', 'let', 'var'].includes(tokens[i].value) ||
+            tokens[i + 1].type !== 'identifier' || tokens[i + 2].value !== '=') continue
+        bindings.set(tokens[i + 1].value, { start: i + 3, end: expressionEnd(tokens, i + 3) })
+    }
+    return bindings
+}
+
+function stripParens(tokens, start, end){
+    while (tokens[start] && tokens[start].value === '(' && matching(tokens, start, '(', ')') === end - 1){
+        start++; end--
+    }
+    return { start, end }
+}
+
+function splitTopLevel(tokens, start, end, delimiter){
+    const parts = [], stack = []
+    const pairs = { '(': ')', '[': ']', '{': '}' }
+    let partStart = start
+    for (let i = start; i < end; i++){
+        if (pairs[tokens[i].value]) stack.push(pairs[tokens[i].value])
+        else if (stack[stack.length - 1] === tokens[i].value) stack.pop()
+        else if (!stack.length && tokens[i].value === delimiter){
+            parts.push({ start: partStart, end: i }); partStart = i + 1
+        }
+    }
+    parts.push({ start: partStart, end })
+    return parts
+}
+
+function expressionValue(tokens, bindings, start, end, seen = new Set()){
+    ({ start, end } = stripParens(tokens, start, end))
+    if (start >= end) return UNKNOWN
+    const sums = splitTopLevel(tokens, start, end, '+')
+    if (sums.length > 1) return sums.map((p) => expressionValue(tokens, bindings, p.start, p.end, seen)).join('')
+    if (end === start + 1){
+        const token = tokens[start]
+        if (token.type === 'string' || token.type === 'template') return token.value
+        if (token.type === 'identifier' && bindings.has(token.value) && !seen.has(token.value)){
+            const nextSeen = new Set(seen); nextSeen.add(token.value)
+            const bound = bindings.get(token.value)
+            return expressionValue(tokens, bindings, bound.start, bound.end, nextSeen)
+        }
+        return UNKNOWN
+    }
+    if (tokens[start].value === '['){
+        const close = matching(tokens, start, '[', ']')
+        if (close > start && close + 4 < end && tokens[close + 1].value === '.' &&
+            tokens[close + 2].value === 'join' && tokens[close + 3].value === '('){
+            const callClose = matching(tokens, close + 3, '(', ')')
+            if (callClose === end - 1){
+                const separator = expressionValue(tokens, bindings, close + 4, callClose, seen)
+                return splitTopLevel(tokens, start + 1, close, ',')
+                    .map((p) => expressionValue(tokens, bindings, p.start, p.end, seen)).join(separator)
+            }
+        }
+    }
+    return UNKNOWN
+}
+
+function isStake(value){
+    return value === 'STAKE' || /^STAKE(?:\u0000)*\|/.test(value)
+}
+
+function originFor(tokens, bindings, start, end, seen = new Set()){
+    ({ start, end } = stripParens(tokens, start, end))
+    if (end === start + 1 && tokens[start].type === 'identifier' && bindings.has(tokens[start].value) &&
+        !seen.has(tokens[start].value)){
+        const nextSeen = new Set(seen); nextSeen.add(tokens[start].value)
+        const bound = bindings.get(tokens[start].value)
+        return originFor(tokens, bindings, bound.start, bound.end, nextSeen)
+    }
+    for (let i = start; i < end; i++){
+        const token = tokens[i]
+        if ((token.type === 'string' || token.type === 'template') &&
+            (token.value.startsWith('STAKE') || token.value === 'ST')) return token
+        if (token.type === 'identifier' && bindings.has(token.value) && !seen.has(token.value) &&
+            expressionValue(tokens, bindings, bindings.get(token.value).start, bindings.get(token.value).end) === 'STAKE'){
+            const bound = bindings.get(token.value)
+            return originFor(tokens, bindings, bound.start, bound.end, new Set([...seen, token.value]))
+        }
+    }
+    return tokens[start]
+}
+
+function joinedStake(tokens, bindings, start){
+    const close = matching(tokens, start, '[', ']')
+    if (close < 0 || tokens[close + 1]?.value !== '.' || tokens[close + 2]?.value !== 'join' ||
+        tokens[close + 3]?.value !== '(') return null
+    const callClose = matching(tokens, close + 3, '(', ')')
+    if (callClose < 0) return null
+    const separator = expressionValue(tokens, bindings, close + 4, callClose)
+    if (separator !== '|') return null
+    for (const part of splitTopLevel(tokens, start + 1, close, ',')){
+        if (expressionValue(tokens, bindings, part.start, part.end) === 'STAKE')
+            return originFor(tokens, bindings, part.start, part.end)
+    }
+    return null
+}
+
+function calledBuilder(tokens, bindings, start, end, seen = new Set()){
+    ({ start, end } = stripParens(tokens, start, end))
+    if (end === start + 1 && tokens[start]?.type === 'identifier' && bindings.has(tokens[start].value) &&
+        !seen.has(tokens[start].value)){
+        const nextSeen = new Set(seen); nextSeen.add(tokens[start].value)
+        const bound = bindings.get(tokens[start].value)
+        return calledBuilder(tokens, bindings, bound.start, bound.end, nextSeen)
+    }
+    let open = start
+    while (tokens[open] && tokens[open].value !== '(') open++
+    if (open === start || matching(tokens, open, '(', ')') !== end - 1) return null
+    for (let i = start; i < open; i++){
+        if (tokens[i].type !== 'identifier' && tokens[i].value !== '.' && tokens[i].value !== '?.') return null
+    }
+    return tokens[open - 1].type === 'identifier' ? tokens[open - 1].value : null
+}
+
+function isStakeHelperBuilt(tokens, bindings, start, end, seen = new Set()){
+    ({ start, end } = stripParens(tokens, start, end))
+    if (end === start + 1 && tokens[start]?.type === 'identifier' && bindings.has(tokens[start].value) &&
+        !seen.has(tokens[start].value)){
+        const nextSeen = new Set(seen); nextSeen.add(tokens[start].value)
+        const bound = bindings.get(tokens[start].value)
+        return isStakeHelperBuilt(tokens, bindings, bound.start, bound.end, nextSeen)
+    }
+    let open = start
+    while (tokens[open] && tokens[open].value !== '(') open++
+    if (open === start || matching(tokens, open, '(', ')') !== end - 1) return false
+    return tokens.slice(start, open).some((token) => token.type === 'identifier' && token.value === 'stakeHelper')
+}
+
+function isKnownNonStakePayload(tokens, rel, start, end){
+    ({ start, end } = stripParens(tokens, start, end))
+    if (tokens[start]?.value === '{') return rel === 'test/regression/transaction.regression.js'
+    if (end !== start + 1 || tokens[start]?.type !== 'identifier') return false
+    return NON_STAKE_OPAQUE_PAYLOADS.get(rel)?.has(tokens[start].value) || false
+}
+
+function registrationCount(tokens){
+    let count = 0
+    for (let i = 0; i + 3 < tokens.length; i++){
+        if (tokens[i].value === 'stakeTeardown' && tokens[i + 1].value === '.' &&
+            tokens[i + 2].value === 'registerStake' && tokens[i + 3].value === '(') count++
+    }
+    return count
 }
 
 function scanLines(lines, rel){
     if (rel === REGISTRAR || rel === REGISTRAR.split(path.sep).join('/')) return []
-    const sites = []
-    lines.forEach((line, idx) => {
-        if (!STAKE_PAYLOAD.test(line) && !STAKE_TOKEN.test(line)) return
-        // A comment quoting a payload is not a broadcast.
-        if (COMMENT_LINE.test(line) || optedOut(lines, idx)) return
-        sites.push({ file: rel, line: idx + 1, text: line.trim() })
-    })
+    const tokens = tokensFor(lines.join('\n'))
+    const bindings = bindingMap(tokens)
+    const sitesByLine = new Map()
+    const add = (token) => {
+        if (!token || COMMENT_LINE.test(lines[token.line - 1]) || optedOut(lines, token.line - 1)) return
+        sitesByLine.set(token.line, { file: rel, line: token.line, text: lines[token.line - 1].trim() })
+    }
+
+    for (const bound of bindings.values()){
+        if (isStake(expressionValue(tokens, bindings, bound.start, bound.end)))
+            add(originFor(tokens, bindings, bound.start, bound.end))
+    }
+    for (let i = 0; i < tokens.length; i++){
+        const token = tokens[i]
+        if ((token.type === 'string' || token.type === 'template') && token.value !== 'STAKE' && isStake(token.value)) add(token)
+        if (token.value === '[') add(joinedStake(tokens, bindings, i))
+        if (token.value !== 'createAndSendTransaction' || tokens[i + 1]?.value !== '(') continue
+        const close = matching(tokens, i + 1, '(', ')')
+        if (close < 0) continue
+        const args = splitTopLevel(tokens, i + 2, close, ',')
+        if (args.length < 2) continue
+        const payload = args[1]
+        const value = expressionValue(tokens, bindings, payload.start, payload.end)
+        if (isStake(value))
+            add(originFor(tokens, bindings, payload.start, payload.end))
+        else if (tokens[payload.start]?.value === '[')
+            add(joinedStake(tokens, bindings, payload.start))
+        else if (value === UNKNOWN &&
+            !isStakeHelperBuilt(tokens, bindings, payload.start, payload.end) &&
+            !isKnownNonStakePayload(tokens, rel, payload.start, payload.end)){
+            const builder = calledBuilder(tokens, bindings, payload.start, payload.end)
+            if (!builder || !NON_STAKE_BUILDERS.has(builder))
+                add(originFor(tokens, bindings, payload.start, payload.end))
+        }
+    }
+
+    const sites = [...sitesByLine.values()].sort((a, b) => a.line - b.line)
     // One registration books one broadcast. A static scan cannot pair them, so a
     // shortfall flags every unmarked site in the file.
-    return sites.length > registrationCount(lines) ? sites : []
+    return sites.length > registrationCount(tokens) ? sites : []
 }
 
 function scanFile(file){
