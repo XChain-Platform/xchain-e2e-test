@@ -94,9 +94,11 @@ describe('bridge rail leg drive command', function () {
             repoRoot: REPO_ROOT,
             env: {},
         })
+        const bootstrapAt = command.argv.indexOf('./test/initial_check.test.js')
         const guardsAt = command.argv.indexOf(GUARDS)
 
-        assert.ok(guardsAt > command.argv.indexOf('./test/initial_check.test.js'))
+        assert.ok(bootstrapAt >= 0)
+        assert.ok(guardsAt > bootstrapAt)
         assert.ok(command.argv.indexOf(BASE_ROOT) > guardsAt)
         assert.ok(command.argv.indexOf(BASE_GLOB) > command.argv.indexOf(BASE_ROOT))
     })

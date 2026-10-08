@@ -66,7 +66,7 @@ function buildLegCommand (driveName, legName, opts = {}) {
         '--timeout', '0', '--exit']
     if (leg.grep) argv.push('--grep', leg.grep)
     const files = leg.files || [...(drive.before || []), drive.root, drive.glob]
-    argv.push('--require', './test/initialCheck.test.js', ...files)
+    argv.push('--require', './test/initial_check.test.js', ...files)
     const env = childEnvironment(opts.env || {}, journalDir, repoRoot)
     Object.assign(env, leg.env || {})
     return {

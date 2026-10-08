@@ -21,7 +21,7 @@ const MOCHA_ARGS = [
     'mocha',
     '--timeout', '0',
     '--exit',
-    '--require', './test/initialCheck.test.js',
+    '--require', './test/initial_check.test.js',
     '--reporter', 'json'
 ]
 
