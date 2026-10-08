@@ -91,10 +91,11 @@ describe('rail roster runner', () => {
         const suites = readRailRoster().suites.filter(entry => entry.run)
         const expected = [
             'npx', 'mocha', '--timeout', '0', '--exit', '--require',
-            './test/initialCheck.test.js', '--reporter', 'json',
+            './test/initial_check.test.js', '--reporter', 'json',
             ...suites.map(entry => entry.file)
         ]
         assert.deepStrictEqual(result.stdout.trim().split(' '), expected)
+        assert.ok(fs.existsSync(path.resolve(REPO_ROOT, expected[6])))
         const smokePositions = suites
             .filter(entry => entry.file.startsWith('test/smoke/'))
             .map(entry => result.stdout.indexOf(entry.file))
@@ -132,7 +133,7 @@ describe('rail roster verdicts', () => {
         assert.match(result.stdout, /rail roster: GREEN/)
         assert.deepStrictEqual(args, [
             'mocha', '--timeout', '0', '--exit', '--require',
-            './test/initialCheck.test.js', '--reporter', 'json', ...suites
+            './test/initial_check.test.js', '--reporter', 'json', ...suites
         ])
         assert.ok(!args.includes('--parallel'))
     })
