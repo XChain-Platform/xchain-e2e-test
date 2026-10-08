@@ -60,7 +60,7 @@ describe('check-mirror-pendings', function () {
 
     it('resolves a named leg whose active case title covers the deferred claim', function () {
         const root = fixture({
-            'at2.test.js': "describe('AT2', () => { it.skip('holds delivery past the forward margin (DRIVEN in at2b)', () => {}) })",
+            'at2.test.js': "describe('AT2', () => { it.skip('holds delivery past the forward margin (DRIVEN in at2b: \"holds the barrier\")', () => {}) })",
             'at2b-forward-margin.test.js': "describe('delivery past the forward margin', () => { it('holds the barrier', () => {}) })",
         })
         const result = run(root)
@@ -147,5 +147,117 @@ describe('check-mirror-pendings', function () {
             '})',
         ].join('\n')
         assert.deepStrictEqual(checker.parseSource(source, 'at0.test.js').pending, [])
+    })
+})
+
+const LEG_SUITE = "describe('delivery past the forward margin', () => { it('holds the barrier', () => {}) })"
+
+function crossrefRun (pendingTitle, legSource) {
+    return run(fixture({
+        'at2.test.js': "describe('AT2', () => { it.skip(" + JSON.stringify(pendingTitle) + ', () => {}) })',
+        'at2b-forward-margin.test.js': legSource,
+    }))
+}
+
+describe('check-mirror-pendings: a cross-reference names its target case', function () {
+    it('refuses a bare reference even when the leg shares every claim word', function () {
+        const result = crossrefRun('holds delivery past the forward margin (DRIVEN in at2b)', LEG_SUITE)
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /at2b.*quotes no target case/)
+    })
+
+    it('refuses an anchor that only shares words with the active case', function () {
+        const result = crossrefRun('holds delivery (DRIVEN in at2b: "holds the barrier when delayed")', LEG_SUITE)
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /no active case titled "holds the barrier when delayed"/)
+    })
+
+    it('refuses an anchor that matches only the suite title', function () {
+        const result = crossrefRun('holds delivery (DRIVEN in at2b: "delivery past the forward margin")', LEG_SUITE)
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /no active case titled/)
+    })
+
+    it('refuses an anchor whose case is skipped or sits under a skipped suite', function () {
+        const pending = 'holds delivery (DRIVEN in at2b: "holds the barrier")'
+        const skippedCase = crossrefRun(pending, "describe('m', () => { it.skip('holds the barrier (needs a lever)', () => {}); it.skip('holds the barrier', () => {}) })")
+        assert.strictEqual(skippedCase.status, 1)
+        assert.match(skippedCase.stderr, /no active case titled "holds the barrier"/)
+        const skippedSuite = crossrefRun(pending, "describe.skip('m (needs a lever)', () => { it('holds the barrier', () => {}) })")
+        assert.strictEqual(skippedSuite.status, 1)
+        assert.match(skippedSuite.stderr, /no active case titled "holds the barrier"/)
+    })
+
+    it('reads the anchor from the attached comment, normalizing case and spacing', function () {
+        const root = fixture({
+            'at2.test.js': [
+                "describe('AT2', () => {",
+                '  // DRIVEN in at2b: "Holds  the BARRIER"',
+                "  it.skip('holds delivery past the margin (DRIVEN in at2b, see comment)', () => {})",
+                '})',
+            ].join('\n'),
+            'at2b-forward-margin.test.js': LEG_SUITE,
+        })
+        const result = run(root)
+        assert.strictEqual(result.status, 0, result.stderr)
+        assert.match(result.stdout, /cross-references 1/)
+    })
+})
+
+describe('check-mirror-pendings: every skip form is reported', function () {
+    it('reports a skipped suite with a reason and refuses one without', function () {
+        const reasoned = run(fixture({ 'at3.test.js': "describe.skip('AT3 deadline (needs 257 rounds)', () => { it('a', () => {}); it('b', () => {}) })" }))
+        assert.strictEqual(reasoned.status, 0, reasoned.stderr)
+        assert.match(reasoned.stdout, /AT3 deadline \(needs 257 rounds\) \[skipped suite, 2 cases\]/)
+        const bare = run(fixture({ 'at3.test.js': "context.skip('AT3 deadline', () => { it('a', () => {}) })" }))
+        assert.strictEqual(bare.status, 1)
+        assert.match(bare.stderr, /unreasoned pending: .*AT3 deadline/)
+    })
+
+    it('reports the xit, xdescribe and xcontext aliases', function () {
+        const source = [
+            "describe('AT7', () => {",
+            "  xit('aliased case', () => {})",
+            "  xdescribe('aliased suite', () => { it('inner', () => {}) })",
+            "  xcontext('aliased context', () => { it('inner', () => {}) })",
+            '})',
+        ].join('\n')
+        const titles = checker.parseSource(source, 'at7.test.js').pending.map((p) => p.claim)
+        assert.deepStrictEqual(titles, ['aliased case', 'aliased suite', 'aliased context'])
+    })
+
+    it('reports a this.skip in a test body, reasoned by its attached comment', function () {
+        const source = (comment) => [
+            "describe('AT8', function () {",
+            "  it('settles an llm request', function () {",
+            '    if (!llm.ok) {',
+            comment,
+            '      this.skip()',
+            '    }',
+            '  })',
+            '})',
+        ].join('\n')
+        const reasoned = checker.parseSource(source('      // Skipped, not passed: no model is reachable here.'), 'at8.test.js').pending
+        assert.strictEqual(reasoned.length, 1)
+        assert.strictEqual(reasoned[0].kind, 'body')
+        assert.match(reasoned[0].reason, /no model is reachable/)
+        const bare = checker.parseSource(source('      console.log(why)'), 'at8.test.js').pending
+        assert.strictEqual(bare.length, 1)
+        assert.strictEqual(bare[0].reason, '')
+    })
+
+    it('does not mistake a regex .test( member call for a mocha test', function () {
+        const source = [
+            "describe('AT9', function () {",
+            '  const ok = pattern.test(value)',
+            "  it('runs only when ready', function () {",
+            '    // Skipped, not passed: the venue is not ready yet.',
+            '    this.skip()',
+            '  })',
+            '})',
+        ].join('\n')
+        const pending = checker.parseSource(source, 'at9.test.js').pending
+        assert.strictEqual(pending.length, 1)
+        assert.strictEqual(pending[0].claim, 'runs only when ready')
     })
 })

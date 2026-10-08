@@ -21,7 +21,8 @@
 const assert = require('assert')
 const {
     WS_OPEN, waitFor, waitUntil, openPeerCount, meshState, waitForMesh,
-    readConfigEverywhere, waitForConfigEverywhere, assertNeverApplied, nominalOracleRoundTime
+    readConfigEverywhere, waitForConfigEverywhere, assertNeverApplied, nominalOracleRoundTime,
+    assertHoldsThroughout
 } = require('../../helpers/consensusWait')
 
 // A hub whose peer map holds `open` OPEN sockets and `connecting` entries that
@@ -198,6 +199,37 @@ describe('consensusWait: deterministic PBFT waits', function () {
             await assert.rejects(
                 () => waitUntil(() => { throw new Error('connection reset') }, { timeoutMs: 100 }),
                 /connection reset/)
+        })
+    })
+
+    // The general absence window: it must poll the whole window when the claim
+    // holds, and fail at the first broken poll rather than at the window's end.
+    describe('assertHoldsThroughout', () => {
+        it('holds for the whole window and polls more than once', async () => {
+            const res = await assertHoldsThroughout(() => true, { windowMs: 150, intervalMs: 20 })
+            assert.strictEqual(res.ok, true)
+            assert.ok(res.polls > 1, 'the window was not actually polled')
+            assert.ok(res.watchedMs >= 150, 'the window closed early')
+        })
+
+        it('fails at the moment the claim breaks, not only at the end of the window', async () => {
+            let broken = false
+            setTimeout(() => { broken = true }, 100)
+            const started = Date.now()
+            await assert.rejects(
+                () => assertHoldsThroughout(() => !broken, { windowMs: 30000, intervalMs: 20, what: 'one row only' }),
+                /one row only stopped holding after \d+ms/)
+            assert.ok(Date.now() - started < 10000, 'the hold sat out the whole window before failing')
+        })
+
+        it('carries what the probe saw into the failure message', async () => {
+            await assert.rejects(
+                () => assertHoldsThroughout(() => ({ ok: false, saw: { okRows: 1 } }), { windowMs: 1000, what: 'no ok row' }),
+                /no ok row stopped holding after \d+ms; saw \{"okRows":1\}/)
+        })
+
+        it('refuses a call with no window instead of polling forever', async () => {
+            await assert.rejects(() => assertHoldsThroughout(() => true, {}), /windowMs is required/)
         })
     })
 

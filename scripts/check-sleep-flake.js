@@ -16,7 +16,8 @@
  * Fixed-settle sleep ratchet.
  *
  * This suite drives a live regtest stack, so tests wait for the indexer to
- * catch up. A wait is written two ways here, `await sleep(n)` (the helper form)
+ * catch up. A wait is written two ways here, `await sleep(n)` (the helper form,
+ * which includes a local timer helper of any name, such as `await pause(n)`)
  * and `await new Promise(r => setTimeout(r, n))` (the inline form), and both
  * spellings are read the same way. Two shapes of wait exist and only one of
  * them is flaky:
@@ -58,8 +59,16 @@ const BASELINE     = path.join(ROOT, BASELINE_REL)
 // inline one ungated: the shared indexer helpers (orderHelper, swapHelper,
 // dispenserHelper) and the oracleBatch settles are all written that way, so a
 // new wait of that shape could land without the count moving at all.
-const AWAIT_SLEEP   = /\bawait\s+(?:sleep|delay)\s*\(/g
+const HELPER_NAMES  = ['sleep', 'delay']
 const AWAIT_PROMISE = /\bawait\s+new\s+Promise\s*\(/g
+
+// Read a local timer helper of any other name (`pause`, `nap`) by its definition.
+// Only a body that is ONE timer promise qualifies: a poll function with an inline
+// timer inside its loop is not a wait, so awaiting it must not count.
+const FN_HELPER  = /\b(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\([^()]*\)\s*\{\s*return\s+new\s+Promise\s*\(/g
+const VAR_HELPER = new RegExp('\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(?:async\\s+)?'
+    + '(?:function\\s*[\\w$]*\\s*\\([^()]*\\)\\s*\\{\\s*return|(?:\\([^()]*\\)|[A-Za-z_$][\\w$]*)\\s*=>'
+    + '(?:\\s*\\{\\s*return)?)\\s*new\\s+Promise\\s*\\(', 'g')
 
 // An awaited promise is a wait on a DURATION only when a timer resolves it.
 // Two neighbouring shapes deliberately fall outside this: an event wait
@@ -313,6 +322,29 @@ function argSpan(code, open) {
     return null
 }
 
+// Names this file binds to a single-timer-promise body, beside sleep/delay.
+function timerHelperNames(code) {
+    const names = new Set(HELPER_NAMES)
+    for (const re of [FN_HELPER, VAR_HELPER]) {
+        re.lastIndex = 0
+        let m
+        while ((m = re.exec(code)) !== null) {
+            const span = argSpan(code, m.index + m[0].length - 1)
+            if (!span || !TIMER_INSIDE.test(code.slice(span.from, span.to))) continue
+            const block = /\breturn\s+new\s+Promise\s*\($/.test(m[0])
+            const tail  = code.slice(span.to + 1)
+            if (block ? /^\s*;?\s*\}/.test(tail) : /^\s*(?:[;,)\n]|$)/.test(tail)) names.add(m[1])
+        }
+    }
+    return [...names]
+}
+
+// The awaited-helper regex for this file, built from its own helper names.
+function awaitHelperRe(code) {
+    const alt = timerHelperNames(code).map((n) => n.replace(/\$/g, '\\$')).join('|')
+    return new RegExp(`\\bawait\\s+(?:${alt})\\s*\\(`, 'g')
+}
+
 function scanSource(src, name) {
     const code = blankNonCode(src)
     const { mask, balanced } = loopMask(code)
@@ -328,8 +360,8 @@ function scanSource(src, name) {
 
     const offsets = []
     let m
-    AWAIT_SLEEP.lastIndex = 0
-    while ((m = AWAIT_SLEEP.exec(code)) !== null) offsets.push(m.index)
+    const awaitHelper = awaitHelperRe(code)
+    while ((m = awaitHelper.exec(code)) !== null) offsets.push(m.index)
     AWAIT_PROMISE.lastIndex = 0
     while ((m = AWAIT_PROMISE.exec(code)) !== null) {
         const span = argSpan(code, m.index + m[0].length - 1)
@@ -369,12 +401,15 @@ function main() {
     if (args.includes('--list')) hits.forEach((h) => console.log(`${h.file}:${h.line}  ${h.text}`))
 
     if (args.includes('--write-baseline')) {
+        // Keep the committed note: it carries the ratchet's history, which a
+        // fixed string here would silently truncate on every rewrite.
+        const prior = fs.existsSync(BASELINE) ? JSON.parse(fs.readFileSync(BASELINE, 'utf8')).note : null
         fs.writeFileSync(BASELINE, JSON.stringify({
             check: 'fixed-settle sleep call sites under test/',
-            note: 'Ratchet only. Lower this when waits are converted to condition waits; never raise it. '
+            note: prior || ('Ratchet only. Lower this when waits are converted to condition waits; never raise it. '
                 + 'Raised once, 26 to 38, when the detector was widened to read the inline '
                 + '`await new Promise(r => setTimeout(r, n))` form alongside `await sleep(n)`: that rise '
-                + 'was the gate seeing a shape it had been blind to, not new debt.',
+                + 'was the gate seeing a shape it had been blind to, not new debt.'),
             count: hits.length,
         }, null, 4) + '\n')
         console.log(`wrote ${BASELINE_REL}: ${hits.length}`)

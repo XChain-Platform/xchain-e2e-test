@@ -33,10 +33,11 @@
 
 const fs   = require('fs')
 const path = require('path')
+const { optOutMarker } = require('./lib/opt_out_marker')
 
 const ROOT         = path.join(__dirname, '..')
 const DEFAULT_PATH = path.join(ROOT, 'test', 'attestMirror')
-const OPT_OUT      = /\/\/\s*request-row-wait-ok:\s*\S/
+const isOptOut     = optOutMarker('request-row-wait-ok')
 
 function slash (value) { return value.split(path.sep).join('/') }
 
@@ -218,9 +219,9 @@ function dominates (wait, read) {
 
 function markerFor (lines, lineNumber) {
     const own = lines[lineNumber - 1] || ''
-    if (OPT_OUT.test(own)) return own.trim()
+    if (isOptOut(own)) return own.trim()
     for (let i = lineNumber - 2; i >= 0 && /^\s*\/\//.test(lines[i]); i--) {
-        if (OPT_OUT.test(lines[i])) return lines[i].trim()
+        if (isOptOut(lines[i])) return lines[i].trim()
     }
     return null
 }

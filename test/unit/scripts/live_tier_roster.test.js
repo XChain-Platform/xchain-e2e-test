@@ -333,6 +333,13 @@ describe('live integration tier roster', () => {
                 'request-row wait lint must run immediately beside sleep-flake lint')
         })
 
+        it('runs the mirror-pendings lint over the real attest-mirror tree', () => {
+            const fullGate = fs.readFileSync(path.resolve(__dirname, '../../../bin/ci-full.sh'), 'utf8')
+            assert.match(fullGate, /^run_tier "[^"]*" npm run lint:mirror-pendings$/m,
+                'the full gate must run mirror-pendings lint, since its unit file reads only fixtures')
+            assert.strictEqual(pkg.scripts['lint:mirror-pendings'], 'node scripts/check-mirror-pendings.js')
+        })
+
         it('ci:live runs this runner rather than a bare glob', () => {
             assert.match(pkg.scripts['ci:live'], /run-live-tier/)
         })

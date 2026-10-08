@@ -103,6 +103,16 @@ describe('check-request-row-wait classifications', function () {
         assert.strictEqual(hits[0].status, 'exception')
         assert.match(hits[0].reason, /absence is the assertion/)
     })
+
+    it('reports a one-word marker reason as unguarded, not as an exception', function () {
+        const hits = scan([
+            'async function check(requestId) {',
+            '    // request-row-wait-ok: absence',
+            '    return readRequestRow(venue, 0, requestId)',
+            '}',
+        ])
+        assert.strictEqual(hits[0].status, 'unguarded')
+    })
 })
 
 describe('check-request-row-wait calibration fixtures', function () {

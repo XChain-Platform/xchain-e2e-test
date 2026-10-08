@@ -244,6 +244,63 @@ function registerRatchetTests() {
     })
 }
 
+const PAUSE_DEF = 'function pause(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }'
+
+function registerLocalHelperCountTests() {
+    it('counts an awaited local timer helper declared as a function', function () {
+        assert.deepStrictEqual(linesOf([
+            PAUSE_DEF,
+            'async function t() {',
+            '    await pause(30000);',
+            '}',
+        ].join('\n')), [3])
+    })
+
+    it('counts an awaited local timer helper bound to an arrow', function () {
+        assert.strictEqual(countOf([
+            'const nap = (ms) => new Promise(r => setTimeout(r, ms))',
+            'async function t() { await nap(1000) }',
+        ].join('\n')), 1)
+    })
+}
+
+function registerLocalHelperExemptTests() {
+    it('exempts a local timer helper used as a poll interval', function () {
+        assert.strictEqual(countOf([
+            PAUSE_DEF,
+            'async function t() {',
+            '    while (Date.now() < deadline) { if (await check()) return true; await pause(500) }',
+            '}',
+        ].join('\n')), 0)
+    })
+
+    it('does not treat a polling function with an inline timer as a helper', function () {
+        assert.strictEqual(countOf([
+            'async function waitHeight(h) {',
+            '    while (Date.now() < deadline) {',
+            '        if (await height() >= h) return true',
+            '        await new Promise(r => setTimeout(r, 500))',
+            '    }',
+            '}',
+            'async function t() { await waitHeight(10) }',
+        ].join('\n')), 0)
+    })
+
+    it('does not treat a local function with no timer as a helper', function () {
+        assert.strictEqual(countOf([
+            'async function settle() { return connector.quiesce() }',
+            'async function t() { await settle() }',
+        ].join('\n')), 0)
+    })
+}
+
+function registerLocalHelperTests() {
+    describe('reads a local timer helper by its definition, not its name', function () {
+        registerLocalHelperCountTests()
+        registerLocalHelperExemptTests()
+    })
+}
+
 describe('check-sleep-flake scanner', function () {
     registerFixedSettleTests()
     registerPollIntervalTests()
@@ -251,4 +308,5 @@ describe('check-sleep-flake scanner', function () {
     registerOffsetHandlingTests()
     registerLoopClassificationTests()
     registerRatchetTests()
+    registerLocalHelperTests()
 })

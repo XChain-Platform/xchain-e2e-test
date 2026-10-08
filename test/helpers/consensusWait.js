@@ -34,7 +34,8 @@
  * The negative direction (a round that must NOT finalize) still needs a fixed
  * observation window - non-occurrence has no event to wait for - but it is
  * spent polling, so it fails at the first hub that applies instead of only
- * looking once at the end.
+ * looking once at the end. assertHoldsThroughout() is the same window for any
+ * predicate, for absence claims outside the PBFT suites.
  *
  * waitFor() is the one polling loop; waitUntil() is its throwing general form,
  * and the sweep off fixed settles in other suites converts onto those two
@@ -239,6 +240,42 @@ async function assertNeverApplied(hubs, sel, opts) {
     }
 }
 
+/**
+ * Watch `predicate` for `windowMs` and throw the moment it stops holding.
+ *
+ * The general form of assertNeverApplied() for any absence claim: the window
+ * stays fixed, but a violation fails at that instant and says what it saw.
+ *
+ * @param predicate () => boolean | {ok:boolean, saw?:any} | Promise of either
+ * @param opts      {windowMs (required), intervalMs, now, what}
+ * @returns {ok, watchedMs, polls, last}
+ */
+async function assertHoldsThroughout(predicate, opts) {
+    opts = opts || {};
+    // A missing window would never elapse, so refuse it rather than spin forever.
+    if (!Number.isFinite(opts.windowMs)) throw new Error('assertHoldsThroughout: windowMs is required');
+    const intervalMs = opts.intervalMs === undefined ? DEFAULT_INTERVAL_MS : opts.intervalMs;
+    const now = opts.now || Date.now;
+    const started = now();
+    let polls = 0;
+
+    for (;;) {
+        const seen = await predicate();
+        polls++;
+        const last = (seen && typeof seen === 'object') ? { ok: !!seen.ok, saw: seen.saw } : { ok: !!seen, saw: undefined };
+        const elapsed = now() - started;
+        if (!last.ok) throw holdBroke(opts.what, elapsed, last.saw);
+        if (elapsed >= opts.windowMs) return { ok: true, watchedMs: elapsed, polls: polls, last: last };
+        await sleep(Math.max(0, Math.min(intervalMs, opts.windowMs - elapsed)));
+    }
+}
+
+// Build the failure for a broken hold, naming the condition and what was seen.
+function holdBroke(what, elapsed, saw) {
+    return new Error('assertHoldsThroughout: ' + (what || 'an unnamed condition') + ' stopped holding after '
+        + elapsed + 'ms' + (saw === undefined ? '' : '; saw ' + JSON.stringify(saw)));
+}
+
 // The wire timestamp an oracle leader must carry once the round time gate is
 // active: followers drop a PROPOSE whose time differs from the round's nominal
 // second, so a suite that drives finalizeRound by hand passes this value.
@@ -258,5 +295,6 @@ module.exports = {
     waitForMesh,
     readConfigEverywhere,
     waitForConfigEverywhere,
-    assertNeverApplied
+    assertNeverApplied,
+    assertHoldsThroughout
 };

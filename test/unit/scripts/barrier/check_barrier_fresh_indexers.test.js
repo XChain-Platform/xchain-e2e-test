@@ -41,6 +41,15 @@ describe('check-barrier-fresh-indexers', function () {
 
         assert.deepStrictEqual(findReusedLabelBoots(source), [{ line: 2, label: 'bf5' }])
     })
+
+    it('rejects an opt-out whose reason is a single word', function () {
+        const source = [
+            '// fresh-indexers-ok: shared',
+            "bootFamilyVenue({ label: 'bf5' })",
+        ].join('\n')
+
+        assert.deepStrictEqual(findReusedLabelBoots(source), [{ line: 2, label: 'bf5' }])
+    })
 })
 
 describe('check-barrier-fresh-indexers labels', function () {
@@ -67,5 +76,63 @@ describe('check-barrier-fresh-indexers labels', function () {
         const source = "bootFamilyVenue({ label: 'bf5', freshIndexers: false })"
 
         assert.deepStrictEqual(findReusedLabelBoots(source), [{ line: 1, label: 'bf5' }])
+    })
+})
+
+describe('check-barrier-fresh-indexers reads code, not text', function () {
+    it('does not accept freshIndexers written in a comment inside the call', function () {
+        const source = [
+            'bootFamilyVenue({',
+            "    label: 'bf5', // freshIndexers: true",
+            '})',
+        ].join('\n')
+
+        assert.deepStrictEqual(findReusedLabelBoots(source), [{ line: 1, label: 'bf5' }])
+    })
+
+    it('does not accept freshIndexers written in a string inside the call', function () {
+        const source = "bootFamilyVenue({ label: 'bf5', note: 'freshIndexers: true' })"
+
+        assert.deepStrictEqual(findReusedLabelBoots(source), [{ line: 1, label: 'bf5' }])
+    })
+
+    it('does not accept a top-level freshIndexers, which the boot helper ignores', function () {
+        const source = "bootFamilyVenue({ label: 'bf5', freshIndexers: true })"
+
+        assert.deepStrictEqual(findReusedLabelBoots(source), [{ line: 1, label: 'bf5' }])
+    })
+
+    it('still sees a boot that follows a regex literal holding a quote', function () {
+        const source = [
+            "const apostrophe = /chain's/",
+            "drive.bootFamilyVenue({ label: 'bf6' })",
+        ].join('\n')
+
+        assert.deepStrictEqual(findReusedLabelBoots(source), [{ line: 2, label: 'bf6' }])
+    })
+
+    it('sees a boot written inside a template interpolation', function () {
+        const source = "const note = `${bootFamilyVenue({ label: 'bf7' })}`"
+
+        assert.deepStrictEqual(findReusedLabelBoots(source), [{ line: 1, label: 'bf7' }])
+    })
+
+    it('ignores a boot that is only commented out', function () {
+        const source = "// bootFamilyVenue({ label: 'bf5' })"
+
+        assert.deepStrictEqual(findReusedLabelBoots(source), [])
+    })
+
+    it('does not accept an opt-out marker that sits inside a string', function () {
+        const source = "bootFamilyVenue({ label: 'bf5', note: '// fresh-indexers-ok: shares the venue' })"
+
+        assert.deepStrictEqual(findReusedLabelBoots(source), [{ line: 1, label: 'bf5' }])
+    })
+
+    it('reports a file it cannot parse instead of passing it', function () {
+        const findings = findReusedLabelBoots("bootFamilyVenue({ label: 'bf5' ")
+
+        assert.strictEqual(findings.length, 1)
+        assert.match(findings[0].error, /^unparseable: /)
     })
 })

@@ -10,6 +10,8 @@ const REQUIRED_INDEXER_TABLES = Object.freeze([
     'issues', 'price_snapshots', 'transactions',
 ])
 
+const COIN_CODES = Object.freeze(['BTC', 'LTC', 'DOGE'])
+
 function loadDependencies (resolveDependency, loadDependency) {
     const resolve = resolveDependency || require.resolve
     const load = loadDependency || require
@@ -40,7 +42,53 @@ async function responseOk (url, init, fetchImpl) {
     }
 }
 
-async function indexerSchemaReady (config) {
+function rpcErrorText (error) {
+    const text = typeof error === 'object' ? (error.message || JSON.stringify(error)) : String(error)
+    return text.slice(0, 200)
+}
+
+// Judge a miner health reply by the miner client's own contract: failure arrives inside an HTTP 200 body.
+function minerBodyProblem (body) {
+    if (!body || typeof body !== 'object') return 'invalid JSON'
+    // A top-level error is an unknown method (a miner older than health) or a handler crash.
+    if (body.error !== undefined && body.error !== null) return 'JSON-RPC error: ' + rpcErrorText(body.error)
+    const result = body.result
+    // A reply with no result confirms nothing, so it is not a healthy miner.
+    if (result === undefined || result === null) return 'missing result'
+    if (typeof result !== 'object') return 'unexpected result'
+    // A truthy result.error is how the miner's handlers report their own failures.
+    if (result.error) return 'result error: ' + rpcErrorText(result.error)
+    if (result.status === 'degraded') return 'degraded: ' + result.reason
+    // The miner's cold-start grace answers healthy before its wallet is ready; seeding needs the wallet.
+    if (result.reason === 'starting' && !(result.wallet_ready === true && result.mining_started === true)) {
+        return 'starting: wallet not ready'
+    }
+    return ''
+}
+
+// Probe one miner's health method and name what is wrong, or return '' when it is usable.
+async function minerProblem (url, fetchImpl) {
+    let response
+    try {
+        response = await fetchImpl(url, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ jsonrpc: '2.0', method: 'health', id: 1 }),
+        })
+    } catch (_) {
+        return 'unreachable'
+    }
+    if (!response || !response.ok) return 'HTTP ' + (response ? response.status : 'no response')
+    let body
+    try {
+        body = await response.json()
+    } catch (_) {
+        return 'invalid JSON'
+    }
+    return minerBodyProblem(body)
+}
+
+async function indexerSchemaReady (config, dbName) {
     let connection = null
     try {
         connection = await config.connect({
@@ -53,7 +101,7 @@ async function indexerSchemaReady (config) {
         const rows = await connection.query(
             'SELECT COUNT(DISTINCT table_name) AS n FROM information_schema.tables ' +
             'WHERE table_schema = ? AND table_name IN (' + placeholders + ')',
-            [config.indexerDbName, ...config.requiredIndexerTables])
+            [dbName, ...config.requiredIndexerTables])
         return Number(rows[0].n) === config.requiredIndexerTables.length
     } catch (_) {
         return false
@@ -62,52 +110,102 @@ async function indexerSchemaReady (config) {
     }
 }
 
-async function stackReady (config) {
-    if (!await indexerSchemaReady(config)) return false
-    if (!await responseOk(config.indexerStatusUrl, undefined, config.fetchImpl)) return false
-    for (const url of config.minerHealthUrls) {
-        if (!await responseOk(url, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ jsonrpc: '2.0', method: 'health', id: 1 }),
-        }, config.fetchImpl)) return false
+// Name the first check that is not ready yet, or return '' when the whole stack is.
+async function stackProblem (config) {
+    // Check every coin's schema before any HTTP probe: /status can answer before the first migration.
+    for (const indexer of config.indexers) {
+        if (!await indexerSchemaReady(config, indexer.dbName)) return indexer.coin + ' indexer schema'
     }
-    return true
+    for (const indexer of config.indexers) {
+        if (!await responseOk(indexer.statusUrl, undefined, config.fetchImpl)) return indexer.coin + ' indexer /status'
+    }
+    for (const url of config.minerHealthUrls) {
+        const problem = await minerProblem(url, config.fetchImpl)
+        if (problem) return 'miner ' + url + ': ' + problem
+    }
+    return ''
+}
+
+async function stackReady (config) {
+    return await stackProblem(config) === ''
 }
 
 async function waitForStack (config) {
     const deadline = Date.now() + config.timeoutMs
+    let problem = ''
     do {
-        if (await stackReady(config)) return
+        problem = await stackProblem(config)
+        if (!problem) return
         await config.sleep(config.intervalMs)
     } while (Date.now() <= deadline)
-    throw new Error('attest-mirror stack did not expose the indexer schema and healthy miners inside ' + config.timeoutMs + ' ms')
+    throw new Error('attest-mirror stack did not expose the indexer schema and healthy miners inside ' +
+        config.timeoutMs + ' ms; last failure: ' + problem)
+}
+
+function requiredValue (value, key) {
+    if (!value) throw new Error('missing stack readiness value ' + key)
+    return value
+}
+
+// Refuse a malformed number up front: a NaN deadline gives up after one probe, a NaN interval spins.
+function positiveNumber (env, key, fallback) {
+    if (env[key] === undefined || env[key] === '') return fallback
+    const value = Number(env[key])
+    if (!Number.isFinite(value) || value <= 0) {
+        throw new Error('invalid stack readiness value ' + key + ': expected a positive number, got "' + env[key] + '"')
+    }
+    return value
+}
+
+function portNumber (value, key) {
+    const port = Number(value)
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('invalid stack readiness value ' + key + ': not a port')
+    return port
+}
+
+// Read the coins the stack must serve; the attest-mirror stack runs all three.
+function readyCoins (env) {
+    const coins = (env.ATTEST_MIRROR_READY_COINS || COIN_CODES.join(','))
+        .split(',').map((coin) => coin.trim().toUpperCase()).filter(Boolean)
+    for (const coin of coins) {
+        if (!COIN_CODES.includes(coin)) throw new Error('unknown stack readiness coin ' + coin)
+    }
+    if (coins.length === 0) throw new Error('missing stack readiness value ATTEST_MIRROR_READY_COINS')
+    return coins
+}
+
+// Resolve one coin's indexer and miner the way the leg runner exports them; BTC keeps its legacy names.
+function coinTargets (env, coin, host) {
+    const btc = coin === 'BTC'
+    const indexerPort = btc ? env.BTC_INDEXER_API_PORT || env.INDEXER_API_PORT || env.INDEXER_HOST_PORT
+        : env[coin + '_INDEXER_API_PORT'] || env[coin + '_INDEXER_HOST_PORT']
+    const minerPort = btc ? env.BTC_REGTEST_MINER_API_PORT || env.REGTEST_MINER_API_PORT || env.MINER_HOST_PORT
+        : env[coin + '_REGTEST_MINER_API_PORT'] || env[coin + '_MINER_HOST_PORT']
+    const dbName = (btc ? env.BTC_INDEXER_DB_NAME || env.INDEXER_DB_NAME : env[coin + '_INDEXER_DB_NAME']) ||
+        'XChain_' + coin + '_Regtest_Indexer'
+    const indexerKey = coin + ' indexerPort'
+    const minerKey = coin + ' minerPort'
+    return {
+        indexer: { coin, dbName, statusUrl: 'http://' + host + ':' + portNumber(requiredValue(indexerPort, indexerKey), indexerKey) + '/status' },
+        minerUrl: 'http://' + host + ':' + portNumber(requiredValue(minerPort, minerKey), minerKey) + '/',
+    }
 }
 
 function configFromEnv (env, dependencies, fetchImpl) {
     const host = env.ATTEST_MIRROR_STACK_HOST || '127.0.0.1'
-    const minerPorts = [env.BTC_REGTEST_MINER_API_PORT || env.REGTEST_MINER_API_PORT || env.MINER_HOST_PORT,
-        env.LTC_REGTEST_MINER_API_PORT, env.DOGE_REGTEST_MINER_API_PORT].filter(Boolean)
-    const required = {
-        dbPort: env.DB_HOST_PORT || env.DATABASE_PORT,
-        dbPassword: env.DB_PASSWORD || env.INDEXER_DB_PASS,
-        indexerPort: env.BTC_INDEXER_API_PORT || env.INDEXER_API_PORT || env.INDEXER_HOST_PORT,
-    }
-    for (const [key, value] of Object.entries(required)) {
-        if (!value) throw new Error('missing stack readiness value ' + key)
-    }
-    if (minerPorts.length === 0) throw new Error('missing stack readiness value minerPort')
+    const dbPort = requiredValue(env.DB_HOST_PORT || env.DATABASE_PORT, 'dbPort')
+    const dbPassword = requiredValue(env.DB_PASSWORD || env.INDEXER_DB_PASS, 'dbPassword')
+    const targets = readyCoins(env).map((coin) => coinTargets(env, coin, host))
     return {
         dbHost: host,
-        dbPort: Number(required.dbPort),
+        dbPort: portNumber(dbPort, 'dbPort'),
         dbUser: env.INDEXER_DB_USER || 'root',
-        dbPassword: required.dbPassword,
-        indexerDbName: env.BTC_INDEXER_DB_NAME || env.INDEXER_DB_NAME || 'XChain_BTC_Regtest_Indexer',
+        dbPassword,
         requiredIndexerTables: REQUIRED_INDEXER_TABLES,
-        indexerStatusUrl: 'http://' + host + ':' + required.indexerPort + '/status',
-        minerHealthUrls: minerPorts.map((port) => 'http://' + host + ':' + port + '/'),
-        timeoutMs: Number(env.ATTEST_MIRROR_READY_TIMEOUT_MS || 300000),
-        intervalMs: Number(env.ATTEST_MIRROR_READY_INTERVAL_MS || 3000),
+        indexers: targets.map((target) => target.indexer),
+        minerHealthUrls: targets.map((target) => target.minerUrl),
+        timeoutMs: positiveNumber(env, 'ATTEST_MIRROR_READY_TIMEOUT_MS', 300000),
+        intervalMs: positiveNumber(env, 'ATTEST_MIRROR_READY_INTERVAL_MS', 3000),
         connect: dependencies.mariadb.createConnection,
         fetchImpl: fetchImpl,
         sleep,
@@ -129,7 +227,10 @@ module.exports = {
     REQUIRED_INDEXER_TABLES,
     loadDependencies,
     responseOk,
+    minerBodyProblem,
+    minerProblem,
     indexerSchemaReady,
+    stackProblem,
     stackReady,
     waitForStack,
     configFromEnv,

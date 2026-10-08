@@ -20,6 +20,18 @@ const logger = getLogger()
 // Cap the read waitForTx polls, so a silent node cannot hang it past timeMax.
 const READ_TIMEOUT_MS = 15000
 
+// RPC_INVALID_ADDRESS_OR_KEY: the node's "no such transaction" answer to getrawtransaction.
+const RPC_TX_NOT_FOUND = -5
+
+// Read the JSON-RPC error code off a failed call, from either reply shape: an HTTP 200
+// body (attached by _rpc as rpcCode) or a legacy node's HTTP 500 body that axios rejects.
+function rpcErrorCode(e) {
+    if (e && e.rpcCode !== undefined) return e.rpcCode
+    let body = e && e.response ? e.response.data : undefined
+    if (typeof body === 'string') { try { body = JSON.parse(body) } catch (_) { return undefined } }
+    return (body && body.error && typeof body.error === 'object') ? body.error.code : undefined
+}
+
 class BlockchainConnector {
     constructor(url, port, rpcUser, rpcPassword) {
         this.url = "http://"+url+":"+port
@@ -228,7 +240,11 @@ class BlockchainConnector {
             headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${auth}` }
         });
         const data = response.data;
-        if (data.error) throw new Error(`${method} RPC error: ` + JSON.stringify(data.error));
+        if (data.error) {
+            const err = new Error(`${method} RPC error: ` + JSON.stringify(data.error));
+            err.rpcCode = (typeof data.error === 'object') ? data.error.code : undefined;
+            throw err;
+        }
         return data.result;
     }
     async getBlockCount(){ return await this['_rpc']('getblockcount'); }
@@ -247,8 +263,12 @@ class BlockchainConnector {
     // node's reject reason (the caller decides which reasons are benign).
     async sendRawTransaction(txHex){ return await this['_rpc']('sendrawtransaction', [txHex]); }
     // Verbose transaction lookup (needs txindex, which the regtest nodes run). Returns null
-    // when the node has never seen the txid; `confirmations` is 0 while it sits in the mempool.
-    async getTransaction(txid){ try { return await this['_rpc']('getrawtransaction', [txid, true]); } catch (e) { return null; } }
+    // only when the node answers "no such transaction" (-5); any other failure throws, so a
+    // dead node can never read as an orphaned tx. `confirmations` is 0 while in the mempool.
+    async getTransaction(txid){
+        try { return await this['_rpc']('getrawtransaction', [txid, true]); }
+        catch (e) { if (rpcErrorCode(e) === RPC_TX_NOT_FOUND) return null; throw e; }
+    }
     // Mine a block containing EXACTLY `txs` (default: none), ignoring the mempool. This is
     // what lets a reorg DROP an orphaned tx: after invalidateBlock, mine empty blocks to build
     // a longer competing chain that excludes the mempool tx. (Bitcoin Core 0.19+ `generateblock`.)

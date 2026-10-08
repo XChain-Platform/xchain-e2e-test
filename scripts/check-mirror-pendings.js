@@ -8,7 +8,9 @@ const path = require('path')
 const ROOT = path.resolve(__dirname, '..')
 const DEFAULT_INPUTS = [path.join(ROOT, 'test', 'attestMirror')]
 const TEST_FILE = /\.test\.js$/
-const MOCHA_CALL = /\b(describe|context|suite|it|test|before|beforeEach|setup)(\.skip)?\s*\(/g
+// Match the x-prefixed skip aliases too; the lookbehind keeps a member call such as re.test( out.
+const MOCHA_CALL = /(?<![.$\w])(x?(?:describe|context|it|specify)|suite|test|before|beforeEach|setup)(\.skip)?\s*\(/g
+const BASE_KIND = { specify: 'it', xspecify: 'it', xit: 'it', xdescribe: 'describe', xcontext: 'context' }
 const HOOKS = new Set(['before', 'beforeEach', 'setup'])
 const SUITES = new Set(['describe', 'context', 'suite'])
 const TESTS = new Set(['it', 'test'])
@@ -140,8 +142,8 @@ function findCalls (source) {
         const bodyOpen = openParen + 1 + callback.index + callback[0].lastIndexOf('{')
         const bodyClose = closeBrace(masked, bodyOpen)
         calls.push({
-            kind: match[1],
-            skipped: Boolean(match[2]),
+            kind: BASE_KIND[match[1]] || match[1],
+            skipped: Boolean(match[2]) || match[1].startsWith('x'),
             offset: match.index,
             line: lineAt(source, match.index),
             title: stringAt(source, openParen + 1),
@@ -196,60 +198,85 @@ function availabilityGuard (source, call, offset) {
     return unavailableVenue || unavailableRail
 }
 
-function parseSource (source, file) {
-    const { calls, masked } = findCalls(source)
-    const pending = []
-
-    for (const call of calls) {
-        if (!TESTS.has(call.kind) || !call.skipped) continue
-        const suite = parentSuite(call, calls)
-        const title = call.title || '<untitled pending test>'
-        const comment = attachedComment(source, call.line)
-        pending.push({
-            file,
-            line: call.line,
-            title: suite && suite.title ? suite.title + ' > ' + title : title,
-            claim: title,
-            comment,
-            reason: reasonFrom(title, comment),
-            crossrefs: crossrefsFrom(title + ' ' + comment),
-            kind: 'declared',
-        })
+function pendingEntry (file, line, title, claim, comment, kind) {
+    return {
+        file,
+        line,
+        title,
+        claim,
+        comment,
+        reason: reasonFrom(claim, comment),
+        crossrefs: crossrefsFrom(claim + ' ' + comment),
+        kind,
     }
+}
 
+function underSuite (suite, title) {
+    return suite && suite.title ? suite.title + ' > ' + title : title
+}
+
+// Report each skipped test, and each skipped suite with the count of cases it hides.
+function declaredPendings (source, file, calls) {
+    const pending = []
+    for (const call of calls) {
+        if (!call.skipped) continue
+        const suite = parentSuite(call, calls)
+        const comment = attachedComment(source, call.line)
+        if (TESTS.has(call.kind)) {
+            const title = call.title || '<untitled pending test>'
+            pending.push(pendingEntry(file, call.line, underSuite(suite, title), title, comment, 'declared'))
+        } else if (SUITES.has(call.kind)) {
+            const title = call.title || '<untitled skipped suite>'
+            const hidden = calls.filter((c) => TESTS.has(c.kind) && c.offset > call.bodyOpen && c.offset < call.bodyClose)
+            const shown = underSuite(suite, title) + ' [skipped suite, ' + hidden.length + ' cases]'
+            pending.push(pendingEntry(file, call.line, shown, title, comment, 'suite'))
+        }
+    }
+    return pending
+}
+
+// Report a this.skip() in a hook or a test body, except the standard unavailable-venue guard.
+function runtimePendings (source, file, calls, masked) {
+    const pending = []
     const skipCall = /\bthis\s*\.\s*skip\s*\(\s*\)/g
     let match
     while ((match = skipCall.exec(masked)) !== null) {
-        const containers = calls
+        const container = calls
             .filter((call) => call.bodyOpen < match.index && call.bodyClose > match.index)
             .sort((a, b) => b.bodyOpen - a.bodyOpen)
-        const hook = containers.find((call) => HOOKS.has(call.kind))
-        if (!hook || availabilityGuard(source, hook, match.index)) continue
-        const suite = parentSuite(hook, calls)
+            .find((call) => HOOKS.has(call.kind) || TESTS.has(call.kind))
+        if (!container || container.skipped || availabilityGuard(source, container, match.index)) continue
+        const line = lineAt(source, match.index)
+        const comment = attachedComment(source, line)
+        const suite = parentSuite(container, calls)
+        if (TESTS.has(container.kind)) {
+            const title = container.title || '<untitled test>'
+            pending.push(pendingEntry(file, line, underSuite(suite, title), title, comment, 'body'))
+            continue
+        }
         const suiteTitle = (suite && suite.title) || '<unnamed suite>'
-        const title = suiteTitle + ' [' + hook.kind + ' hook]'
-        const comment = attachedComment(source, lineAt(source, match.index))
-        pending.push({
-            file,
-            line: lineAt(source, match.index),
-            title,
-            claim: suiteTitle,
-            comment,
-            reason: reasonFrom(suiteTitle, comment),
-            crossrefs: crossrefsFrom(suiteTitle + ' ' + comment),
-            kind: 'hook',
-        })
+        pending.push(pendingEntry(file, line, suiteTitle + ' [' + container.kind + ' hook]', suiteTitle, comment, 'hook'))
     }
+    return pending
+}
 
+function parseSource (source, file) {
+    const { calls, masked } = findCalls(source)
+    const pending = declaredPendings(source, file, calls).concat(runtimePendings(source, file, calls, masked))
     return { pending: pending.sort((a, b) => a.line - b.line), calls }
 }
 
+// Gather each named leg with every case title quoted right after it ('DRIVEN in at2b: "<title>"').
 function crossrefsFrom (text) {
-    const found = []
-    const matcher = /\b(?:driven|covered)\s+in\s+`?([a-z]+\d+[a-z]?)\b/ig
+    const legs = new Map()
+    const matcher = /\b(?:driven|covered)\s+in\s+`?([a-z]+\d+[a-z]?)\b`?(?:\s*[:,]?\s*(["'`])(.+?)\2)?/ig
     let match
-    while ((match = matcher.exec(text)) !== null) found.push(match[1].toLowerCase())
-    return [...new Set(found)]
+    while ((match = matcher.exec(text)) !== null) {
+        const name = match[1].toLowerCase()
+        if (!legs.has(name)) legs.set(name, { name, anchors: [] })
+        if (match[3]) legs.get(name).anchors.push(match[3])
+    }
+    return [...legs.values()]
 }
 
 function walkTests (directory, output) {
@@ -276,52 +303,47 @@ function collectFiles (inputs) {
     return { files: [...new Set(files)].sort(), missing }
 }
 
-const STOP_WORDS = new Set([
-    'a', 'an', 'and', 'at', 'by', 'comment', 'does', 'driven', 'for', 'in', 'is', 'it', 'leg',
-    'names', 'on', 'see', 'specifically', 'test', 'that', 'the', 'this', 'to', 'when', 'with',
-])
-
-function claimWords (text) {
-    return [...new Set(String(text).toLowerCase().match(/[a-z][a-z0-9_]+/g) || [])]
-        .filter((word) => !STOP_WORDS.has(word) && !/^at\d+[a-z]?$/.test(word))
+function normalizeTitle (text) {
+    return String(text).toLowerCase().replace(/\s+/g, ' ').trim()
 }
 
-function titleMatchesClaim (claim, title) {
-    const wanted = claimWords(claim)
-    const offered = new Set(claimWords(title))
-    if (wanted.some((word) => word.includes('_') && offered.has(word))) return true
-    const overlap = wanted.filter((word) => offered.has(word)).length
-    return wanted.length > 0 && overlap >= Math.min(2, wanted.length)
+// Compare a quoted anchor with a case's OWN title (a suite title would vouch for every case under it).
+function titleMatchesClaim (anchor, caseTitle) {
+    return normalizeTitle(anchor) !== '' && normalizeTitle(anchor) === normalizeTitle(caseTitle)
+}
+
+// Collect the titles of cases that run: not skipped and under no skipped suite.
+function activeCaseTitles (calls) {
+    const suites = calls.filter((call) => SUITES.has(call.kind) && call.skipped)
+    return calls
+        .filter((call) => TESTS.has(call.kind) && !call.skipped && call.title)
+        .filter((call) => !suites.some((suite) => suite.bodyOpen < call.offset && suite.bodyClose > call.offset))
+        .map((call) => call.title)
+}
+
+function legFiles (parsedFiles, name) {
+    return [...parsedFiles.entries()].filter(([file]) => {
+        const base = path.basename(file, '.test.js').toLowerCase()
+        return base === name || base.startsWith(name + '-') || base.startsWith(name + '_')
+    })
+}
+
+function checkCrossref (item, ref, parsedFiles) {
+    const targets = legFiles(parsedFiles, ref.name)
+    const fail = (why) => ({ item, name: ref.name, ok: false, why })
+    if (!targets.length) return fail('leg file does not exist')
+    if (!ref.anchors.length) {
+        return fail('leg has no matching active case title: the reference quotes no target case; ' +
+            'quote the active case title after the leg name')
+    }
+    const titles = targets.flatMap(([, parsed]) => activeCaseTitles(parsed.calls))
+    const missing = ref.anchors.find((anchor) => !titles.some((title) => titleMatchesClaim(anchor, title)))
+    if (missing !== undefined) return fail('leg has no matching active case title: no active case titled "' + missing + '"')
+    return { item, name: ref.name, ok: true, why: '' }
 }
 
 function resolveCrossrefs (pending, parsedFiles) {
-    const checks = []
-    for (const item of pending) {
-        for (const name of item.crossrefs) {
-            const targets = [...parsedFiles.entries()].filter(([file]) => {
-                const base = path.basename(file, '.test.js').toLowerCase()
-                return base === name || base.startsWith(name + '-') || base.startsWith(name + '_')
-            })
-            if (!targets.length) {
-                checks.push({ item, name, ok: false, why: 'leg file does not exist' })
-                continue
-            }
-            const matching = targets.flatMap(([, parsed]) => parsed.calls)
-                .filter((call) => TESTS.has(call.kind) && !call.skipped && call.title)
-                .find((call) => {
-                    const suite = parentSuite(call, targets.find(([, value]) => value.calls.includes(call))[1].calls)
-                    const fullTitle = (suite && suite.title ? suite.title + ' ' : '') + call.title
-                    return titleMatchesClaim(item.claim, fullTitle)
-                })
-            checks.push({
-                item,
-                name,
-                ok: Boolean(matching),
-                why: matching ? '' : 'leg has no matching active case title',
-            })
-        }
-    }
-    return checks
+    return pending.flatMap((item) => item.crossrefs.map((ref) => checkCrossref(item, ref, parsedFiles)))
 }
 
 function scanPaths (inputs) {

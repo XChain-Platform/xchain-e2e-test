@@ -195,6 +195,7 @@ describe('AT0 anti-wedge: the mirror barrier parks a hubless BTC indexer and nev
     // both indexers carry it. The anti-wedge property AT0 exists to prove is fully covered
     // by the case above; only the reason string needed the at0b lever
     // (`venue.withholdMirrorTable` plus a raised `attestResponse` grace).
+    // DRIVEN in at0b: "parks the starved indexer on attest_response_sync_barrier while every other barrier stays clear"
     it.skip('names attest_response_sync_barrier specifically (DRIVEN in at0b, see comment)', async function () {
         const a = await statusOf(0)
         assert.strictEqual(a.reason, BARRIER_REASON)

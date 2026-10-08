@@ -56,6 +56,7 @@
 
 const fs   = require('fs')
 const path = require('path')
+const { MIN_REASON_WORDS, optOutMarker } = require('./lib/opt_out_marker')
 
 const ROOT       = path.join(__dirname, '..')
 const SCAN_DIR   = path.join(ROOT, 'test')
@@ -72,7 +73,7 @@ const SKIP_DIRS = new Set(['node_modules', 'unit'])
 // question and carry their own contracts, so a receiver-blind match would bury
 // the real class under them.
 const WAIT_CALL = /(?:^|[^\w.])(?:[\w.]+\.)?(?:indexerDatabase|db)\.waitFor[A-Z]\w*\s*\(/
-const OPT_OUT   = /\/\/\s*give-up-ok:\s*\S/
+const isOptOut  = optOutMarker('give-up-ok')
 // Match the tracker barrier on any receiver (the connector is the tree's only
 // waitForSync), so `global.utxoTrackerConnector.waitForSync()` and aliases count.
 const SYNC_CALL = /\bwaitForSync\s*\(/
@@ -143,10 +144,10 @@ function scanLines(lines, rel, isHelper){
         // The marker counts on the call's own line or anywhere in the comment
         // block directly above it, because the reason usually needs a sentence
         // and a one-line-only rule would push it onto the code line.
-        if (OPT_OUT.test(line)) return
+        if (isOptOut(line)) return
         let opted = false
         for (let k = idx - 1; k >= 0 && /^\s*\/\//.test(lines[k]); k--){
-            if (OPT_OUT.test(lines[k])) { opted = true; break }
+            if (isOptOut(lines[k])) { opted = true; break }
         }
         if (opted) return
         // The tracker barrier earns no guard or assertion credit (header above).
@@ -210,7 +211,8 @@ function main(){
     console.error('Fix a site by wrapping the wait in requireRow() (test/helpers/requireRow.js),')
     console.error('guarding it with `if (!row) throw`, or asserting on the row before using it.')
     console.error('A utxo-tracker waitForSync is fixed by calling utxoTrackerConnector.requireSync() instead.')
-    console.error('If an empty result is genuinely fine, say why on the call line or the one above:')
+    console.error('If an empty result is genuinely fine, say why on the call line or the one above,')
+    console.error('in a reason of at least ' + MIN_REASON_WORDS + ' words on the marker line:')
     console.error('    // give-up-ok: <reason>')
     return 1
 }

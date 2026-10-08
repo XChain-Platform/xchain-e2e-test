@@ -85,6 +85,10 @@ case "$phase" in
         set +a
         export BTC_INDEXER_API_PORT=$INDEXER_HOST_PORT
         export BTC_INDEXER_DB_NAME=XChain_BTC_Regtest_Indexer
+        export LTC_INDEXER_API_PORT=$LTC_INDEXER_HOST_PORT
+        export LTC_INDEXER_DB_NAME=XChain_LTC_Regtest_Indexer
+        export DOGE_INDEXER_API_PORT=$DOGE_INDEXER_HOST_PORT
+        export DOGE_INDEXER_DB_NAME=XChain_DOGE_Regtest_Indexer
         export BTC_REGTEST_MINER_API_PORT=$MINER_HOST_PORT
         export LTC_REGTEST_MINER_API_PORT=$LTC_MINER_HOST_PORT
         export DOGE_REGTEST_MINER_API_PORT=$DOGE_MINER_HOST_PORT
@@ -92,7 +96,7 @@ case "$phase" in
         ;;
     seed)
         "${ATTEST_MIRROR_STACK_ROOT}/run-leg.sh" "${stack}-seed" "$number" "$venue_base" \
-            test/tools/reseedAttestationRoster.test.js \
+            test/tools/reseed_attestation_roster.test.js \
             EXPLORER_API_PORT="${ATTEST_MIRROR_EXPLORER_PORT:-46599}" E2E_STAKE_TEARDOWN=off
         ;;
     run)

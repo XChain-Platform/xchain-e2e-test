@@ -890,6 +890,14 @@ describe('bridgeRailVenue: the pure layer', function () {
             assert.deepStrictEqual(out, { hash: 'orig-2655', tipBefore: 2655, tipAfter: 2656, mined: 2 });
         });
 
+        it('fails rather than certifying an orphan when the node does not answer the lock lookup', async function () {
+            const node = fakeNode({ tip: 2655, lockHeight: 2654, lockTx: 'lock' });
+            node.getTransaction = async () => { throw new Error('connect ECONNREFUSED'); };
+            await assert.rejects(
+                () => orphanWithEmptyBlocks(node, { height: 2654, coinbase: 'mcoinbase', atLeast: 3, lockTx: 'lock' }),
+                /ECONNREFUSED/);
+        });
+
         it('refuses to run without a height or a coinbase address', async function () {
             const node = fakeNode({ tip: 2655, lockHeight: 2654, lockTx: 'lock' });
             await assert.rejects(() => orphanWithEmptyBlocks(node, { coinbase: 'mcoinbase' }), /needs a height/);

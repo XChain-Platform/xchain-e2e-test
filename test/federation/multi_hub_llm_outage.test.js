@@ -66,8 +66,7 @@ const vmHelper = require('../helpers/vmHelper')
 const transactionHelper = require('../helpers/core/transactionHelper')
 const { MultiValidatorHub } = require('../helpers/multiValidatorHubHelper')
 const { requireFederationEnv, assertCleanValidatorSet } = require('../helpers/federationGuards')
-
-function sleep(ms){ return new Promise(r => setTimeout(r, ms)) }
+const { assertHoldsThroughout } = require('../helpers/consensusWait')
 
 async function internalSettleStack() {
     await utxoTrackerConnector.quiesce({ timeoutMs: 30000, pollMs: 250, regtestMiner: regtestMinerConnector })
@@ -305,7 +304,11 @@ module.exports = {
         // must keep the on-chain record at exactly one row, even though every
         // retry round keeps failing and the leader slot rotates.
         await regtestMinerConnector.generateBlocks(3)
-        await sleep(75000)
+        // Same 75s window, polled, so a second row fails the drill the moment it lands.
+        await assertHoldsThroughout(async () => {
+            const rows = await countV1Rows(rid, 'provider_error', false)
+            return { ok: rows <= 1, saw: { providerErrorRows: rows } }
+        }, { windowMs: 75000, intervalMs: 1000, what: 'at most one provider_error row' })
         const total = await countV1Rows(rid, 'provider_error', false)
         assert.strictEqual(total, 1, 'provider_error must land EXACTLY once, got ' + total)
 
@@ -474,7 +477,12 @@ module.exports = {
         // vendor -> no credential -> fetch keeps failing, so the request must
         // NOT be fulfilled despite working Anthropic creds. (provider_error is
         // already throttled for this rid, so no new rows land either.)
-        await sleep(90000)
+        // Same 90s window, polled, so a fulfillment or a status change fails at that instant.
+        await assertHoldsThroughout(async () => {
+            const okRows = await countV1Rows(rid, 'ok', false)
+            const pending = await indexerDatabase.checkAttestationRequest({ requestId: rid, requestStatus: 'pending' })
+            return { ok: okRows === 0 && !!pending, saw: { okRows: okRows, pending: !!pending } }
+        }, { windowMs: 90000, intervalMs: 1000, what: 'the pinned request staying unfulfilled and pending' })
         assert.strictEqual(await countV1Rows(rid, 'ok', false), 0,
             'segment-2 request must NOT fulfill: fetch is pinned to the openai model')
         const stillPending = await indexerDatabase.checkAttestationRequest({
@@ -518,7 +526,11 @@ module.exports = {
         await mvh['_stopOne'](mvh.hubs[idx])
 
         await regtestMinerConnector.generateBlocks(4)
-        await sleep(75000)
+        // Same 75s window, polled, so a valid row fails the drill the moment it lands.
+        await assertHoldsThroughout(async () => {
+            const rows = await countV1Rows(rid, null, true)
+            return { ok: rows === 0, saw: { validRows: rows } }
+        }, { windowMs: 75000, intervalMs: 1000, what: 'no valid v1 row with slot-0 dead' })
 
         const validRows = await countV1Rows(rid, null, true)
         assert.strictEqual(validRows, 0,

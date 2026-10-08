@@ -364,7 +364,7 @@ describe('BlockchainConnector', function () {
         });
 
         it('returns null when the request itself fails', async function () {
-            axiosPostStub.rejects(makeHttpError(500));
+            axiosPostStub.rejects(makeHttpError(500, { result: null, error: { code: -5, message: 'No such mempool or blockchain transaction' } }));
             assert.strictEqual(await connector.getTransaction('boom'), null);
         });
     });

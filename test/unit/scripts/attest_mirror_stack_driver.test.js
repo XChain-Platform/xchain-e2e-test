@@ -163,4 +163,30 @@ describe('attest-mirror concrete stack driver', function () {
             fs.rmSync(f.root, { recursive: true, force: true })
         }
     })
+
+    it('seed phase hands run-leg.sh a reseed spec that exists on disk', function () {
+        const f = fixture()
+        try {
+            const result = spawnSync(DRIVER, ['seed', '--stack', 'am-proof-1', '--slot', '0',
+                '--leg', 'test/attestMirror/zc5_flag_day.test.js'], {
+                cwd: ROOT,
+                env: Object.assign({}, process.env, { ATTEST_MIRROR_STACK_ROOT: f.root, FAKE_DRIVER_LOG: f.log }),
+                encoding: 'utf8',
+            })
+            assert.strictEqual(result.status, 0, result.stderr)
+            const args = fs.readFileSync(f.log, 'utf8').trim().split(/\s+/)
+            assert.strictEqual(args[0], 'am-proof-1-seed')
+            assert.strictEqual(args[3], 'test/tools/reseed_attestation_roster.test.js')
+            assert.ok(fs.existsSync(path.join(ROOT, args[3])), 'seed spec missing: ' + args[3])
+        } finally {
+            fs.rmSync(f.root, { recursive: true, force: true })
+        }
+    })
+
+    it('every test/ path the driver names exists on disk', function () {
+        const named = fs.readFileSync(DRIVER, 'utf8').match(/test\/[A-Za-z0-9_./-]+\.js/g) || []
+        assert.ok(named.length > 0, 'the driver names no test/ path, so this check reads nothing')
+        const missing = named.filter((rel) => !fs.existsSync(path.join(ROOT, rel)))
+        assert.deepStrictEqual(missing, [], 'driver names a test path that does not exist')
+    })
 })

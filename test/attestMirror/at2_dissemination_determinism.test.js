@@ -238,6 +238,7 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
             })
             if (!path.happy) {
                 console.log('AT2 SKIPPED on request ' + driven.requestId.slice(0, 12) + ': ' + path.why)
+                // Skipped, not passed: a widened round breaks the premise that this hub never ran the round.
                 this.skip()
                 return
             }
@@ -409,6 +410,8 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
      *      they diverge (the drill above proves the first half today);
      *   2. keep the wording and rule that the barrier should hold on per-row
      *      completeness, which is a design change to the watermark, not a test.
+     *
+     * DRIVEN in at2b: "waits on the named barrier and still binds at the same block on both nodes"
      */
     it.skip('holds the barrier when delivery is delayed past the forward margin (DRIVEN in at2b, see comment)',
         async function () {

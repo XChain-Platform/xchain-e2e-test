@@ -109,7 +109,7 @@ describe('check-wait-swallow: the gate that keeps helpers loud', function () {
 
     it('accepts a marked site, on its own line or in the comment block above', function () {
         assert.deepStrictEqual(findings(
-            "        await indexerDatabase.waitForBatch({ status: 'valid' }) // give-up-ok: sequencing"), [])
+            "        await indexerDatabase.waitForBatch({ status: 'valid' }) // give-up-ok: sequencing only, asserted below"), [])
         assert.deepStrictEqual(findings([
             "        // give-up-ok: sequencing only; the row below is the",
             "        // assertion this case is actually about.",
@@ -120,6 +120,13 @@ describe('check-wait-swallow: the gate that keeps helpers loud', function () {
     it('does not accept a bare marker with no reason', function () {
         const hits = findings("        await indexerDatabase.waitForBatch({}) // give-up-ok:")
         assert.strictEqual(hits.length, 1)
+    })
+
+    it('does not accept a one-word or two-word give-up reason', function () {
+        for (const reason of ['sequencing', 'x', 'sequencing only', '- -- ---']){
+            const hits = findings("        await indexerDatabase.waitForBatch({}) // give-up-ok: " + reason)
+            assert.strictEqual(hits.length, 1, 'reason should be refused: ' + reason)
+        }
     })
 
     // The guard has to belong to THIS function. A later method's `if (!row)
