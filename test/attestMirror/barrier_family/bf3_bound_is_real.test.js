@@ -105,10 +105,8 @@ async function seedAndPin (ctx) {
     const base = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: now, snapshotBlock: ctx.B }
     const match = rows.inertRow(TABLE, Object.assign({ tag: 'bf3|match|' + tip, admitBlocks: { BTC: ctx.B } }, base))
     const members = [match]
-    const snapshots = await rows.requiredSnapshotSeeds(members, tip, drive.stakeWeightsAt(ctx.venue, PINNED))
-    const coverage = rows.snapshotCapabilityCoverage(members.concat(snapshots))
-    assert.ok(coverage.satisfied, coverage.refusal || 'missing capability snapshot blocks ' + JSON.stringify(coverage.missingBlocks) + ' in the BF3 snapshot seed set')
-    await drive.seedMirrors(ctx.venue, snapshots.concat(members))
+    const snapshots = await drive.seedSnapshotsFromStake(ctx.venue, PINNED, members, tip)
+    await drive.seedMirrors(ctx.venue, members)
     await drive.waitForMirrorRows(ctx.venue, PINNED, TABLE, 1)
     await drive.waitForMirrorRows(ctx.venue, PEER, TABLE, 1)
     ctx.pin = { [TABLE]: { BTC: fixture.pinnedHeightFor(TABLE, ctx.B) } }
