@@ -52,7 +52,7 @@ const os     = require('os');
 const path   = require('path');
 const { MultiValidatorHub } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
-const { waitForMesh } = require('../helpers/consensusWait');
+const { waitForMesh, waitUntil } = require('../helpers/consensusWait');
 
 const COUNT = 3;
 // A deadline, not a settle: waitForMesh returns the moment every hub holds an open
@@ -80,8 +80,6 @@ const CAPS = {
     // fails closed on the regtest hubs this harness stands up.
     oracle_publish: { doge_address: 'nsTake195wjCuVwLHf26EsZnRjwpm2LJtb', doge_wallet: '/data/.dogecoin/wallet.dat' }
 };
-
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', function () {
     this.timeout(180_000);
@@ -158,6 +156,21 @@ describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', funct
         // and gossips a CAPABILITY_*_MIN_STAKE proposal directly onto the mesh.
         // GOV_PROPOSE is the governance proposal message type (validators/governance.js).
         const rogueId = 'gov:CAPABILITY_PRICE_MIN_STAKE:rogue-' + Date.now();
+        const handledFollowers = new Set();
+        const restores = mvh.hubs.slice(1).map((hub, index) => {
+            const descriptor = Object.getOwnPropertyDescriptor(hub.governance, 'handlePropose');
+            const original = hub.governance.handlePropose;
+            hub.governance.handlePropose = async function (envelope) {
+                const result = await original.call(this, envelope);
+                if (envelope.data && envelope.data.proposalId === rogueId) handledFollowers.add(index + 1);
+                return result;
+            };
+            return () => {
+                if (descriptor) Object.defineProperty(hub.governance, 'handlePropose', descriptor);
+                else delete hub.governance.handlePropose;
+            };
+        });
+
         proposer.peerManager.broadcast('GOV_PROPOSE', {
             proposalId:      rogueId,
             parameter:       'CAPABILITY_PRICE_MIN_STAKE',
@@ -168,7 +181,18 @@ describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', funct
             votingEnd:       new Date(Date.now() + 60_000).toISOString(),
             activationBlock: null
         });
-        await sleep(2500); // let the gossip reach every follower + handlePropose run
+        try {
+            await waitUntil(() => ({
+                ok: handledFollowers.size === mvh.hubs.length - 1,
+                saw: [...handledFollowers]
+            }), {
+                timeoutMs: 2500,
+                what: 'every follower to finish handling the rogue governance proposal'
+            });
+        } finally {
+            restores.forEach(restore => restore());
+        }
+
         for (const hub of mvh.hubs) {
             const rows = await hub.db.doQuery(
                 'SELECT proposal_id FROM governance_proposals WHERE proposal_id = ? OR parameter = ?',
