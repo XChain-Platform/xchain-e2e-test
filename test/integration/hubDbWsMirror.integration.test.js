@@ -39,6 +39,7 @@ const HubDbBroadcaster = require('../../../xchain-hub/src/peers/hub_db_broadcast
 const HubDbSync        = require('../../../xchain-indexer/src/hub/hub_db_sync');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { MIRROR_SQL, readDDL } = require('../helpers/hub_db_mirror/schema');
+const { HUB_SCHEMA_VERSION } = require('../attestMirror/helpers/hubSchemaVersion');
 
 // HubDbSync must find every mirrored local table before startup and bootstrap.
 // Omitting even an unasserted table leaves the bootstrap barrier closed, which prevents
@@ -92,7 +93,7 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
                     const rows = await srcPool.query('SELECT * FROM ' + m[1] + ' WHERE id > ? ORDER BY id ASC LIMIT ?',
                         [Number(u.query.since_id || 0), Number(u.query.limit || 10000)]);
                     res.writeHead(200, { 'content-type': 'application/json' });
-                    res.end(JSON.stringify({ table: m[1], rows, count: rows.length }));
+                    res.end(JSON.stringify({ table: m[1], rows, count: rows.length, schema_version: HUB_SCHEMA_VERSION }));
                 } catch (e) {
                     // Explicit JSON content-type: an unset one on an error body can get
                     // content-type-sniffed as HTML, letting e.message render as markup.
