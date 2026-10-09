@@ -270,12 +270,8 @@ async function seedThree (ctx) {
     // canonical; the guard fails this case, not the drill block, if it is ever moved to bridge or policy.
     const hazards = rows.armedLegacyApplyHazards([legacy, omits, control], ctx.armHeight)
     assert.deepStrictEqual(hazards, [], assertionMessage('no armed legacy apply hazards', hazards, 'the BF4 seed rows'))
-    const snapshots = await rows.requiredSnapshotSeeds([legacy, omits, control], ctx.tip, drive.stakeWeightsAt(ctx.venue, ARMED))
-    const coverage = rows.snapshotCapabilityCoverage([legacy, omits, control].concat(snapshots))
-    // Refuse incomplete snapshot coverage before any mirror rows are seeded.
-    assert.ok(coverage.satisfied, assertionMessage('no missing capability snapshot blocks', coverage.missingBlocks,
-        coverage.refusal || 'the BF4 snapshot seed set'))
-    await drive.seedMirrors(ctx.venue, snapshots.concat([legacy, omits, control]))
+    const snapshots = await drive.seedSnapshotsFromStake(ctx.venue, ARMED, [legacy, omits, control], ctx.tip)
+    await drive.seedMirrors(ctx.venue, [legacy, omits, control])
     await drive.waitForMirrorRows(ctx.venue, ARMED, TABLE, 3)
     await drive.waitForMirrorRows(ctx.venue, ARMED, 'capability_snapshots', snapshots.length)
     ctx.keys = { legacy: legacy.row.match_id, omits: omits.row.match_id, control: control.row.match_id }

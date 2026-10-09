@@ -206,10 +206,8 @@ async function seedRows (ctx) {
   const seeded = bf8Rows(ctx.plan, base)
   ctx.keys = { A: seeded.A.row.match_id, N: seeded.N.row.match_id }
   const members = [seeded.A, seeded.N]
-  const snapshots = await rows.requiredSnapshotSeeds(members, btcTip, drive.stakeWeightsAt(ctx.venue, ARMED[0]))
-  const coverage = rows.snapshotCapabilityCoverage(members.concat(snapshots))
-  assert.ok(coverage.satisfied, coverage.refusal || 'missing capability snapshot blocks ' + JSON.stringify(coverage.missingBlocks) + ' in the BF8 snapshot seed set')
-  await drive.seedMirrors(ctx.venue, snapshots.concat(members))
+  const snapshots = await drive.seedSnapshotsFromStake(ctx.venue, ARMED[0], members, btcTip)
+  await drive.seedMirrors(ctx.venue, members)
   for (const ix of ctx.ltcVenue.indexers) ix.mirrorProxy.dropSockets()
   for (const i of ARMED) {
     await drive.waitForMirrorRows(ctx.venue, i, TABLE, 2)
