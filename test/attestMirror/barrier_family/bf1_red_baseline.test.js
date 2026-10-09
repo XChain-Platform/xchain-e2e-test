@@ -106,9 +106,9 @@ describe('BF1: the RED baseline, and the family enumerated from the running node
     })
 })
 
-// One inert row per member table, plus the capability snapshot the match and call rows
-// point at. The snapshot is withheld from the WALKER first, so the ninth member holds
-// there and nowhere else; the inert node receives it and stays clear of that member.
+// One inert row per member table, plus the stake-derived capability snapshots the match
+// and call rows need. They are withheld from the WALKER first, so the ninth member holds
+// there and nowhere else; the inert node receives them and wedges at the red block.
 //
 // THE CHAIN IS HELD STILL BEFORE ANYTHING IS ARMED. The snapshot member is content-keyed
 // and runs on EVERY block, so once the rows are seeded and the snapshot withheld, the first
@@ -128,16 +128,16 @@ async function seedFamily (ctx) {
     ctx.markerAddress = held.before
     const tip = held.tip
     const now = Math.floor(Date.now() / 1000)
-    // Snapshot at the drill height, not the reached tip: a fresh node's stake re-derivation rejects a synthetic capability row at a reached height.
+    // Stake-derived snapshot coverage lets the inert node reach the red block instead of wedging one block early on the snapshot barrier.
     const spec = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: now, snapshotBlock: tip + 1, tag: 'bf1|' + tip }
     ctx.venue.withholdMirrorTable(WALKER, 'capability_snapshots')
-    await drive.seedMirrors(ctx.venue, [rows.inertRow('capability_snapshots', spec)])
+    const snapshots = await drive.seedSnapshotsFromStake(ctx.venue, INERT, rows.familySeedRows(spec), tip)
     await drive.seedMirrors(ctx.venue, rows.familySeedRows(spec))
     for (const t of SEED_TABLES) {
         await drive.waitForMirrorRows(ctx.venue, INERT, t, 1)
         await drive.waitForMirrorRows(ctx.venue, WALKER, t, 1)
     }
-    await drive.waitForMirrorRows(ctx.venue, INERT, 'capability_snapshots', 1)
+    await drive.waitForMirrorRows(ctx.venue, INERT, 'capability_snapshots', snapshots.length)
     await drive.assertChainHeld(ctx.btc, tip, 'the BTC chain, across the seed,')
     ctx.seedTime = now
     console.log('BF1 seeded one finalized row per member at effective_time ' + now + ', snapshot_block ' + tip)
