@@ -50,6 +50,7 @@ describe('AB2: the fix, the anchor-attest predicate satisfied on first evaluatio
     before(async function () {
         const up = await drive.bootFamilyVenue({
             label: 'ab2', repoRoot: BUILD_ROOT, armed: [ARMED], armHubs: true,
+            venue: { freshIndexers: true },
             indexerGraces: { [ARMED]: { anchorAttest: GRACE_S } },
             indexerExtraEnv: { HUB_SYNC_ANCHOR_ATTEST_ARRIVAL_MARGIN_S: String(MARGIN_S) },
         })

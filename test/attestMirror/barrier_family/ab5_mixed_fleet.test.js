@@ -47,6 +47,7 @@ describe('AB5: a mixed fleet, one armed and one inert indexer, derives one set a
     before(async function () {
         const up = await drive.bootFamilyVenue({
             label: 'ab5', repoRoot: BUILD_ROOT, armed: [ARMED],
+            venue: { freshIndexers: true },
             indexerExtraEnv: { HUB_SYNC_ANCHOR_ATTEST_ARRIVAL_MARGIN_S: String(MARGIN_S) },
         })
         Object.assign(ctx, up, { coin: up.evidence.coinCode })

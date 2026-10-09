@@ -168,7 +168,7 @@ async function bootBothCoins (ctx) {
   ctx.ltc = await createRail(SECOND_COIN, 'regtest')
   const ltcIndexerUrl = 'http://' + ctx.ltc.host + ':' + ctx.ltc.ports.indexer
   const up = await drive.bootFamilyVenue({
-    label: 'bf8', repoRoot: BUILD_ROOT, armed: ARMED, venue: { hubExtraEnv: secondCoinHubEnv(LTC, ltcIndexerUrl) },
+    label: 'bf8', repoRoot: BUILD_ROOT, armed: ARMED, venue: { freshIndexers: true, hubExtraEnv: secondCoinHubEnv(LTC, ltcIndexerUrl) },
   })
   Object.assign(ctx, { venue: up.venue, btc: up.btc, evidence: up.evidence })
   assert.deepStrictEqual(Object.keys(ctx.venue.indexerEnv).map(Number), ARMED, 'both BTC indexers must be armed')

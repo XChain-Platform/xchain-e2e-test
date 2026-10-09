@@ -103,7 +103,7 @@ describe('AT4 corpus: a federation-signed admission-era mirror row, applied at i
         const staked = await provisionDrillIdentities({ label: LABEL, count: 5, redundancy: 3 })
         const up = await drive.bootFamilyVenue({
             label: LABEL, repoRoot: BUILD_ROOT, armed: [0, 1], armHubs: true,
-            venue: { identities: staked.identities, needsLlm: false, hubExtraEnv: Object.assign({}, ctx.server.hubEnv) },
+            venue: { freshIndexers: true, identities: staked.identities, needsLlm: false, hubExtraEnv: Object.assign({}, ctx.server.hubEnv) },
         })
         Object.assign(ctx, up, { coin: up.evidence.coinCode })
         ctx.contract = await deployRequestContract({ label: LABEL + 'http', code: rows.attestRequestContractCode(DEADLINE_BLOCKS, CONTEXT_TAG) })
