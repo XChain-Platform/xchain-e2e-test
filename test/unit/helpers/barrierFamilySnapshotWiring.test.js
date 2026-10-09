@@ -20,6 +20,7 @@ const path = require('path')
 
 const LEG_DIR = path.join(__dirname, '..', '..', 'attestMirror', 'barrier_family')
 const LEGS = [
+    'bf1_red_baseline',
     'bf2_armed_fix', 'bf3_bound_is_real', 'bf4_boundary', 'bf5_flag_day', 'bf8_second_coin',
 ]
 
