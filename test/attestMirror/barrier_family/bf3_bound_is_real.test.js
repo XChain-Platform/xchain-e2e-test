@@ -59,6 +59,7 @@ describe('BF3: the bound is real, a pinned height holds one member and only that
     before(async function () {
         const up = await drive.bootFamilyVenue({
             label: 'bf3', repoRoot: BUILD_ROOT, armed: ARMED_RUN ? [PINNED, PEER] : [], armHubs: ARMED_RUN,
+            venue: { freshIndexers: true },
         })
         Object.assign(ctx, up, { coin: up.evidence.coinCode })
     })

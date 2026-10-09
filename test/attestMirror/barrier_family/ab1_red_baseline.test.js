@@ -50,7 +50,7 @@ describe('AB1: the RED baseline, the anchor-attest barrier holds a +7200 block f
     const ctx = { venue: null, btc: null, coin: 'BTC', block: null, red: null }
 
     before(async function () {
-        const up = await drive.bootFamilyVenue({ label: 'ab1', repoRoot: BUILD_ROOT, indexerGraces: { [HELD]: { anchorAttest: GRACE_S } } })
+        const up = await drive.bootFamilyVenue({ label: 'ab1', repoRoot: BUILD_ROOT, venue: { freshIndexers: true }, indexerGraces: { [HELD]: { anchorAttest: GRACE_S } } })
         Object.assign(ctx, up, { coin: up.evidence.coinCode })
     })
 
