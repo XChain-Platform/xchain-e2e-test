@@ -9,9 +9,9 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  **********************************************************************
- * Every barrier-family leg that seeds joined rows takes its capability
- * snapshots from the stake weights through requiredSnapshotSeeds, checks the
- * coverage before seeding, and never hand-seeds an inert capability row.
+ * Every barrier-family leg that seeds joined rows uses the burial-aware drive
+ * helper to seed capability snapshots before member rows, and never hand-seeds
+ * an inert capability row.
  ********************************************************************/
 
 const assert = require('assert')
@@ -36,19 +36,19 @@ describe('barrier family legs: capability snapshots come from stake weights', fu
                 assert.ok(!/inertRow\(\s*'capability_snapshots'/.test(src))
             })
 
-            it('derives its snapshots from the indexer stake weights at the reached tip', function () {
-                assert.ok(/rows\.requiredSnapshotSeeds\([^)]*,[^)]*drive\.stakeWeightsAt\(/.test(src))
+            it('seeds burial-aware snapshots from the indexer stake weights', function () {
+                assert.ok(src.includes('drive.seedSnapshotsFromStake('))
             })
 
-            it('refuses incomplete snapshot coverage before seeding the mirrors', function () {
-                const cover = src.indexOf('rows.snapshotCapabilityCoverage(')
-                const ok = src.indexOf('coverage.satisfied', cover)
-                const seed = src.indexOf('drive.seedMirrors(', ok)
-                assert.ok(cover > 0 && ok > cover && seed > ok)
+            it('does not duplicate snapshot derivation or coverage checks', function () {
+                assert.ok(!src.includes('rows.requiredSnapshotSeeds('))
+                assert.ok(!src.includes('rows.snapshotCapabilityCoverage('))
             })
 
-            it('seeds the snapshots together with the member rows', function () {
-                assert.ok(/seedMirrors\(ctx\.venue, (snapshots\.concat\(|seeds)/.test(src))
+            it('seeds snapshots before the member rows', function () {
+                const snapshots = src.indexOf('drive.seedSnapshotsFromStake(')
+                const members = src.indexOf('drive.seedMirrors(', snapshots)
+                assert.ok(snapshots !== -1 && members > snapshots)
             })
         })
     }
