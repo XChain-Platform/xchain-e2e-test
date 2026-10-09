@@ -97,7 +97,7 @@ describe('BF2: the fix, armed, the identical block on the identical mirror state
                   seen: [], seeded: {}, expected: {}, read: {} }
 
     before(async function () {
-        const up = await drive.bootFamilyVenue({ label: 'bf2', repoRoot: BUILD_ROOT, armed: [ARMED, PEER], armHubs: true, armAtCrossing: true })
+        const up = await drive.bootFamilyVenue({ label: 'bf2', repoRoot: BUILD_ROOT, armed: [ARMED, PEER], armHubs: true, armAtCrossing: true, venue: { freshIndexers: true } })
         Object.assign(ctx, up, { coin: up.evidence.coinCode })
         console.log('BF2 armed at ' + ctx.armHeight + ', legacy era block ' + ctx.legacyBlock)
     })

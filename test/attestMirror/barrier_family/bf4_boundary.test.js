@@ -218,7 +218,7 @@ describe('BF4 live: above the activation a NULL row and a chain-omitting row bin
     const ctx = { venue: null, btc: null, coin: 'BTC', T: null, tip: null, armHeight: null, legacyBlock: null, keys: {}, blocks: [] }
 
     before(async function () {
-        const up = await drive.bootFamilyVenue({ label: 'bf4', repoRoot: BUILD_ROOT, armed: [ARMED, 1], armHubs: true, armAtCrossing: true })
+        const up = await drive.bootFamilyVenue({ label: 'bf4', repoRoot: BUILD_ROOT, armed: [ARMED, 1], armHubs: true, armAtCrossing: true, venue: { freshIndexers: true } })
         Object.assign(ctx, up, { coin: up.evidence.coinCode })
         console.log('BF4 armed at ' + ctx.armHeight + ', legacy era block ' + ctx.legacyBlock)
     })

@@ -70,6 +70,7 @@ describe('BF1: the RED baseline, and the family enumerated from the running node
     before(async function () {
         const up = await drive.bootFamilyVenue({
             label: 'bf1', repoRoot: BUILD_ROOT, indexerGraces: { [WALKER]: LADDER },
+            venue: { freshIndexers: true },
         })
         Object.assign(ctx, up, { coin: up.evidence.coinCode })
         console.log('BF1 ladder on indexer ' + WALKER + ': ' + JSON.stringify(LADDER))

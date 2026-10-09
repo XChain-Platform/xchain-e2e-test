@@ -63,6 +63,7 @@ describe('AB3: safety preserved, the armed node holds inside the horizon window 
     before(async function () {
         const up = await drive.bootFamilyVenue({
             label: 'ab3', repoRoot: BUILD_ROOT, armed: [HELD, PEER], armHubs: true,
+            venue: { freshIndexers: true },
             indexerGraces: { [HELD]: { anchorAttest: GRACE_S } },
             indexerExtraEnv: { HUB_SYNC_ANCHOR_ATTEST_ARRIVAL_MARGIN_S: String(MARGIN_S) },
         })
