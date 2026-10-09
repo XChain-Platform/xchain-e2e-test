@@ -52,13 +52,12 @@
 #     ../xchain-hub and ../xchain-indexer for the same reason.
 # Full sweeps skip no ci.yml work; fast runs name every deferred tier.
 #
-# The last four tiers are LOCAL-ONLY additions rather than transcriptions, and
+# The last five tiers are LOCAL-ONLY additions rather than transcriptions, and
 # are marked as such: three are the part of `npm run ci` (the command this gate
 # ran before ci:full) that no GitHub job runs, because GitHub would need five
-# more sibling deploy keys to run it. Replacing the gate command without them
-# would have quietly shrunk the gate. The fourth, the mirror-pendings lint, is
-# the only run of that checker over the real tree. They cost seconds plus the
-# parity suites; ci:live is not repeated here, it is the live-tier job above.
+# more sibling deploy keys to run it. The two lint additions run their checkers
+# over the real tree. They cost seconds plus the parity suites; ci:live is not
+# repeated here, it is the live-tier job above.
 #
 # All tiers run even after one fails (GitHub reports every red job, so this
 # reports every red tier); the exit code is red if any tier was.
@@ -193,6 +192,7 @@ run_tier "drift: coin consensus-pin conformance" node -e '
 # secrets. The venue has all five, so the gate keeps covering them.
 run_tier "local: sleep-flake lint (lint:sleep-flake)" npm run lint:sleep-flake
 run_tier "local: request-row-wait lint (lint:request-row-wait)" npm run lint:request-row-wait
+run_tier "local: barrier fresh-indexers lint (lint:barrier-fresh-indexers)" npm run lint:barrier-fresh-indexers
 # Scan the real attest-mirror tree: the checker's unit file reads only temp fixtures.
 run_tier "local: mirror-pendings lint (lint:mirror-pendings)" npm run lint:mirror-pendings
 run_tier "local: cross-repo parity suites (siblings required)" \
