@@ -132,8 +132,8 @@ const broadcastFilterArb = filterObjectArb([
 
 const dispenserFilterArb = filterObjectArb([
     'blockIndex', 'txHash', 'source', 'giveCoin', 'giveTick', 'giveAmount',
-    'giveEscrow', 'getCoin', 'getTick', 'getAmount', 'getAddress',
-    'fiatCode', 'fiatAmount', 'expiration', 'allowList', 'blockList', 'memo', 'status'
+    'giveEscrow', 'giveOwnership', 'getCoin', 'getTick', 'getAmount', 'getAddress',
+    'fiatCode', 'fiatAmount', 'oracleAddress', 'expiration', 'allowList', 'blockList', 'memo', 'status'
 ])
 
 const dispenseFilterArb = filterObjectArb([

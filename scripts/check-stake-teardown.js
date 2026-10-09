@@ -26,8 +26,11 @@
  * test/helpers/stakeTeardown so the root afterAll can give them back. A suite
  * that hand-builds its own `STAKE|...` payload and broadcasts it directly
  * bypasses that ledger, and the leak comes straight back with nobody watching.
+ * So does an SDK-tier suite that submits `{ action: 'STAKE', params }` and lets
+ * the SDK build the payload: the gate counts that object key as a STAKE site
+ * too, while a comparison such as `tx.action === 'STAKE'` stays a read.
  *
- * So every raw STAKE broadcast under test/ must do ONE of:
+ * So every raw or SDK-form STAKE broadcast under test/ must do ONE of:
  *
  *   - go through stakeHelper, which registers the stake for release
  *   - register it itself (a stakeTeardown.registerStake call in the same file,
@@ -35,6 +38,10 @@
  *   - say why this one never becomes a member, on the payload's own line or in
  *     the comment block directly above it:
  *         // stake-teardown-ok: <reason>
+ *     The same marker covers a stake on a FIXED key that a declared dedicated
+ *     staking venue keeps seated (the XCALL relay hub key): one key can seat
+ *     once, so it cannot accumulate, and releasing it would leave the venue's
+ *     own hub unseated.
  *
  * The reason is a sentence, not a pragma, because the distinction that matters
  * is a judgement: an intentionally-REJECTED stake (amount 0, a malformed
@@ -384,6 +391,14 @@ function registrationCount(tokens){
     return count
 }
 
+// Return the value span of an object-literal `action:` key, else null (the `:` after a key is not a comparison).
+function actionValueSpan(tokens, i){
+    const key = tokens[i]
+    if (key.value !== 'action' || (key.type !== 'identifier' && key.type !== 'string')) return null
+    if (tokens[i + 1]?.value !== ':' || !['{', ','].includes(tokens[i - 1]?.value)) return null
+    return { start: i + 2, end: expressionEnd(tokens, i + 2) }
+}
+
 function scanLines(lines, rel){
     if (rel === REGISTRAR || rel === REGISTRAR.split(path.sep).join('/')) return []
     const tokens = tokensFor(lines.join('\n'))
@@ -402,6 +417,9 @@ function scanLines(lines, rel){
         const token = tokens[i]
         if ((token.type === 'string' || token.type === 'template') && token.value !== 'STAKE' && isStake(token.value)) add(token)
         if (token.value === '[') add(joinedStake(tokens, bindings, i))
+        const action = actionValueSpan(tokens, i)
+        if (action && expressionValue(tokens, bindings, action.start, action.end) === 'STAKE')
+            add(originFor(tokens, bindings, action.start, action.end))
         if (token.value !== 'createAndSendTransaction' || tokens[i + 1]?.value !== '(') continue
         const close = matching(tokens, i + 1, '(', ')')
         if (close < 0) continue

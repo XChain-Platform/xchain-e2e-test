@@ -632,6 +632,58 @@ describe('checkDispenser() fiatAmount filter', function () {
     }
 })
 
+describe('checkDispenser() ownership and oracle columns', function () {
+    // A dispenser indexed with the wrong ownership flag or oracle address must be visible and filterable.
+    it('selects d.give_ownership and the joined oracle address', async function () {
+        await db.checkDispenser({ txHash: 'hash1' })
+        const sql = mockConnection.query.firstCall.args[0]
+        assert.ok(sql.includes('d.give_ownership,'))
+        assert.ok(sql.includes('oracle_ia.address AS oracle_address'))
+        assert.ok(sql.includes('LEFT JOIN index_addresses oracle_ia ON oracle_ia.id = d.oracle_address_id'))
+    })
+
+    for (const giveOwnership of [1, 0, '1', '0']) {
+        it('giveOwnership ' + JSON.stringify(giveOwnership) + ': adds d.give_ownership = ? with the number bound', async function () {
+            await db.checkDispenser({ txHash: 'hash1', giveOwnership })
+            const sql    = mockConnection.query.firstCall.args[0]
+            const params = mockConnection.query.firstCall.args[1]
+            const wherePart = sql.split('WHERE')[1] || ''
+            assert.ok(wherePart.includes('d.give_ownership = ?'))
+            assert.ok(params.includes(Number(giveOwnership)))
+            assert.strictEqual(countPlaceholders(sql), params.length)
+        })
+    }
+
+    for (const giveOwnership of [null, undefined, '']) {
+        it('giveOwnership ' + String(JSON.stringify(giveOwnership)) + ': adds no d.give_ownership clause', async function () {
+            await db.checkDispenser({ txHash: 'hash1', giveOwnership })
+            const sql    = mockConnection.query.firstCall.args[0]
+            const params = mockConnection.query.firstCall.args[1]
+            assert.ok(!(sql.split('WHERE')[1] || '').includes('d.give_ownership'))
+            assert.strictEqual(countPlaceholders(sql), params.length)
+        })
+    }
+
+    it('oracleAddress set: adds oracle_ia.address = ? with the address bound', async function () {
+        await db.checkDispenser({ txHash: 'hash1', oracleAddress: 'addrOracle' })
+        const sql    = mockConnection.query.firstCall.args[0]
+        const params = mockConnection.query.firstCall.args[1]
+        assert.ok((sql.split('WHERE')[1] || '').includes('oracle_ia.address = ?'))
+        assert.ok(params.includes('addrOracle'))
+        assert.strictEqual(countPlaceholders(sql), params.length)
+    })
+
+    for (const oracleAddress of [null, '']) {
+        it('oracleAddress ' + JSON.stringify(oracleAddress) + ': adds no oracle_ia.address clause', async function () {
+            await db.checkDispenser({ txHash: 'hash1', oracleAddress })
+            const sql    = mockConnection.query.firstCall.args[0]
+            const params = mockConnection.query.firstCall.args[1]
+            assert.ok(!(sql.split('WHERE')[1] || '').includes('oracle_ia.address'))
+            assert.strictEqual(countPlaceholders(sql), params.length)
+        })
+    }
+})
+
 describe('checkDispense()', function () {
     it('all-fields: 11 placeholders using isNullOrNullString', async function () {
         await db.checkDispense({

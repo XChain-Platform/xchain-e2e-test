@@ -41,12 +41,12 @@
  *
  ********************************************************************/
 
-const axios   = require('axios');
 const mariadb = require('mariadb');
 const { XChainSDK } = require('./sdkHelper');
 const { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM } = require('../../helpers/xchainPriceConstants');
 const { seedDogeFixturePrices, describeSeed } = require('../../helpers/dogeSetupPriceSeed');
 const topology = require('../../helpers/hubMirrorTopology');
+const { minerRpc: sharedMinerRpc } = require('../../helpers/minerRpc');
 
 // Seeded fee-oracle prices. XCHAIN comes from the shared bootstrap constant (the
 // value a real hub publishes); DOGE is a venue fiction chosen for round arithmetic.
@@ -119,10 +119,9 @@ const CONTRACT_C = `
     };
 `;
 
-async function minerRpc(method, params) {
-    const res = await axios.post(MINER_URL, { jsonrpc: '2.0', method, params: params || {}, id: 1 }, { timeout: 20000 });
-    if (res.data && res.data.error) throw new Error(method + ': ' + JSON.stringify(res.data.error));
-    return res.data ? res.data.result : null;
+// The shared helper rejects a refusal the miner returns inside `result` too.
+function minerRpc(method, params) {
+    return sharedMinerRpc(MINER_URL, method, params, { timeout: 20000 });
 }
 
 async function withConn(database, user, password, fn) {

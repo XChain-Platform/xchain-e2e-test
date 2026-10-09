@@ -254,7 +254,8 @@ describe('check-stake-teardown gate: payloads assembled from a bare STAKE', () =
     })
 
     it('leaves an action key, a comparison and an UNSTAKE array alone', () => {
-        assert.strictEqual(scan("submit(sdk, { action: 'STAKE', params: p })").length, 0)
+        assert.strictEqual(scan("submit(sdk, { action: 'UNSTAKE', params: p })").length, 0)
+        assert.strictEqual(scan("const label = ready ? action : 'STAKE'").length, 0)
         assert.strictEqual(scan("if (tx.action === 'STAKE') count++").length, 0)
         assert.strictEqual(scan("const ok = tx.action == 'STAKE';").length, 0)
         assert.strictEqual(scan("let msg = ['UNSTAKE', 1, pk].join('|')").length, 0)
@@ -265,5 +266,21 @@ describe('check-stake-teardown gate: payloads assembled from a bare STAKE', () =
             "let msg = ['STAKE', 1, 0, pk].join('|')"].join('\n')).length, 0)
         assert.strictEqual(scan(["let msg = ['STAKE', 1, amount, pk].join('|')",
             'stakeTeardown.registerStake({ addressInfo: addr, signingPubkey: pk, amount: amount })'].join('\n')).length, 0)
+    })
+})
+
+describe('check-stake-teardown gate: SDK-form STAKE submissions', () => {
+    it('catches an SDK action STAKE object on its STAKE line, quoted key and const value included', () => {
+        assert.deepStrictEqual(scan("submit(sdk, { action: 'STAKE', params: p })").map(h => h.line), [1])
+        assert.deepStrictEqual(scan(['submit(sdk, {', "    action: 'STAKE',", '    params: p,', '})'].join('\n')).map(h => h.line), [2])
+        assert.strictEqual(scan("submit(sdk, { 'action': \"STAKE\", params: p })").length, 1)
+        assert.deepStrictEqual(scan(["const KIND = 'STAKE'", 'submit(sdk, { action: KIND, params: p })'].join('\n')).map(h => h.line), [1])
+    })
+
+    it('accepts an SDK action STAKE under a reasoned marker or booked by a registration', () => {
+        assert.strictEqual(scan(['// stake-teardown-ok: a contract stake never joins a capability set',
+            "submit(sdk, { action: 'STAKE', params: p })"].join('\n')).length, 0)
+        assert.strictEqual(scan(["const res = await submit(sdk, { action: 'STAKE', params: p })",
+            'stakeTeardown.registerStake({ addressInfo: from, signingPubkey: p.signingPubkey, amount: p.amount })'].join('\n')).length, 0)
     })
 })

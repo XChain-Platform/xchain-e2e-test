@@ -68,7 +68,9 @@ PARITY_DB=${PARITY_DB:-XChain_BTC_DrillB_Indexer}
 WORK=${WORK:-$HOME/bet-parity}
 CNF=/tmp/bet-parity-client.cnf
 
-SRC_DB=$(docker exec "$SRC_CONTAINER" printenv INDEXER_DB_NAME)
+# Resolved only by the subcommands that read node A (see resolve_src_db), so
+# `down`, `logs` and the usage path still work when node A is stopped or renamed.
+SRC_DB=
 
 # Set by cmd_up just before node B is created, so only a failed `up` tears it
 # down; a failed `status` must never remove a node that passed its checks.
@@ -88,6 +90,15 @@ cleanup_on_exit() {
         if [ -n "$(docker ps -aq --filter "name=^${PARITY_CONTAINER}$")" ]; then
             echo "   WARNING: $PARITY_CONTAINER still exists; remove it by hand: docker rm -f $PARITY_CONTAINER" >&2
         fi
+    fi
+}
+
+# Read node A's database name, refusing when node A cannot answer. cmd_up calls
+# it before any destructive step, so a missing node A never drops $PARITY_DB.
+resolve_src_db() {
+    if ! SRC_DB=$(docker exec "$SRC_CONTAINER" printenv INDEXER_DB_NAME) || [ -z "$SRC_DB" ]; then
+        echo "   REFUSING: cannot read INDEXER_DB_NAME from $SRC_CONTAINER (node A stopped, renamed, or SRC_CONTAINER wrong)" >&2
+        exit 1
     fi
 }
 
@@ -139,6 +150,7 @@ clone_database() {
 }
 
 cmd_up() {
+    resolve_src_db
     mkdir -p "$WORK"
     write_client_cnf
 
@@ -221,6 +233,7 @@ cmd_up() {
 }
 
 cmd_status() {
+    resolve_src_db
     write_client_cnf
     echo "node A ($SRC_DB): tip $(tip_of "$SRC_DB")"
     echo "node B ($PARITY_DB): tip $(tip_of "$PARITY_DB")"

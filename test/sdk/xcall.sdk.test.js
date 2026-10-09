@@ -126,6 +126,7 @@ async function stakeRelayValidator() {
 
     try {
         const res = await submit(sdk,
+            // stake-teardown-ok: seats the fixed relay hub key this venue keeps seated; a release would block its re-stake for the cooldown while the already-in-use branch reads it as seated.
             { action: 'STAKE', params: { amount: '5000.00000000', signingPubkey: hubPubkey } },
             { pubkey: deployer.address, change: deployer.address },
             submitOpts({ wif: deployer.wif })

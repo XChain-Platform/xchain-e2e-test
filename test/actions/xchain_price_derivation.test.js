@@ -33,6 +33,7 @@ const issueHelper = require('../helpers/issueHelper')
 const stakeHelper = require('../helpers/stakeHelper')
 const { captureCurrentRail } = require('../helpers/chainRail')
 const { NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
+const { minerRpc: sharedMinerRpc } = require('../helpers/minerRpc')
 
 const { code: COIN_CODE } = captureCurrentRail()
 
@@ -104,15 +105,10 @@ function lastBelow(rows, pair, round) {
     return below.length ? below[below.length - 1] : null
 }
 
-async function minerRpc(method, params) {
-    const res = await fetch(MINER_API_URL + '/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: method, params: params || {} })
-    })
-    const body = await res.json()
-    if (body.error) throw new Error('miner ' + method + ' failed: ' + JSON.stringify(body.error))
-    return body.result
+// No timeout: a call mines up to 200 blocks. The shared helper also rejects a
+// refusal the miner returns inside `result`.
+function minerRpc(method, params) {
+    return sharedMinerRpc(MINER_API_URL + '/', method, params, { timeout: 0 })
 }
 
 // Advance the chain by `count` blocks and wait for the indexer to catch up.

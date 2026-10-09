@@ -8,6 +8,8 @@ const { spawnSync } = require('child_process')
 const ready = require('../../../scripts/wait-attest-mirror-stack')
 
 const HELPER = path.join(__dirname, '..', '..', '..', 'scripts', 'wait-attest-mirror-stack.js')
+// A literal, so a change to the pinned table list has to touch this test too.
+const PINNED_TABLE_COUNT = 8
 const HEALTHY_BODY = { jsonrpc: '2.0', id: 1, result: { status: 'success', reason: 'ok', wallet_ready: true, mining_started: true } }
 
 function healthy () {
@@ -16,7 +18,7 @@ function healthy () {
 
 const fakeMariadb = {
     createConnection: async () => ({
-        query: async () => [{ n: ready.REQUIRED_INDEXER_TABLES.length }],
+        query: async () => [{ n: PINNED_TABLE_COUNT }],
         end: async () => {},
     }),
 }
@@ -28,7 +30,7 @@ function config (overrides) {
         minerHealthUrls: ['http://miner-a/', 'http://miner-b/'],
         requiredIndexerTables: ready.REQUIRED_INDEXER_TABLES,
         timeoutMs: 20, intervalMs: 0, sleep: async () => {},
-        connect: async () => ({ query: async () => [{ n: ready.REQUIRED_INDEXER_TABLES.length }], end: async () => {} }),
+        connect: async () => ({ query: async () => [{ n: PINNED_TABLE_COUNT }], end: async () => {} }),
         fetchImpl: async () => healthy(),
     }, overrides || {})
 }
@@ -131,7 +133,7 @@ describe('attest-mirror stack readiness', function () {
     it('trusts schemaReady false without accepting a complete pinned table set', async function () {
         let connections = 0
         const c = config({
-            connect: async () => { connections++; return { query: async () => [{ n: ready.REQUIRED_INDEXER_TABLES.length }], end: async () => {} } },
+            connect: async () => { connections++; return { query: async () => [{ n: PINNED_TABLE_COUNT }], end: async () => {} } },
             fetchImpl: async (url) => url.includes('indexer')
                 ? { ok: true, json: async () => ({ schemaReady: false }) }
                 : healthy(),
@@ -145,7 +147,7 @@ describe('attest-mirror stack readiness', function () {
         const c = config({
             connect: async () => {
                 connections++
-                return { query: async () => [{ n: ready.REQUIRED_INDEXER_TABLES.length }], end: async () => {} }
+                return { query: async () => [{ n: PINNED_TABLE_COUNT }], end: async () => {} }
             },
         })
         assert.strictEqual(await ready.stackReady(c), true)
@@ -261,7 +263,7 @@ describe('attest-mirror stack readiness: every coin', function () {
         const fetched = []
         const c = config({
             indexers: [{ coin: 'BTC', dbName: 'btc', statusUrl: 'http://btc/status' }, { coin: 'LTC', dbName: 'ltc', statusUrl: 'http://ltc/status' }],
-            connect: async () => ({ query: async (sql, args) => [{ n: args[0] === 'ltc' ? 1 : ready.REQUIRED_INDEXER_TABLES.length }], end: async () => {} }),
+            connect: async () => ({ query: async (sql, args) => [{ n: args[0] === 'ltc' ? 1 : PINNED_TABLE_COUNT }], end: async () => {} }),
             fetchImpl: async (url) => { fetched.push(url); return healthy() },
         })
         assert.strictEqual(await ready.stackProblem(c), 'LTC indexer schema')
@@ -286,5 +288,24 @@ describe('attest-mirror stack readiness: timing values', function () {
 
     it('refuses a database port that is not a port', function () {
         assert.throws(() => envWith({ DB_HOST_PORT: 'db' }), /invalid stack readiness value dbPort: not a port/)
+    })
+})
+
+describe('attest-mirror stack readiness: pinned tables against the indexer schema', function () {
+    const INDEXER_SQL_DIR = path.join(__dirname, '..', '..', '..', '..', 'xchain-indexer', 'src', 'sql')
+
+    it('pins the fallback list at the literal fixture count', function () {
+        assert.strictEqual(ready.REQUIRED_INDEXER_TABLES.length, PINNED_TABLE_COUNT)
+    })
+
+    it('finds a CREATE TABLE for every pinned table in the sibling indexer schema', function () {
+        const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout')
+        if (!skipOrFail(this, siblingCheckout(__dirname, INDEXER_SQL_DIR), 'the pinned indexer table guard')) return
+        const created = new Set()
+        for (const name of fs.readdirSync(INDEXER_SQL_DIR).filter((f) => f.endsWith('.sql'))) {
+            const sql = fs.readFileSync(path.join(INDEXER_SQL_DIR, name), 'utf8')
+            for (const m of sql.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(\w+)`?/gi)) created.add(m[1].toLowerCase())
+        }
+        assert.deepStrictEqual(ready.REQUIRED_INDEXER_TABLES.filter((t) => !created.has(t)), [])
     })
 })

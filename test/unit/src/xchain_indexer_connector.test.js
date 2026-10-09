@@ -141,6 +141,41 @@ describe('XChainIndexerConnector', function () {
             } finally { warn.restore(); }
         });
     });
+
+    // The indexer flags a set cut at VALIDATOR_QUERY_LIMIT; a count or membership
+    // assertion on it would read as a product regression, so the wrapper refuses it.
+    describe('getCapabilityValidators truncation', function () {
+
+        function answer(extra) {
+            return { data: { result: Object.assign(
+                { capability: 'oracle_publish', block_index: 10, count: 1, validators: [{ pubkey: 'p' }] }, extra) } };
+        }
+
+        it('throws when the indexer marks the set truncated', async function () {
+            axiosPostStub.resolves(answer({ truncated: true }));
+            await assert.rejects(() => connector.getCapabilityValidators('oracle_publish', 10), /TRUNCATED/);
+        });
+
+        it('returns a set the indexer marks complete', async function () {
+            axiosPostStub.resolves(answer({ truncated: false }));
+            const res = await connector.getCapabilityValidators('oracle_publish', 10);
+            assert.strictEqual(res.truncated, false);
+            assert.strictEqual(res.count, 1);
+        });
+
+        it('returns a set from an older indexer that omits the flag', async function () {
+            axiosPostStub.resolves(answer({}));
+            const res = await connector.getCapabilityValidators('oracle_publish', 10);
+            assert.strictEqual(res.count, 1);
+            assert.ok(!('truncated' in res));
+        });
+
+        it('leaves raw call() able to read a truncated set', async function () {
+            axiosPostStub.resolves(answer({ truncated: true }));
+            const res = await connector.call('getcapabilityvalidators', { capability: 'oracle_publish', block_index: 10 });
+            assert.strictEqual(res.truncated, true);
+        });
+    });
 });
 
 // waitForIndexedBlock checks its deadline only between health calls, so the probes

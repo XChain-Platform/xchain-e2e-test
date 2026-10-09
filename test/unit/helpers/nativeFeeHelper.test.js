@@ -773,6 +773,24 @@ describe('nativeFeeHelper.nativeFeeSats', () => {
         assert.strictEqual(sats, Math.ceil(5000000 * helper.FEE_HEADROOM))
     })
 
+    it('sizes DEPLOY from the static schedule-priced quote, whose valid is null rather than true', async () => {
+        schedules = [REPRICED]
+        quote = { supported: true, valid: null, validated: false, staticQuote: true, requiredFeeSats: 200000 }
+        const helper = freshHelper()
+        const sats = await helper.nativeFeeSats('DEPLOY|0|abc', 'DSrc111')
+        assert.strictEqual(sats, Math.ceil(200000 * helper.FEE_HEADROOM))
+        assert.strictEqual(quotes().length, 1)
+    })
+
+    it('never sizes from a denied answer, even one that carries a fee', async () => {
+        schedules = [REPRICED]
+        quote = { supported: false, denied: true, valid: null, requiredFeeSats: 200000 }
+        const helper = freshHelper()
+        const sats = await helper.nativeFeeSats('BATCH|0|abc', 'DSrc111')
+        // 25 XCHAIN at $2 / $1000 = 0.05 DOGE, plus headroom: the priced budget, not the quote.
+        assert.strictEqual(sats, Math.ceil(5000000 * helper.FEE_HEADROOM))
+    })
+
     it('prices by budget when no action string is given (the SDK and multisig lanes)', async () => {
         schedules = [REPRICED]
         const helper = freshHelper()

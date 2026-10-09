@@ -54,6 +54,7 @@
 const { expect } = require('chai');
 const { makeSdk, submit, fundedGasAddress, mine, submitOpts, loadSDK } = require('../helpers/sdkHelper');
 const attestationHelper = require('../../helpers/attestationHelper');
+const stakeTeardown = require('../../helpers/stakeTeardown');
 const { requireResponsibleValidator } = require('../../helpers/federationGuards');
 // Reuse the harness's SDK resolver (sibling checkout or installed dep) to get
 // the top-level AttestationHelpers builders (also exposed as sdk.attestation).
@@ -215,11 +216,15 @@ async function setup() {
         // pubkey for `attestation` (default min 1000 XCHAIN). 15000 also clears the
         // http_get PROVIDER floor (10000), enforced on the responsible set
         // at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest). Driven via SDK.
+        const stakeAmount = '15000.00000000';
         const stakeRes = await submit(sdk,
-            { action: 'STAKE', params: { version: 1, amount: '15000.00000000', signingPubkey: validator.pubkey } },
+            { action: 'STAKE', params: { version: 1, amount: stakeAmount, signingPubkey: validator.pubkey } },
             { pubkey: operator.address, change: operator.address },
             submitOpts({ wif: operator.wif })
         );
+        // Book a valid stake before asserting on it, so the root afterAll gives the fresh key back.
+        if (stakeRes && stakeRes.indexed && stakeRes.indexed.status === 'valid')
+            stakeTeardown.registerStake({ addressInfo: operator, signingPubkey: validator.pubkey, amount: stakeAmount });
         console.log('    [sdk] STAKE v1 version=' + stakeRes.version + ' status=' + stakeRes.indexed.status);
         expect(stakeRes.version, 'should select STAKE v1 (capability)').to.equal(1);
         expect(stakeRes.indexed.status).to.equal('valid');

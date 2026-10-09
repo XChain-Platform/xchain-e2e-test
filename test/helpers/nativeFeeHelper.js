@@ -576,12 +576,17 @@ function rawSatsForXchain(xchainAmount, prices){
 }
 
 // The indexer's own expected fee for this exact action, in satoshis with FEE_HEADROOM,
-// or null when it will not price it. feequote dry-runs the real handler against current
-// state and values its staged XCHAIN fee at the prices the chain will use. It answers
-// no fee for an action it judges invalid (a negative test's deliberately bad action),
-// for a controller-bound one, for BATCH/XEXEC, or while the indexer is busy on a block;
-// connector.call throws on that answer's error envelope, and every one of those cases
-// falls back to the priced budget.
+// or null when it will not price it. For most actions feequote dry-runs the real handler
+// against current state, so `valid` is the handler's verdict and the staged XCHAIN fee is
+// valued at the prices the chain will use. DEPLOY/EXECUTE are never dry-run: their answer
+// is priced from the gas schedule (staticQuote:true, validated:false, valid:null), and this
+// helper deliberately sizes from that fee-only quote, since valid:null means "not judged",
+// not "invalid". It answers no fee for an action it judges invalid (a negative test's
+// deliberately bad action), for a controller-bound one, for BATCH/XEXEC (supported:false,
+// denied:true), or while the indexer is busy on a block; connector.call throws on that
+// answer's error envelope, and every one of those cases falls back to the priced budget.
+// A supported:false answer is refused here too, so a denied answer is never sized even
+// if it someday carries a fee.
 // Returns { sats, prices } where `prices` is the pair the quote itself was valued at (the
 // feequote answer carries it), or null when there is no quote.
 async function quoteActionSats(wire, source){
@@ -593,7 +598,7 @@ async function quoteActionSats(wire, source){
     try {
         q = await c.call('feequote', { action: wire.slice(0, cut), params: wire.slice(cut + 1), source: source })
     } catch (e) { return null }
-    if (!q || q.valid === false) return null
+    if (!q || q.valid === false || (q.supported === false && !q.feeExempt)) return null
     if (q.feeExempt) return { sats: 0, prices: null }
     const sats = Number(q.requiredFeeSats)
     if (!Number.isFinite(sats) || sats < 0) return null

@@ -22,6 +22,7 @@
 const { expect } = require('chai');
 const crypto = require('crypto');
 const { makeSdk, submit, fundedGasAddress, submitOpts, GAS_TICK } = require('./helpers/sdkHelper');
+const stakeTeardown = require('../helpers/stakeTeardown');
 
 // Ed25519 validator signing pubkey as 64-hex (matches the connector suite).
 function newSigningPubkey() {
@@ -77,12 +78,13 @@ describe('[sdk] contract-targeted staking (DEPLOY v1 -> STAKE v3)', function () 
     });
 
     it('STAKE v3 stakes XCHAIN against the contract', async function () {
+        const signingPubkey = newSigningPubkey();
         const res = await submit(sdk,
             {
                 action: 'STAKE',
                 params: {
                     amount: '200.00000000',
-                    signingPubkey: newSigningPubkey(),
+                    signingPubkey,
                     targetContractIndex: contractIndex,
                     tick: GAS_TICK,
                 },
@@ -91,6 +93,9 @@ describe('[sdk] contract-targeted staking (DEPLOY v1 -> STAKE v3)', function () 
             submitOpts({ wif: staker.wif })
         );
         console.log('    [sdk] STAKE version=' + res.version + ' encoding=' + res.encoding + ' status=' + res.indexed.status);
+        // Book a valid contract stake before asserting on it, so the root afterAll unstakes it.
+        if (res && res.indexed && res.indexed.status === 'valid')
+            stakeTeardown.registerStake({ addressInfo: staker, signingPubkey, amount: '200.00000000', contractIndex, tick: GAS_TICK });
         expect(res.version, 'should select STAKE v3').to.equal(3);
         expect(res.indexed.status).to.equal('valid');
     });

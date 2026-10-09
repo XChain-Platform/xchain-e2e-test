@@ -97,13 +97,13 @@ function findReusedLabelBoots (source) {
     return findings.sort((a, b) => a.at - b.at).map(({ line, label }) => ({ line, label }))
 }
 
-function scan () {
-    const files = fs.readdirSync(SCAN_DIR)
+function scan (dir = SCAN_DIR) {
+    const files = fs.readdirSync(dir)
         .filter((file) => file.endsWith('.test.js'))
         .sort()
     const findings = []
     for (const file of files) {
-        const absolute = path.join(SCAN_DIR, file)
+        const absolute = path.join(dir, file)
         const relative = path.relative(ROOT, absolute).split(path.sep).join('/')
         for (const finding of findReusedLabelBoots(fs.readFileSync(absolute, 'utf8'))) {
             findings.push({ file: relative, ...finding })
@@ -112,15 +112,29 @@ function scan () {
     return { files, findings }
 }
 
-function main () {
-    const { files, findings } = scan()
+// A scan that reads no leg file is a broken scan, not a clean corpus, so it fails even under --report.
+function main (argv = process.argv.slice(2), dir = SCAN_DIR) {
+    const shown = path.relative(ROOT, dir).split(path.sep).join('/') || dir
+    let result
+    try {
+        result = scan(dir)
+    } catch (error) {
+        if (!error || error.code !== 'ENOENT') throw error
+        console.error(`check-barrier-fresh-indexers: scan directory does not exist: ${shown}`)
+        return 1
+    }
+    const { files, findings } = result
+    if (files.length === 0) {
+        console.error(`check-barrier-fresh-indexers: read zero files from ${shown}`)
+        return 1
+    }
     for (const finding of findings) {
         console.log(`${finding.file}:${finding.line} label=${finding.label}` + (finding.error ? ` ${finding.error}` : ''))
     }
     console.log(`${findings.length} reused-label boot(s) in ${files.length} file(s)`)
-    return findings.length && !process.argv.includes('--report') ? 1 : 0
+    return findings.length && !argv.includes('--report') ? 1 : 0
 }
 
-module.exports = { findReusedLabelBoots }
+module.exports = { findReusedLabelBoots, scan, main }
 
 if (require.main === module) process.exit(main())

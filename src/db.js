@@ -51,6 +51,11 @@ function addDispenserGiveFilters(database, params, whereClauses, whereValues){
     addDispenserWhereValue(database, whereClauses, whereValues, params.giveTick, "give_it.tick = ?")
     addDispenserWhereValue(database, whereClauses, whereValues, params.giveAmount, "d.give_amount = ?")
     addDispenserWhereValue(database, whereClauses, whereValues, params.giveEscrow, "d.give_escrow = ?")
+    // Bypass isNullOrNullString, which reads 0 as unset, so giveOwnership 0 still pins the flag
+    if (params.giveOwnership != null && params.giveOwnership !== ""){
+        whereClauses.push("d.give_ownership = ?")
+        whereValues.push(Number(params.giveOwnership))
+    }
 }
 
 function addDispenserGetFilters(database, params, whereClauses, whereValues){
@@ -69,6 +74,7 @@ function addDispenserConstraintFilters(database, params, whereClauses, whereValu
     addDispenserWhereValue(database, whereClauses, whereValues, params.fiatCode, "ifs.code = ?")
     // Match the fiat amount the caller named; the indexer stores the wire string verbatim
     addDispenserWhereValue(database, whereClauses, whereValues, params.fiatAmount, "d.fiat_amount = ?")
+    addDispenserWhereValue(database, whereClauses, whereValues, params.oracleAddress, "oracle_ia.address = ?")
     addDispenserWhereValue(database, whereClauses, whereValues, params.expiration, "d.expiration = ?")
     addDispenserWhereValue(database, whereClauses, whereValues, params.allowList, "d.allow_list = ?")
     addDispenserWhereValue(database, whereClauses, whereValues, params.blockList, "d.block_list = ?")
@@ -96,12 +102,14 @@ function buildDispenserQuery(whereClauses){
                 give_it.tick AS give_tick,
                 d.give_amount,
                 d.give_escrow,
+                d.give_ownership,
                 get_ic.coin AS get_coin,
                 get_it.tick AS get_tick,
                 d.get_amount,
                 get_ia.address AS get_address,
                 ifs.code AS fiat_code,
                 d.fiat_amount,
+                oracle_ia.address AS oracle_address,
                 d.expiration,
                 d.allow_list,
                 d.block_list,
@@ -118,6 +126,7 @@ function buildDispenserQuery(whereClauses){
             LEFT JOIN index_tickers get_it ON get_it.id = d.get_tick_id
             LEFT JOIN index_addresses get_ia ON get_ia.id = d.get_address_id
             LEFT JOIN index_fiats ifs ON ifs.id = d.fiat_id
+            LEFT JOIN index_addresses oracle_ia ON oracle_ia.id = d.oracle_address_id
             LEFT JOIN index_memos im ON im.id = d.memo_id
             LEFT JOIN index_statuses ist ON ist.id = d.status_id
         `+"WHERE "+whereClauses.join(" AND ");
@@ -1182,10 +1191,10 @@ class Database {
     async waitForDispenser(dispenserObject, timeMax = 60000){ return this['_waitFor'](this.checkDispenser, dispenserObject, timeMax) }
 
     async checkDispenser({blockIndex, txHash, source, giveCoin, giveTick, giveAmount, giveEscrow,
-      getCoin, getTick, getAmount, getAddress, fiatCode, fiatAmount,
+      giveOwnership, getCoin, getTick, getAmount, getAddress, fiatCode, fiatAmount, oracleAddress,
       expiration, allowList, blockList, memo, status}){
         const params = {blockIndex, txHash, source, giveCoin, giveTick, giveAmount, giveEscrow,
-            getCoin, getTick, getAmount, getAddress, fiatCode, fiatAmount,
+            giveOwnership, getCoin, getTick, getAmount, getAddress, fiatCode, fiatAmount, oracleAddress,
             expiration, allowList, blockList, memo, status}
         const {whereClauses, whereValues} = buildDispenserFilters(this, params)
         const query = buildDispenserQuery(whereClauses)

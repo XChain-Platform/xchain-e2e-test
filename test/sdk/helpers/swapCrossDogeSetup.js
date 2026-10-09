@@ -68,6 +68,7 @@ const { XChainSDK } = require('./sdkHelper');
 const { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM } = require('../../helpers/xchainPriceConstants');
 const { seedDogeFixturePrices, describeSeed } = require('../../helpers/dogeSetupPriceSeed');
 const topology = require('../../helpers/hubMirrorTopology');
+const { minerRpc: sharedMinerRpc } = require('../../helpers/minerRpc');
 
 const MINER_URL   = process.env.XCALL_DOGE_MINER_URL   || 'http://localhost:3125';
 const INDEXER_URL = process.env.XCALL_DOGE_INDEXER_URL || 'http://127.0.0.1:3124';
@@ -99,10 +100,9 @@ const SWAP_AMOUNT = 100;
 const DOGE_TICK = String(process.env.SWAP_DOGE_TICK || '').trim();
 const BTC_TICK  = String(process.env.SWAP_BTC_TICK  || '').trim();
 
-async function minerRpc(method, params) {
-    const res = await axios.post(MINER_URL, { jsonrpc: '2.0', method, params: params || {}, id: 1 }, { timeout: 20000 });
-    if (res.data && res.data.error) throw new Error(method + ': ' + JSON.stringify(res.data.error));
-    return res.data ? res.data.result : null;
+// The shared helper rejects a refusal the miner returns inside `result` too.
+function minerRpc(method, params) {
+    return sharedMinerRpc(MINER_URL, method, params, { timeout: 20000 });
 }
 
 async function withConn(database, user, password, fn) {

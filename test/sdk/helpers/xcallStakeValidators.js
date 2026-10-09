@@ -95,6 +95,7 @@ function registerStakeValidatorTest() {
             const staker = await fundedGasAddress(sdk, 1);
             try {
                 const res = await submit(sdk,
+                    // stake-teardown-ok: seats the operator-supplied federation keys this venue keeps seated, so a release at run end would unseat the relay federation.
                     { action: 'STAKE', params: { amount: Number(amount).toFixed(8), signingPubkey: pubkey } },
                     { pubkey: staker.address, change: staker.address },
                     submitOpts({ wif: staker.wif })

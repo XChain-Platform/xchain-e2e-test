@@ -150,14 +150,23 @@ class XChainIndexerConnector {
     // indexer's consensus effective-set query: stake keys minus revocations
     // ∪ active delegated keys backed by the source's aggregate stake).
     // minStake is caller-supplied so tests don't depend on the venue's local
-    // MIN_STAKE config. Returns { capability, block_index, count, validators },
-    // or null on transport failure; a rejected query throws (see call()).
+    // MIN_STAKE config. Returns { capability, block_index, count, truncated,
+    // validators }, or null on transport failure; a rejected query throws (see
+    // call()). Throws when truncated === true (the set hit the indexer's
+    // VALIDATOR_QUERY_LIMIT), since a count or membership check on a cut set is
+    // meaningless; an older indexer that omits the field passes. Use raw call()
+    // to read a truncated set on purpose.
     async getCapabilityValidators(capability, blockIndex, minStake){
-        return await this.call('getcapabilityvalidators', {
+        const result = await this.call('getcapabilityvalidators', {
             capability:  capability,
             block_index: Number(blockIndex),
             min_stake:   minStake
         })
+        if (result && result.truncated === true) {
+            throw new Error('getcapabilityvalidators(' + capability + ') at block ' + blockIndex +
+                ' came back TRUNCATED (hit VALIDATOR_QUERY_LIMIT); a count or membership check on it would be meaningless')
+        }
+        return result
     }
 
     // Resolve the staking source address that owned/delegated a signing pubkey

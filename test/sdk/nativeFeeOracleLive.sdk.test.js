@@ -71,6 +71,7 @@ const axios   = require('axios');
 const mariadb = require('mariadb');
 const { XChainSDK } = require('./helpers/sdkHelper');
 const { serviceRefusal } = require('../../src/lib/service_refusal');
+const { minerRpc: sharedMinerRpc } = require('../helpers/minerRpc');
 
 const MINER_URL   = process.env.XCALL_DOGE_MINER_URL   || 'http://localhost:3125';
 const INDEXER_URL = process.env.XCALL_DOGE_INDEXER_URL || 'http://127.0.0.1:3124';
@@ -106,10 +107,9 @@ const FEE_TOL_MIN = 0.95, FEE_TOL_MAX = 1.10;   // matches indexer FEE_TOLERANCE
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
-async function minerRpc(method, params) {
-    const res = await axios.post(MINER_URL, { jsonrpc: '2.0', method, params: params || {}, id: 1 }, { timeout: 20000 });
-    if (res.data && res.data.error) throw new Error(method + ': ' + JSON.stringify(res.data.error));
-    return res.data ? res.data.result : null;
+// The shared helper rejects a refusal the miner returns inside `result` too.
+function minerRpc(method, params) {
+    return sharedMinerRpc(MINER_URL, method, params, { timeout: 20000 });
 }
 
 // The indexer gates feequotedryrun behind x-api-key (401, -32001 without it); same key precedence as chainRail.
