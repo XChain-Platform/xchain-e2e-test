@@ -101,6 +101,7 @@ function mirrorStub (heights, active) {
         coin: 'BTC', network: 'regtest', heightWatermarks: heights || {}, ['_heightShortfalls']: {},
         admissionChain: () => 'BTC', admissionActiveAt: () => !!active,
         publishedHeight: watermarks.publishedHeight, heightSatisfied: watermarks.heightSatisfied,
+        admissionStreamSatisfied: watermarks.admissionStreamSatisfied,
         matchBootstrapped: true, matchSyncTimestamp: T - 1, streamWatermark: T, matchWatermarkGraceS: 120,
     }
 }
@@ -151,10 +152,13 @@ describe('BF4 unit: below the activation every predicate is today\'s form, above
                 assertionMessage('empty-mirror escape=true', emptyMirror, 'the BF4 legacy member predicate'))
         }
         const armed = mirrorStub({ [TABLE]: { BTC: B - 5 } }, true)
+        const armedHeightSatisfied = members.matchSyncSatisfied.call(armed, T + 1, B)
+        assert.strictEqual(armedHeightSatisfied, false,
+            assertionMessage('armed member=false below its height line and stream grace', armedHeightSatisfied, 'the BF4 armed member predicate'))
         armed.streamWatermark = T + 99999
-        const armedSatisfied = members.matchSyncSatisfied.call(armed, T + 1, B)
-        assert.strictEqual(armedSatisfied, false,
-            assertionMessage('armed height-keyed member=false below its height line', armedSatisfied, 'the BF4 armed member predicate'))
+        const armedStreamSatisfied = members.matchSyncSatisfied.call(armed, T + 1, B)
+        assert.strictEqual(armedStreamSatisfied, true,
+            assertionMessage('armed member=true after stream grace with published admission evidence', armedStreamSatisfied, 'the BF4 armed member predicate'))
     })
 
 })
