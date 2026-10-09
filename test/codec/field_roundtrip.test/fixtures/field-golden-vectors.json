@@ -306,6 +306,19 @@
     }
   },
   {
+    "action": "BET",
+    "version": 4,
+    "format": "VERSION|FEED_ACTION_INDEX|ALLOW_LIST|BLOCK_LIST|MEMO",
+    "string": "BET|4|0|0|1|field round trip 270272",
+    "fields": {
+      "VERSION": "4",
+      "FEED_ACTION_INDEX": "0",
+      "ALLOW_LIST": "0",
+      "BLOCK_LIST": "1",
+      "MEMO": "field round trip 270272"
+    }
+  },
+  {
     "action": "BROADCAST",
     "version": 0,
     "format": "VERSION|MESSAGE|VALUE",
