@@ -110,14 +110,30 @@ async function indexerSchemaReady (config, dbName) {
     }
 }
 
+async function indexerProblem (config, indexer) {
+    let response
+    try {
+        response = await config.fetchImpl(indexer.statusUrl)
+    } catch (_) {
+        return ' /status'
+    }
+    if (!response || !response.ok) return ' /status'
+
+    let body = null
+    try {
+        body = await response.json()
+    } catch (_) {}
+    if (body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'schemaReady')) {
+        return body.schemaReady === true ? '' : ' schema'
+    }
+    return await indexerSchemaReady(config, indexer.dbName) ? '' : ' schema'
+}
+
 // Name the first check that is not ready yet, or return '' when the whole stack is.
 async function stackProblem (config) {
-    // Check every coin's schema before any HTTP probe: /status can answer before the first migration.
     for (const indexer of config.indexers) {
-        if (!await indexerSchemaReady(config, indexer.dbName)) return indexer.coin + ' indexer schema'
-    }
-    for (const indexer of config.indexers) {
-        if (!await responseOk(indexer.statusUrl, undefined, config.fetchImpl)) return indexer.coin + ' indexer /status'
+        const problem = await indexerProblem(config, indexer)
+        if (problem) return indexer.coin + ' indexer' + problem
     }
     for (const url of config.minerHealthUrls) {
         const problem = await minerProblem(url, config.fetchImpl)
@@ -230,6 +246,7 @@ module.exports = {
     minerBodyProblem,
     minerProblem,
     indexerSchemaReady,
+    indexerProblem,
     stackProblem,
     stackReady,
     waitForStack,

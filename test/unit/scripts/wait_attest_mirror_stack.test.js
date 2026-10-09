@@ -116,14 +116,40 @@ describe('attest-mirror stack readiness', function () {
         assert.match(calls[1].init.body, /"method":"health"/)
     })
 
-    it('does not probe services until the indexer schema exists', async function () {
-        let fetched = false
+    it('trusts schemaReady without querying the pinned table fallback', async function () {
+        let connections = 0
         const c = config({
-            connect: async () => ({ query: async () => [{ n: ready.REQUIRED_INDEXER_TABLES.length - 1 }], end: async () => {} }),
-            fetchImpl: async () => { fetched = true; return { ok: true } },
+            connect: async () => { connections++; throw new Error('fallback should not run') },
+            fetchImpl: async (url) => url.includes('indexer')
+                ? { ok: true, json: async () => ({ schemaReady: true }) }
+                : healthy(),
+        })
+        assert.strictEqual(await ready.stackReady(c), true)
+        assert.strictEqual(connections, 0)
+    })
+
+    it('trusts schemaReady false without accepting a complete pinned table set', async function () {
+        let connections = 0
+        const c = config({
+            connect: async () => { connections++; return { query: async () => [{ n: ready.REQUIRED_INDEXER_TABLES.length }], end: async () => {} } },
+            fetchImpl: async (url) => url.includes('indexer')
+                ? { ok: true, json: async () => ({ schemaReady: false }) }
+                : healthy(),
         })
         assert.strictEqual(await ready.stackReady(c), false)
-        assert.strictEqual(fetched, false)
+        assert.strictEqual(connections, 0)
+    })
+
+    it('falls back to the pinned table set when /status has no schemaReady field', async function () {
+        let connections = 0
+        const c = config({
+            connect: async () => {
+                connections++
+                return { query: async () => [{ n: ready.REQUIRED_INDEXER_TABLES.length }], end: async () => {} }
+            },
+        })
+        assert.strictEqual(await ready.stackReady(c), true)
+        assert.strictEqual(connections, 1)
     })
 
     it('waits through a miner race and completes only after health is green', async function () {
@@ -231,15 +257,15 @@ describe('attest-mirror stack readiness: every coin', function () {
         assert.throws(() => envWith({ ATTEST_MIRROR_READY_COINS: 'BTC,XYZ' }), /unknown stack readiness coin XYZ/)
     })
 
-    it('makes no HTTP probe while a second-coin schema is missing', async function () {
-        let fetched = false
+    it('uses the pinned-table fallback for a second coin whose status omits schemaReady', async function () {
+        const fetched = []
         const c = config({
             indexers: [{ coin: 'BTC', dbName: 'btc', statusUrl: 'http://btc/status' }, { coin: 'LTC', dbName: 'ltc', statusUrl: 'http://ltc/status' }],
             connect: async () => ({ query: async (sql, args) => [{ n: args[0] === 'ltc' ? 1 : ready.REQUIRED_INDEXER_TABLES.length }], end: async () => {} }),
-            fetchImpl: async () => { fetched = true; return healthy() },
+            fetchImpl: async (url) => { fetched.push(url); return healthy() },
         })
         assert.strictEqual(await ready.stackProblem(c), 'LTC indexer schema')
-        assert.strictEqual(fetched, false)
+        assert.deepStrictEqual(fetched, ['http://btc/status', 'http://ltc/status'])
     })
 })
 
