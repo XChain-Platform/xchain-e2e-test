@@ -13,7 +13,7 @@
 
 const assert = require('assert')
 const cryptoHelper = require('../../helpers/core/cryptoHelper')
-const mintHelper = require('../../helpers/mintHelper')
+const gasHelper = require('../../helpers/gasHelper')
 const batchHelper = require('../../helpers/batchHelper')
 const {
     GAS_TICK, XCHAIN_PER_ISSUE, XCHAIN_PER_CHILD_ISSUE, state, debitsForTx, balanceOf,
@@ -36,16 +36,16 @@ module.exports = function registerGasChildrenCases(){
             const perChild  = XCHAIN_PER_CHILD_ISSUE
             const perParent = XCHAIN_PER_ISSUE
 
-            // seedGas=false so the balance is exactly what this test mints, not the
-            // 100 XCHAIN the funding helper hands out by default.
+            // seedGas=false so the balance is exactly what this test funds, not the
+            // 100 XCHAIN getNewFundedAddress hands out by default.
             const addr    = await cryptoHelper.getNewFundedAddress("BIL.A6", COIN, NETWORK, null, "legacy", 0, 1, false)
             const address = addr["address"]
             const parent  = "BILA6" + address.substring(address.length - 8)
 
-            const mintAmount = perParent + K * perChild
-            await mintHelper.sendMintV0(addr, GAS_TICK, mintAmount, address, "")
-            assert.strictEqual(Number(await balanceOf(address, GAS_TICK)), mintAmount,
-                "the source must start with exactly " + mintAmount + " XCHAIN")
+            const budget = perParent + K * perChild
+            await gasHelper.ensureGasBalance(addr, budget)
+            assert.strictEqual(Number(await balanceOf(address, GAS_TICK)), budget,
+                "the source must start with exactly " + budget + " XCHAIN")
 
             // The parent ISSUE must also be gas-metered, so it is sent WITHOUT the
             // harness's automatic fee output rather than through issueHelper.
