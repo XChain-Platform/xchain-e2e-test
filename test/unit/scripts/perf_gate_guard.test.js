@@ -21,7 +21,6 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
-const gate = require('../../../scripts/perf-gate')
 
 const cli = path.resolve(__dirname, '../../../scripts/perf-gate.js')
 
@@ -36,7 +35,19 @@ function runFixture(data) {
 
 describe('perf-gate guards', () => {
     it('can be imported without running the CLI', () => {
-        assert.strictEqual(typeof gate.run, 'function')
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'perf-gate-import-'))
+        const missingFile = path.join(dir, 'missing-results.json')
+        const importScript = [
+            `process.argv = [process.execPath, 'perf-gate-import', '--file', ${JSON.stringify(missingFile)}]`,
+            `const gate = require(${JSON.stringify(cli)})`,
+            'if (typeof gate.run !== "function") process.exitCode = 3'
+        ].join('\n')
+        const result = spawnSync(process.execPath, ['-e', importScript], { encoding: 'utf8' })
+        fs.rmSync(dir, { recursive: true, force: true })
+
+        assert.strictEqual(result.status, 0, result.stdout + result.stderr)
+        assert.strictEqual(result.stdout, '')
+        assert.strictEqual(result.stderr, '')
     })
 
     it('fails a result file from a run that recorded no tests', () => {
