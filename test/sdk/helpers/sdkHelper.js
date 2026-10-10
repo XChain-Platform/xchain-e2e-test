@@ -50,6 +50,7 @@ function loadSDK() {
 }
 
 const { XChainSDK } = loadSDK();
+const gasHelper = require('../../helpers/gasHelper');
 
 // global.COIN / global.NETWORK are set by the initialCheck beforeAll hook;
 // fall back to raw env for standalone use.
@@ -261,13 +262,8 @@ const GAS_FAUCET_MAX_MINT = 100000;
 
 // Bootstrap primitive for acquiring gas before any fee-paying action
 // (ISSUE, ORDER, SWAP, DISPENSER, CALLBACK, EXECUTE, ...).
-async function mintGas(sdk, addr, amount = GAS_FAUCET_MAX_MINT) {
-    return submit(
-        sdk,
-        { action: 'MINT', params: { tick: GAS_TICK, amount, destination: addr.address } },
-        { pubkey: addr.address, change: addr.address },
-        submitOpts({ wif: addr.wif })
-    );
+async function mintGas(_sdk, addr, amount = GAS_FAUCET_MAX_MINT) {
+    return gasHelper.ensureGasBalance(addr, amount);
 }
 
 async function fundedGasAddress(sdk, amountToFund = 1, gasAmount = GAS_FAUCET_MAX_MINT, addressType = 'p2pkh') {
