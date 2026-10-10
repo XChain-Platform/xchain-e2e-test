@@ -52,29 +52,20 @@ const registerCoinpayCases = require('./batch_issuance_limits/coinpay')
 const registerDispenserSinglePaymentCases = require('./batch_issuance_limits/dispenser_single_payment')
 const registerDispenserBatchCreateCases = require('./batch_issuance_limits/dispenser_batch_creates')
 
-describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
-
-    before(async function () {
-        const mode = await nativeFeeHelper.discoverFeeMode()
-        state.FEE_DEST = mode.destination || null
-        // detectFeePaymentMode (xchain-indexer/src/utility.js): a transaction carrying
-        // NO output to FEE_DESTINATION falls back to an XCHAIN-balance deduction only
-        // on BTC, or on a stack with no fee destination configured at all. Everywhere
-        // else that transaction is rejected outright. So this, not "does the stack
-        // have native fees", is what decides whether the gas-metered cases can run:
-        // a regtest BTC stack can have BOTH modes wired at once, and this suite's
-        // first run assumed it could not.
-        state.GAS_MODE = (COIN_CODE === 'BTC') || !state.FEE_DEST
-        console.log('lane: COIN=' + COIN_CODE + ' gasModeAvailable=' + state.GAS_MODE +
-            ' feeDestination=' + (state.FEE_DEST ? 'resolved' : 'none'))
-    })
-
-    registerIssuanceCases()
-    registerCommandCapCases()
-    registerCaretTickCases()
-    registerGasChildrenCases()
-    registerNativeFeeCases()
-    registerCoinpayCases()
+async function discoverFeeMode() {
+    const mode = await nativeFeeHelper.discoverFeeMode()
+    state.FEE_DEST = mode.destination || null
+    // detectFeePaymentMode (xchain-indexer/src/utility.js): a transaction carrying
+    // NO output to FEE_DESTINATION falls back to an XCHAIN-balance deduction only
+    // on BTC, or on a stack with no fee destination configured at all. Everywhere
+    // else that transaction is rejected outright. So this, not "does the stack
+    // have native fees", is what decides whether the gas-metered cases can run:
+    // a regtest BTC stack can have BOTH modes wired at once, and this suite's
+    // first run assumed it could not.
+    state.GAS_MODE = (COIN_CODE === 'BTC') || !state.FEE_DEST
+    console.log('lane: COIN=' + COIN_CODE + ' gasModeAvailable=' + state.GAS_MODE +
+        ' feeDestination=' + (state.FEE_DEST ? 'resolved' : 'none'))
+}
 
     // ─── A5 (DISPENSE half: spec frontier rows 18, 19, 20, 23 and 35) ──────────
     //
@@ -122,9 +113,22 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
     // xchain-indexer/test/unit/db/markets/dispenser_value_accounting.test.js, which drives the
     // handler with the gate forced off. That is the honest boundary: these are
     // at-flag witnesses only.
-    describe('A5: one payment fills ONE dispenser (rows 19/20/23) and a batched create dispenses (row 35)', function () {
-
+function registerDispenserCases() {
+    describe('A5: one payment fills ONE dispenser (rows 19/20/23) and a batched create dispenses (row 35)', function registerA5DispenserCases() {
         registerDispenserSinglePaymentCases()
         registerDispenserBatchCreateCases()
     })
-})
+}
+
+function registerBatchIssuanceLimits() {
+    before(discoverFeeMode)
+    registerIssuanceCases()
+    registerCommandCapCases()
+    registerCaretTickCases()
+    registerGasChildrenCases()
+    registerNativeFeeCases()
+    registerCoinpayCases()
+    registerDispenserCases()
+}
+
+describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', registerBatchIssuanceLimits)
