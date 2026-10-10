@@ -4,39 +4,60 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 const assert = require('assert');
-const sinon = require('sinon');
-const proxyquire = require('proxyquire').noCallThru().noPreserveCache();
+const Module = require('module');
+
+const HELPER_PATH = require.resolve('../../sdk/helpers/sdkHelper');
+
+function recordingAsync(value) {
+    const calls = [];
+    const fn = async (...args) => {
+        calls.push(args);
+        return value;
+    };
+    fn.calls = calls;
+    return fn;
+}
 
 function loadHelper(ensureGasBalance) {
     class FakeSDK {}
-    return proxyquire('../../sdk/helpers/sdkHelper', {
-        'xchain-sdk': { XChainSDK: FakeSDK },
-        '../../helpers/gasHelper': { ensureGasBalance }
-    });
+    const originalLoad = Module._load;
+    delete require.cache[HELPER_PATH];
+    Module._load = function (request, parent, isMain) {
+        if (request === 'xchain-sdk') return { XChainSDK: FakeSDK };
+        if (request === '../../helpers/gasHelper' && parent && parent.filename === HELPER_PATH) {
+            return { ensureGasBalance };
+        }
+        return originalLoad.call(this, request, parent, isMain);
+    };
+    try {
+        return require(HELPER_PATH);
+    } finally {
+        Module._load = originalLoad;
+        delete require.cache[HELPER_PATH];
+    }
 }
 
 describe('sdkHelper gas funding', function () {
     it('routes gas through the shared rail-aware funder instead of submitting MINT', async function () {
         const funded = { txHash: 'send-from-faucet' };
-        const ensureGasBalance = sinon.stub().resolves(funded);
+        const ensureGasBalance = recordingAsync(funded);
         const helper = loadHelper(ensureGasBalance);
-        const sdk = { submitAction: sinon.stub().rejects(new Error('SDK action must not run')) };
+        const sdk = { submitAction: () => { throw new Error('SDK action must not run'); } };
         const addr = { address: 'fixture-address', wif: 'fixture-wif' };
 
         const result = await helper.mintGas(sdk, addr, 5000);
 
         assert.strictEqual(result, funded);
-        assert(ensureGasBalance.calledOnceWithExactly(addr, 5000));
-        assert(sdk.submitAction.notCalled);
+        assert.deepStrictEqual(ensureGasBalance.calls, [[addr, 5000]]);
     });
 
     it('uses the fixture gas default through the shared funder', async function () {
-        const ensureGasBalance = sinon.stub().resolves();
+        const ensureGasBalance = recordingAsync();
         const helper = loadHelper(ensureGasBalance);
         const addr = { address: 'fixture-address', wif: 'fixture-wif' };
 
         await helper.mintGas({}, addr);
 
-        assert(ensureGasBalance.calledOnceWithExactly(addr, 100000));
+        assert.deepStrictEqual(ensureGasBalance.calls, [[addr, 100000]]);
     });
 });
