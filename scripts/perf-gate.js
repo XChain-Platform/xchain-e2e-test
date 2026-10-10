@@ -64,8 +64,8 @@ function formatMb(bytes) {
     return `${(bytes / 1048576).toFixed(1)} MB`
 }
 
-function run() {
-    const args = parseArgs(process.argv.slice(2))
+function run(argv = process.argv.slice(2)) {
+    const args = parseArgs(argv)
 
     let thresholds = { ...DEFAULT_THRESHOLDS }
     if (args.config) {
@@ -74,7 +74,7 @@ function run() {
             thresholds = { ...thresholds, ...custom }
         } catch (e) {
             console.error('[perf-gate] Error reading config:', e)
-            process.exit(2)
+            return 2
         }
     }
 
@@ -85,7 +85,7 @@ function run() {
 
     if (!filePath || !fs.existsSync(filePath)) {
         console.error('[perf-gate] No performance results found. Run test:perf first.')
-        process.exit(2)
+        return 2
     }
 
     console.log(`[perf-gate] Reading: ${path.basename(filePath)}`)
@@ -95,7 +95,13 @@ function run() {
         data = JSON.parse(fs.readFileSync(filePath, 'utf8'))
     } catch (e) {
         console.error('[perf-gate] Error parsing results:', e)
-        process.exit(2)
+        return 2
+    }
+
+    if (!data.mochaStats || !Array.isArray(data.tests) ||
+        data.mochaStats.tests <= 0 || data.tests.length === 0) {
+        console.error('[perf-gate] Empty performance results: no tests were recorded.')
+        return 2
     }
 
     const breaches = []
@@ -168,11 +174,13 @@ function run() {
         }
         console.log('')
         console.log(`[perf-gate] FAILED: ${breaches.length} threshold(s) breached`)
-        process.exit(1)
+        return 1
     } else {
         console.log('[perf-gate] PASSED: all thresholds within limits')
-        process.exit(0)
+        return 0
     }
 }
 
-run()
+if (require.main === module) process.exitCode = run()
+
+module.exports = { run }
