@@ -223,12 +223,22 @@ function assertRedBaseline (ctx) {
 // reason a rung deferred under stays on `/status` for one barrier cycle after the rung opens, and
 // reads `wedged` there (rail 2026-09-17, oracle), which is the node's health verdict on a stale
 // label, not the future-stamp wait this leg enumerates.
+
+// The walker names only members this leg can hold: the eight the ladder graces and the withheld
+// snapshot. list_share has no grace and passes on its empty mirror, so it is never reached.
+function reachableReasons () {
+    const reachable = new Set(rows.ladderReasons().concat(['snapshot_sync_barrier']))
+    return fixture.FAMILY_REASONS_LOOP_ORDER.filter((r) => reachable.has(r))
+}
+
 function assertEnumeration (ctx) {
     const seen = rows.distinctRuns(ctx.walk.map((x) => x.stallReason))
-    assert.deepStrictEqual(seen, fixture.FAMILY_REASONS_LOOP_ORDER.slice(),
-        'the walker named ' + JSON.stringify(seen) + ' rather than the ten reasons in loop order')
+    const expected = reachableReasons()
+    assert.strictEqual(expected.length, 9, 'the reachable members are ' + JSON.stringify(expected) + ', not nine')
+    assert.deepStrictEqual(seen, expected,
+        'the walker named ' + JSON.stringify(seen) + ' rather than the nine reachable reasons in loop order')
     assert.ok(rows.inLoopOrder(seen), 'the sequence is not in block-loop order')
-    assert.strictEqual(new Set(fixture.mirrorBarrierReasons()).size, 9, 'the indexer source no longer carries nine reasons')
+    assert.strictEqual(new Set(fixture.mirrorBarrierReasons()).size, 10, 'the indexer source no longer carries ten reasons')
     const ladderByReason = {}
     for (const key of Object.keys(LADDER)) ladderByReason[gracedBarrierReason(key)] = LADDER[key]
     const faults = rows.enumerationClassFaults(ctx.walk, ladderByReason, ctx.blocks.walk.blockTime, UNCLOCKED_REASONS)
