@@ -75,8 +75,9 @@ function fixtures(net, snapshotBlock) {
     return { b, d, PUBLISHER };
 }
 
-describe('ANCHOR_REWARD (XANCPUB) cross-service parity', function () {
-
+// Named registrars keep each describe callback short; each registers its `it`
+// blocks in the original order, so titles and execution order are unchanged.
+function registerAnchorConstantChecks() {
     it('the flag-day map + frozen amount are byte-equal across the twins and the canonical SoT', function () {
         const map = protocolConstants.ANCHOR_REWARD_ACTIVATION;
         const amt = protocolConstants.ANCHOR_REWARD_AMOUNT;
@@ -117,7 +118,9 @@ describe('ANCHOR_REWARD (XANCPUB) cross-service parity', function () {
             }
         }
     });
+}
 
+function registerAnchorCanonicalChecks() {
     it('EQUIV armed: hub == indexer bundle XANCPUB canonical (EQUIV-wrapped, frozen amount)', function () {
         // regtest arms the EQUIV header at 0, so snapshot_block 100 takes the wrapped leg.
         const { b, d, PUBLISHER } = fixtures('regtest', 100);
@@ -161,25 +164,29 @@ describe('ANCHOR_REWARD (XANCPUB) cross-service parity', function () {
             'EQUIV-dormant canonical must be the bare XANCPUB string');
         assert.ok(!hubC.startsWith('EQUIV|'), 'EQUIV-dormant canonical must carry no EQUIV prefix');
     });
+}
+
+describe('ANCHOR_REWARD (XANCPUB) cross-service parity', function () {
+    registerAnchorConstantChecks();
+    registerAnchorCanonicalChecks();
 });
 
 // The ARCHIVE leg of the same contract. The archive XANCPUB canonical is built
 // inline in the hub producer (archiveAttestationCanonical) and the indexer verifier
 // (rewardCanonical, FORMAT 6); the ARCHIVE_REWARD map + frozen amount live in the same
 // twin modules + the canonical SoT. Same fork argument, same guards.
-describe('ARCHIVE_REWARD (archive XANCPUB) cross-service parity', function () {
+function hubArchXancpub(cp, batchSeq, publisher) {
+    return StateAnchorPublisher.prototype.archiveAttestationCanonical.call({}, cp, batchSeq, publisher);
+}
+function archiveFixtures(net, snapshotBlock) {
+    const PUBLISHER = '07'.repeat(32);
+    const cp = { chain: 'BTC', network: net, checkpoint_seq: 7, snapshot_block: snapshotBlock };
+    const d  = { FORMAT: 1, CHAIN: 'BTC', NETWORK: net, CHECKPOINT_SEQ: 7,
+                 SNAPSHOT_BLOCK: snapshotBlock, MATCH_BATCH_SEQ: 3, PUBLISHER };
+    return { cp, d, PUBLISHER };
+}
 
-    function hubArchXancpub(cp, batchSeq, publisher) {
-        return StateAnchorPublisher.prototype.archiveAttestationCanonical.call({}, cp, batchSeq, publisher);
-    }
-    function archiveFixtures(net, snapshotBlock) {
-        const PUBLISHER = '07'.repeat(32);
-        const cp = { chain: 'BTC', network: net, checkpoint_seq: 7, snapshot_block: snapshotBlock };
-        const d  = { FORMAT: 1, CHAIN: 'BTC', NETWORK: net, CHECKPOINT_SEQ: 7,
-                     SNAPSHOT_BLOCK: snapshotBlock, MATCH_BATCH_SEQ: 3, PUBLISHER };
-        return { cp, d, PUBLISHER };
-    }
-
+function registerArchiveConstantChecks() {
     it('the archive flag-day map + frozen amount are byte-equal across the twins and the canonical SoT', function () {
         const map = protocolConstants.ARCHIVE_REWARD_ACTIVATION;
         const amt = protocolConstants.ARCHIVE_REWARD_AMOUNT;
@@ -202,7 +209,9 @@ describe('ARCHIVE_REWARD (archive XANCPUB) cross-service parity', function () {
             }
         }
     });
+}
 
+function registerArchiveCanonicalChecks() {
     it('post-flag-day: hub == indexer archive XANCPUB canonical (EQUIV-wrapped, frozen ARCHIVE amount, archive round-id family)', function () {
         const { cp, d, PUBLISHER } = archiveFixtures('regtest', 100);
         const hubC = hubArchXancpub(cp, 3, PUBLISHER);
@@ -235,4 +244,9 @@ describe('ARCHIVE_REWARD (archive XANCPUB) cross-service parity', function () {
         assert.notStrictEqual(roundIdOf(bundle), roundIdOf(archive),
             'archive round id must not collide with the bundle XANCPUB round id');
     });
+}
+
+describe('ARCHIVE_REWARD (archive XANCPUB) cross-service parity', function () {
+    registerArchiveConstantChecks();
+    registerArchiveCanonicalChecks();
 });
