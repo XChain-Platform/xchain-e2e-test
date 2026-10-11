@@ -294,9 +294,14 @@ async function sendCopy(state, T, from, tick, amount, destination, memo) {
     return T.dogeAction(from, sendWireV0('BTC.' + tick, amount, destination, memo || ''), 'sends');
 }
 
+// The DOGE indexer's own lines naming a snapshot. Only its tail is read: AT4 rows reach every
+// venue follower, so each BTC indexer logs its own ingest refusal of a fenced row, and a count
+// over every tail reads five refusals where the destination logged one.
 function policyLines(state, snapshotId) {
     const prefix = String(snapshotId).slice(0, 16);
-    return state.venue.indexerTails(600).split('\n')
+    const doge = state.venue.dogeVenue;
+    assert.ok(doge, 'the policy venue has no DOGE indexer to read');
+    return String(doge.logTail('indexer0') || '').split('\n').slice(-600)
         .filter((line) => line.includes('XPOLICY') && line.includes(prefix)).map((line) => line.trim().slice(0, 240));
 }
 
