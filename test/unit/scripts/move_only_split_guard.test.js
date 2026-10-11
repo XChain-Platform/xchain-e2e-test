@@ -110,13 +110,7 @@ function replace(root, relPath, from, to) {
     fs.writeFileSync(absolute, source.replace(from, to))
 }
 
-describe('check-move-only-split', function() {
-    this.timeout(30000)
-
-    before(createFixture)
-
-    after(() => fs.rmSync(root, { recursive: true, force: true }))
-
+function registerAcceptanceTests() {
     it('accepts statements moved verbatim while ignoring formatting outside literals', () => {
         assert.deepStrictEqual(check(), { ok: true, problems: [] })
     })
@@ -130,7 +124,9 @@ describe('check-move-only-split', function() {
         assert.strictEqual(result.status, 0, result.stderr)
         assert.match(result.stdout, /move-only split holds/)
     })
+}
 
+function registerStructuralEditTests() {
     it('refuses an added behavior-bearing helper', () => {
         const result = check((root) => replace(
             root,
@@ -155,7 +151,9 @@ describe('check-move-only-split', function() {
         assert.ok(result.problems.some((problem) => problem.includes('suite title missing')))
         assert.ok(result.problems.some((problem) => problem.includes('suite title added')))
     })
+}
 
+function registerDuplicateAndNestingTests() {
     it('refuses a duplicated baseline describe statement', () => {
         const result = check((root) => writeFile(root, 'sample.test/03_duplicate.test.js', BETA))
         assert.strictEqual(result.ok, false)
@@ -192,7 +190,9 @@ describe('check-move-only-split', function() {
         assert.strictEqual(result.ok, false)
         assert.ok(result.problems.some((problem) => problem.includes('wrapper suite')))
     })
+}
 
+function registerLiteralTests() {
     it('refuses whitespace rewritten inside a string literal', () => {
         const result = check((root) => replace(
             root,
@@ -229,7 +229,9 @@ describe('check-move-only-split', function() {
         assert.strictEqual(stringResult.ok, false)
         assert.strictEqual(templateResult.ok, false)
     })
+}
 
+function registerParserAndFailureTests() {
     it('refuses a changed parenthesis structure preserved by Acorn', () => {
         const baseline = guard.parseSource('const value = (1 + 2) * 3', 'baseline.js').body[0]
         const changed = guard.parseSource('const value = 1 + 2 * 3', 'changed.js').body[0]
@@ -252,4 +254,18 @@ describe('check-move-only-split', function() {
         assert.strictEqual(result.status, 1)
         assert.match(result.stderr, /move-only split failed/)
     })
+}
+
+describe('check-move-only-split', function() {
+    this.timeout(30000)
+
+    before(createFixture)
+
+    after(() => fs.rmSync(root, { recursive: true, force: true }))
+
+    registerAcceptanceTests()
+    registerStructuralEditTests()
+    registerDuplicateAndNestingTests()
+    registerLiteralTests()
+    registerParserAndFailureTests()
 })

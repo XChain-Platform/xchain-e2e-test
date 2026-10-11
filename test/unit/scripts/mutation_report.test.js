@@ -56,8 +56,7 @@ function oneFileReport(mutants, source = SOURCE) {
     return { files: { 'src/ping.js': { language: 'javascript', source, mutants } } }
 }
 
-describe('mutation-report generator fidelity', () => {
-
+function registerSnippetTests() {
     describe('pre-mutation snippets come from the report own source', () => {
 
         it('slices a single-line span with 1-based columns and an exclusive end', () => {
@@ -109,7 +108,9 @@ describe('mutation-report generator fidelity', () => {
             assert.strictEqual(built.unextractable, 1, 'the unrenderable mutant is counted, not swallowed')
         })
     })
+}
 
+function registerScoreTests() {
     describe('one score definition, per-file and overall alike', () => {
 
         it('scores over covered mutants only', () => {
@@ -149,7 +150,9 @@ describe('mutation-report generator fidelity', () => {
             assert.match(built.md, /covered-code mutation score/)
         })
     })
+}
 
+function registerRankingTests() {
     describe('worst-first ranking survives an unscorable file', () => {
 
         it('sorts N/A last instead of scrambling the order', () => {
@@ -179,7 +182,9 @@ describe('mutation-report generator fidelity', () => {
             assert.strictEqual(built.perFile[0].critical, true)
         })
     })
+}
 
+function registerAllDetectedTests() {
     describe('the all-detected claim is gated on mutants actually killed', () => {
 
         it('refuses the claim when nothing Survived and nothing was detected either', () => {
@@ -222,8 +227,10 @@ describe('mutation-report generator fidelity', () => {
             assert.match(killedAndTimeout.md, /All mutants were detected by the test suite/)
         })
     })
+}
 
-    // A date-only filename let a same-day phase2 report replace phase1's.
+// A date-only filename let a same-day phase2 report replace phase1's.
+function registerReportPathTests() {
     describe('each mutation lane gets its own report file', () => {
 
         it('names the output after the input phase and the date', () => {
@@ -261,4 +268,12 @@ describe('mutation-report generator fidelity', () => {
             }
         })
     })
+}
+
+describe('mutation-report generator fidelity', () => {
+    registerSnippetTests()
+    registerScoreTests()
+    registerRankingTests()
+    registerAllDetectedTests()
+    registerReportPathTests()
 })
