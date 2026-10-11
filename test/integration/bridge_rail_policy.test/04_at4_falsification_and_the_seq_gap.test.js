@@ -30,6 +30,11 @@
  * policy then differs from it everywhere at once and the federation signs seq 4, which is
  * asserted too, so the copy ends the leg enforcing the origin's policy again.
  *
+ * EVERY ROW HERE GOES TO EVERY HUB AND EVERY FOLLOWER, the forgeries included, through
+ * injectPolicyRowEverywhere: the BTC venue indexers follow the same hubs and anchor their
+ * refusal of an origin-chain row to a minted action, so a row one hub held forked the BTC
+ * indexer on that hub from its peers and stopped every later lock from finalizing.
+ *
  ********************************************************************/
 
 'use strict';
@@ -52,6 +57,7 @@ const {
     policyTransferMatches,
     needsFederation,
     bridgeRailSuite,
+    injectPolicyRowEverywhere,
 } = require('./support');
 
 const GROUP = 'policy AT4: falsification and the seq gap';
@@ -86,16 +92,16 @@ const FORGERIES = [
       build: (tick) => forged(tick, { block: [A], policyHash: HUB.hubEngine().policyHash(null, [B], false) }) },
     { name: 'arrays out of canonical order', tick: 'FORGO', build: (tick) => forged(tick, { block: [B, A] }) },
     { name: 'a bad signature', tick: 'FORGS', build: (tick) => forged(tick, { block: [A] }, { message: 'not the canonical' }) },
-    { name: 'a foreign network', tick: 'FORGN', build: (tick) => forged(tick, { block: [A], network: 'testnet' }) },
-    { name: 'a foreign btc_chain_id', tick: 'FORGC', build: (tick) => forged(tick, { block: [A], btcChainId: 'f'.repeat(64) }) },
+    { name: 'a foreign network', tick: 'FORGN', fenced: true, build: (tick) => forged(tick, { block: [A], network: 'testnet' }) },
+    { name: 'a foreign btc_chain_id', tick: 'FORGC', fenced: true, build: (tick) => forged(tick, { block: [A], btcChainId: 'f'.repeat(64) }) },
 ];
 
 // Inject one forgery, let the DOGE indexer pass over it for three blocks, and read what it did.
-async function injectAndObserve(row) {
+async function injectAndObserve(row, fenced) {
     const venue = state.venue;
     const startTip = Number((await venue.venueTips()).DOGE);
     const hashBefore = await venue.blockHashes('DOGE', startTip);
-    await venue.dogeVenue.injectMirrorRow(row, { table: 'policy_snapshots', key: ['snapshot_id'] });
+    await injectPolicyRowEverywhere(row, { fenced: !!fenced });
     await venue.waitForVenueTip('DOGE', startTip + 3, 'past the forged snapshot ' + row.snapshot_id.slice(0, 16),
         { timeoutMs: 15 * 60 * 1000, everyMs: 5000 });
     const settled = await venue.queryIndexerDb('DOGE',
@@ -111,7 +117,7 @@ for (const f of FORGERIES) {
             this.timeout(0);
             if (needsFederation(this, 'policy AT4 ' + f.name)) return;
             const row = f.build(f.tick + String(Date.now() % 100000));
-            const got = await injectAndObserve(row);
+            const got = await injectAndObserve(row, f.fenced);
             state.evidence['at4_' + f.tick] = Object.assign({ snapshotId: row.snapshot_id }, got);
             assert.strictEqual(got.settled, 0, 'the DOGE ledger recorded a policy settlement for a snapshot carrying ' + f.name);
             assert.strictEqual(got.hashAfter, got.hashBefore, 'the DOGE ledger_hash moved across a snapshot carrying ' + f.name);
@@ -154,8 +160,7 @@ bridgeRailSuite(GROUP, function () {
             originBlock: Number(G.seq1.origin_block), effectiveTime: Number(G.seq1.effective_time), network: String(G.seq1.network),
             view: Number(G.seq1.finalizing_view || 0), btcChainId: G.seq1.btc_chain_id, block: [G.member2.address],
         }), venueSigners());
-        await state.venue.dogeVenue.injectMirrorRow(row, { table: 'policy_snapshots', key: ['snapshot_id'],
-            hubs: state.venue.hubs.map((h) => h.index) });
+        await injectPolicyRowEverywhere(row);
         const applied = await waitForAppliedSeq(G.tick, 3, { snapshotId: row.snapshot_id });
         const copyAt3 = await copyPolicy(G.tick);
         const lines = policyLines(row.snapshot_id);

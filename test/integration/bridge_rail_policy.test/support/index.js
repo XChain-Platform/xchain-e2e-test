@@ -14,6 +14,7 @@
 
 'use strict';
 
+const assert = require('assert');
 const crypto = require('crypto');
 const axios = require('axios');
 const fs = require('fs');
@@ -677,6 +678,95 @@ async function withPolicyMiningPaused(work) {
     }
 }
 
+// The highest block one venue indexer has committed, read from its own ledger database.
+async function venueIndexerTip(conn, ix) {
+    assert.ok(/^[A-Za-z0-9_]+$/.test(String(ix.indexerDbName)), 'unsafe database name ' + ix.indexerDbName);
+    const rows = await conn.query('SELECT MAX(block_index) AS hi FROM `' + ix.indexerDbName + '`.blocks');
+    return rows.length && rows[0].hi !== null ? Number(rows[0].hi) : null;
+}
+
+async function mirrorHolds(conn, ix, snapshotId) {
+    assert.ok(/^[A-Za-z0-9_]+$/.test(String(ix.mirrorDbName)), 'unsafe database name ' + ix.mirrorDbName);
+    const rows = await conn.query('SELECT 1 FROM `' + ix.mirrorDbName + '`.policy_snapshots WHERE snapshot_id = ? LIMIT 1',
+        [snapshotId]);
+    return rows.length > 0;
+}
+
+/**
+ * Put one policy_snapshots row on every venue hub and into every venue follower's mirror,
+ * BTC included, with BTC held still from before the write until every mirror holds it.
+ *
+ * WHY EVERY FOLLOWER AND NOT ONLY DOGE. The BTC venue indexers follow the same hubs as the
+ * DOGE one (BTC indexer i follows hub i, the DOGE indexer follows hub 0), and a BTC indexer
+ * screens a mirrored policy row too: an origin-chain row is refused terminally and that
+ * refusal is anchored to a minted XPOLICY action. A row only hub 0 held reached BTC indexer
+ * 0 at its next reconnect and not its three peers, so it alone minted that action, its
+ * actions and ledger hashes split from theirs, and hub 0 stopped signing checkpoints and
+ * bridge rounds (measured on the xce3 stack 2026-10-11: AT4 seq gap setup and AT5 never
+ * finalized a lock). Writing to every hub is not enough on its own either: a BTC indexer
+ * parses its next block on its own clock, so one that parses before its reconnect delivers
+ * the row refuses it a block later than its peers. So BTC stops first, every BTC venue
+ * indexer reaches the same tip, the row goes to every hub and every follower re-pages, and
+ * BTC moves again only once every mirror holds it: all four then screen it in one block.
+ *
+ * A row the mirror fences at ingest (foreign network or btc_chain_id) never reaches a
+ * mirror and mints nothing anywhere; pass `{fenced: true}` and only the write and the
+ * re-page are done.
+ *
+ * @param {object} row  a signed policy_snapshots row (HUB.signRecord output)
+ * @param {{fenced?: boolean, timeoutMs?: number}} [opts]
+ * @returns {Promise<{tip: number, written: Array}>}
+ */
+async function injectPolicyRowEverywhere(row, opts) {
+    const o = opts || {};
+    const venue = drive.state.venue;
+    assert.ok(venue && venue.btcVenue && venue.dogeVenue && venue.hubDb, 'the policy venue is not started');
+    const btc = venue.btcVenue.indexers;
+    const followers = btc.concat(venue.dogeVenue.indexers);
+    const db = venue.hubDb;
+    const deadlineFor = () => Date.now() + Number(o.timeoutMs || 5 * 60 * 1000);
+    const conn = await mariadb.createConnection({ host: db.host, port: parseInt(db.port, 10),
+        user: db.user, password: db.pass, connectTimeout: 10000 });
+    try {
+        return await withPolicyMiningPaused(async () => {
+            let tip = null;
+            let deadline = deadlineFor();
+            for (;;) {
+                const tips = [];
+                for (const ix of btc) tips.push(await venueIndexerTip(conn, ix));
+                if (tips.every((t) => t !== null && t === tips[0])) {
+                    // Equal twice across a pause: nothing was in flight between the reads.
+                    await new Promise((r) => setTimeout(r, 3000));
+                    const again = [];
+                    for (const ix of btc) again.push(await venueIndexerTip(conn, ix));
+                    if (again.every((t) => t === tips[0])) { tip = tips[0]; break; }
+                }
+                assert.ok(Date.now() < deadline, 'the BTC venue indexers never met at one tip with BTC paused: ' +
+                    JSON.stringify(tips));
+                await new Promise((r) => setTimeout(r, 2000));
+            }
+            const written = await venue.dogeVenue.injectMirrorRow(row, { table: 'policy_snapshots',
+                key: ['snapshot_id'], hubs: venue.hubs.map((h) => h.index) });
+            for (const ix of btc) if (ix.mirrorProxy) ix.mirrorProxy.dropSockets();
+            if (o.fenced) return { tip, written };
+            deadline = deadlineFor();
+            for (;;) {
+                const missing = [];
+                for (const ix of followers) {
+                    if (!await mirrorHolds(conn, ix, row.snapshot_id)) missing.push(ix.mirrorDbName);
+                }
+                if (!missing.length) break;
+                assert.ok(Date.now() < deadline, 'policy row ' + String(row.snapshot_id).slice(0, 16) +
+                    ' never reached these venue mirrors: ' + missing.join(', '));
+                await new Promise((r) => setTimeout(r, 2000));
+            }
+            return { tip, written };
+        });
+    } finally {
+        await conn.end().catch(() => {});
+    }
+}
+
 async function waitForStandingHub() {
     const deadline = Date.now() + BOOTSTRAP_SYNC_TIMEOUT_MS;
     const connector = installStandingHubConnector();
@@ -745,4 +835,4 @@ after(async function () {
     finally { await stopDogeCadence(); }
 });
 
-module.exports = Object.assign({ POLICY_DRIVE }, drive, policy.bind(drive.state, drive));
+module.exports = Object.assign({ POLICY_DRIVE, injectPolicyRowEverywhere }, drive, policy.bind(drive.state, drive));
