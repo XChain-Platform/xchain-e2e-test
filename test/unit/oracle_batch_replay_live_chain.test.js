@@ -66,9 +66,8 @@ function rigWithCountedConnector() {
     return { mod: mod, seen: seen };
 }
 
-describe('oracleBatchReplay: the explicit live-chain override (AT5 venue, row 41)', function () {
-    this.timeout(20000);
-
+// The override resolves the caller's endpoints, with or without a liveIndexer.
+function registerOverrideResolutionTests() {
     it('resolves the caller\'s endpoints and never constructs the hub connector', async function () {
         const { mod, seen } = rigWithCountedConnector();
         const override = fullOverride();
@@ -106,56 +105,60 @@ describe('oracleBatchReplay: the explicit live-chain override (AT5 venue, row 41
         const live = await node['_resolveLiveChain']();
         assert.deepStrictEqual(live.liveIndexer, override.liveIndexer);
     });
+}
 
-    describe('a malformed override is refused by the FIELD that is missing', function () {
-        // Each case drops exactly one field, so a message that names the wrong one
-        // is a real defect: this error is the only signal a launcher gets before
-        // the node spends hours indexing nothing.
-        const cases = [
-            ['decoder.pass',      (o) => { delete o.decoder.pass; }],
-            ['decoder.name',      (o) => { o.decoder.name = ''; }],
-            ['node.port',         (o) => { delete o.node.port; }],
-            ['tracker.host',      (o) => { delete o.tracker.host; }],
-            ['btcOracle.apiKey',  (o) => { o.btcOracle.apiKey = null; }],
-            ['btcOracle',         (o) => { delete o.btcOracle; }],
-            ['feeDestination',    (o) => { delete o.feeDestination; }],
-            ['liveIndexer.name',  (o) => { o.liveIndexer = { host: 'h', port: 1, user: 'u', pass: 'p' }; }]
-        ];
-        for (const [field, breakIt] of cases) {
-            it('names `' + field + '`', async function () {
-                const { mod, seen } = rigWithCountedConnector();
-                const override = fullOverride();
-                breakIt(override);
-                const node = new mod.OracleBatchReplayNode({ label: 'at5unit', liveChain: override });
-                await assert.rejects(() => node['_resolveLiveChain'](), (err) => {
-                    assert.ok(err instanceof Error, 'a malformed override must reject with an Error');
-                    assert.ok(err.message.indexOf(field) !== -1,
-                        'the refusal must name the missing field `' + field + '`; it said: ' + err.message);
-                    return true;
-                });
-                assert.strictEqual(seen.constructed, 0,
-                    'a malformed override must be refused outright, never fall back to dialling the standing hub');
+// Each malformed override is refused, and the refusal names the missing field.
+function registerMalformedOverrideTests() {
+    // Each case drops exactly one field, so a message that names the wrong one
+    // is a real defect: this error is the only signal a launcher gets before
+    // the node spends hours indexing nothing.
+    const cases = [
+        ['decoder.pass',      (o) => { delete o.decoder.pass; }],
+        ['decoder.name',      (o) => { o.decoder.name = ''; }],
+        ['node.port',         (o) => { delete o.node.port; }],
+        ['tracker.host',      (o) => { delete o.tracker.host; }],
+        ['btcOracle.apiKey',  (o) => { o.btcOracle.apiKey = null; }],
+        ['btcOracle',         (o) => { delete o.btcOracle; }],
+        ['feeDestination',    (o) => { delete o.feeDestination; }],
+        ['liveIndexer.name',  (o) => { o.liveIndexer = { host: 'h', port: 1, user: 'u', pass: 'p' }; }]
+    ];
+    for (const [field, breakIt] of cases) {
+        it('names `' + field + '`', async function () {
+            const { mod, seen } = rigWithCountedConnector();
+            const override = fullOverride();
+            breakIt(override);
+            const node = new mod.OracleBatchReplayNode({ label: 'at5unit', liveChain: override });
+            await assert.rejects(() => node['_resolveLiveChain'](), (err) => {
+                assert.ok(err instanceof Error, 'a malformed override must reject with an Error');
+                assert.ok(err.message.indexOf(field) !== -1,
+                    'the refusal must name the missing field `' + field + '`; it said: ' + err.message);
+                return true;
             });
-        }
-
-        it('refuses a feeDestination that is neither an address nor null', async function () {
-            const { mod } = rigWithCountedConnector();
-            const override = fullOverride();
-            override.feeDestination = 12345;
-            const node = new mod.OracleBatchReplayNode({ label: 'at5unit', liveChain: override });
-            await assert.rejects(() => node['_resolveLiveChain'](), /feeDestination/);
+            assert.strictEqual(seen.constructed, 0,
+                'a malformed override must be refused outright, never fall back to dialling the standing hub');
         });
+    }
 
-        it('accepts an explicitly null feeDestination, which means the pinned default', async function () {
-            const { mod } = rigWithCountedConnector();
-            const override = fullOverride();
-            override.feeDestination = null;
-            const node = new mod.OracleBatchReplayNode({ label: 'at5unit', liveChain: override });
-            const live = await node['_resolveLiveChain']();
-            assert.strictEqual(live.feeDestination, null);
-        });
+    it('refuses a feeDestination that is neither an address nor null', async function () {
+        const { mod } = rigWithCountedConnector();
+        const override = fullOverride();
+        override.feeDestination = 12345;
+        const node = new mod.OracleBatchReplayNode({ label: 'at5unit', liveChain: override });
+        await assert.rejects(() => node['_resolveLiveChain'](), /feeDestination/);
     });
 
+    it('accepts an explicitly null feeDestination, which means the pinned default', async function () {
+        const { mod } = rigWithCountedConnector();
+        const override = fullOverride();
+        override.feeDestination = null;
+        const node = new mod.OracleBatchReplayNode({ label: 'at5unit', liveChain: override });
+        const live = await node['_resolveLiveChain']();
+        assert.strictEqual(live.feeDestination, null);
+    });
+}
+
+// The one reader of `liveIndexer` refuses when the override names none.
+function registerLiveIndexerRefusalTest() {
     it('refuses to read the standing chain\'s fee coordinates when the override names no liveIndexer', async function () {
         // The one reader of `liveIndexer`. AT2's cross-node comparison needs it;
         // the barrier drill does not, and the difference has to be legible rather
@@ -165,6 +168,16 @@ describe('oracleBatchReplay: the explicit live-chain override (AT5 venue, row 41
         node['_live'] = await node['_resolveLiveChain']();
         await assert.rejects(() => node.liveChainFeeCoordinates({}), /liveIndexer/);
     });
+}
+
+describe('oracleBatchReplay: the explicit live-chain override (AT5 venue, row 41)', function () {
+    this.timeout(20000);
+
+    registerOverrideResolutionTests();
+
+    describe('a malformed override is refused by the FIELD that is missing', registerMalformedOverrideTests);
+
+    registerLiveIndexerRefusalTest();
 });
 
 /*
@@ -188,83 +201,83 @@ describe('oracleBatchReplay: the explicit live-chain override (AT5 venue, row 41
  * every value is a fabricated fake, and the one sidecar read goes to a temp file
  * this test wrote.
  */
-describe('oracleBatchReplay: the credential path', function () {
-    this.timeout(20000);
+const fs2 = require('fs');
+const os2 = require('os');
+const path2 = require('path');
 
-    const fs2 = require('fs');
-    const os2 = require('os');
-    const path2 = require('path');
+// Fabricated, obviously-fake values. The oracle's redacted tier substitutes
+// SENTINEL for each of them, which is what the rig has to refuse.
+const SENTINEL = '[redacted]';
+const LIVE_DECODER_PASS = 'live-decoder-pass-from-the-oracle';
+const LIVE_NODE_PASS    = 'live-node-rpc-pass-from-the-oracle';
+const LIVE_INDEXER_PASS = 'live-indexer-pass-from-the-oracle';
 
-    // Fabricated, obviously-fake values. The oracle's redacted tier substitutes
-    // SENTINEL for each of them, which is what the rig has to refuse.
-    const SENTINEL = '[redacted]';
-    const LIVE_DECODER_PASS = 'live-decoder-pass-from-the-oracle';
-    const LIVE_NODE_PASS    = 'live-node-rpc-pass-from-the-oracle';
-    const LIVE_INDEXER_PASS = 'live-indexer-pass-from-the-oracle';
+const COIN = 'dogecoin';
+// A network with no config sidecar anywhere in the checkout, so a resolution
+// that reaches the sidecar step finds nothing rather than reading a real
+// credential off disk into a test.
+const NET = 'unitnet';
 
-    const COIN = 'dogecoin';
-    // A network with no config sidecar anywhere in the checkout, so a resolution
-    // that reaches the sidecar step finds nothing rather than reading a real
-    // credential off disk into a test.
-    const NET = 'unitnet';
-
-    // The tree `getallconfigs` returns, at whichever tier the caller asked for.
-    function configTree(redacted) {
-        const p = (real) => (redacted ? SENTINEL : real);
-        return {
-            [COIN]: {
-                [NET]: {
-                    'xchain-decoder': { name: 'XChain_TDOGE_Decoder', user: 'decoder_reader', pass: p(LIVE_DECODER_PASS) },
-                    'xchain-indexer': { name: 'XChain_TDOGE_Indexer', user: 'indexer_reader', pass: p(LIVE_INDEXER_PASS), port: 3024 },
-                    'node': { host: 'node.internal', port: 44555, user: 'rpcuser', pass: p(LIVE_NODE_PASS) },
-                    'xchain-utxo-tracker': { host: 'tracker.internal', port: 3033 }
-                }
-            },
-            bitcoin: {
-                [NET]: { 'xchain-indexer': { name: 'XChain_BTC_Indexer', user: 'btc', pass: p('btc'), port: 3014 } }
+// The tree `getallconfigs` returns, at whichever tier the caller asked for.
+function configTree(redacted) {
+    const p = (real) => (redacted ? SENTINEL : real);
+    return {
+        [COIN]: {
+            [NET]: {
+                'xchain-decoder': { name: 'XChain_TDOGE_Decoder', user: 'decoder_reader', pass: p(LIVE_DECODER_PASS) },
+                'xchain-indexer': { name: 'XChain_TDOGE_Indexer', user: 'indexer_reader', pass: p(LIVE_INDEXER_PASS), port: 3024 },
+                'node': { host: 'node.internal', port: 44555, user: 'rpcuser', pass: p(LIVE_NODE_PASS) },
+                'xchain-utxo-tracker': { host: 'tracker.internal', port: 3033 }
             }
-        };
-    }
-
-    // A hub connector that serves the credential tier only when the call asked
-    // for it, exactly as xchain-hub/src/api.js gates `include_secrets`.
-    //
-    // `authorized` false models the other half of that gate: a hub whose
-    // HUB_CONFIG_SECRETS_API_KEY the caller does not hold answers nothing to the
-    // flagged call, and the caller falls back to the ordinary redacted read.
-    function hubServing(opts) {
-        const seen = { calls: [], plainReads: 0 };
-        class StubHubConnector {
-            constructor() {}
-            static parseEndpoints() { return ['http://127.0.0.1:1']; }
-            async ping() { return true; }
-            async ['_call'](body) {
-                seen.calls.push(body);
-                const wants = !!(body && body.params && body.params.include_secrets);
-                if (wants && !opts.authorized) return null;
-                if (!wants) return { configs: configTree(true), seq: 1, secrets_redacted: true };
-                return { configs: configTree(false), seq: 1, secrets_redacted: false };
-            }
-            async getAllConfig() { seen.plainReads++; return configTree(true); }
+        },
+        bitcoin: {
+            [NET]: { 'xchain-indexer': { name: 'XChain_BTC_Indexer', user: 'btc', pass: p('btc'), port: 3014 } }
         }
-        return { StubHubConnector, seen };
-    }
+    };
+}
 
-    // The rig, with its hub connector replaced and its indexer connector stubbed
-    // so `_resolveFeeDestination` cannot dial anything.
-    function rigModule(StubHubConnector) {
-        class StubIndexerConnector {
-            constructor() {}
-            async call() { return { error: 'no indexer in a unit test' }; }
+// A hub connector that serves the credential tier only when the call asked
+// for it, exactly as xchain-hub/src/api.js gates `include_secrets`.
+//
+// `authorized` false models the other half of that gate: a hub whose
+// HUB_CONFIG_SECRETS_API_KEY the caller does not hold answers nothing to the
+// flagged call, and the caller falls back to the ordinary redacted read.
+function hubServing(opts) {
+    const seen = { calls: [], plainReads: 0 };
+    class StubHubConnector {
+        constructor() {}
+        static parseEndpoints() { return ['http://127.0.0.1:1']; }
+        async ping() { return true; }
+        async ['_call'](body) {
+            seen.calls.push(body);
+            const wants = !!(body && body.params && body.params.include_secrets);
+            if (wants && !opts.authorized) return null;
+            if (!wants) return { configs: configTree(true), seq: 1, secrets_redacted: true };
+            return { configs: configTree(false), seq: 1, secrets_redacted: false };
         }
-        return proxyquire('../helpers/oracleBatchReplay.js', {
-            '../../src/XChainHubConnector.js': StubHubConnector,
-            '../../src/XChainIndexerConnector.js': StubIndexerConnector
-        });
+        async getAllConfig() { seen.plainReads++; return configTree(true); }
     }
+    return { StubHubConnector, seen };
+}
 
-    const CRED_ENV = ['DECODER_DB_PASS', 'DECODER_DB_USER', 'INDEXER_DB_PASS', 'INDEXER_DB_USER',
-        'NODE_PASSWORD', 'NODE_USER', 'COIN', 'INDEXER_COIN', 'XCHAIN_NODE_CONFIG_DIR'];
+// The rig, with its hub connector replaced and its indexer connector stubbed
+// so `_resolveFeeDestination` cannot dial anything.
+function rigModule(StubHubConnector) {
+    class StubIndexerConnector {
+        constructor() {}
+        async call() { return { error: 'no indexer in a unit test' }; }
+    }
+    return proxyquire('../helpers/oracleBatchReplay.js', {
+        '../../src/XChainHubConnector.js': StubHubConnector,
+        '../../src/XChainIndexerConnector.js': StubIndexerConnector
+    });
+}
+
+const CRED_ENV = ['DECODER_DB_PASS', 'DECODER_DB_USER', 'INDEXER_DB_PASS', 'INDEXER_DB_USER',
+    'NODE_PASSWORD', 'NODE_USER', 'COIN', 'INDEXER_COIN', 'XCHAIN_NODE_CONFIG_DIR'];
+
+// Every credential variable is cleared before each test and restored after it.
+function registerCredentialEnvIsolation() {
     let savedEnv = null;
     beforeEach(function () {
         savedEnv = {};
@@ -276,7 +289,10 @@ describe('oracleBatchReplay: the credential path', function () {
             else process.env[k] = savedEnv[k];
         }
     });
+}
 
+// What the rig hands a child when the oracle serves, or refuses, the credential tier.
+function registerCredentialTierTests() {
     it('hands a child the LIVE credential the oracle serves, never the sentinel', async function () {
         const { StubHubConnector, seen } = hubServing({ authorized: true });
         const node = new (rigModule(StubHubConnector).OracleBatchReplayNode)(
@@ -325,7 +341,10 @@ describe('oracleBatchReplay: the credential path', function () {
             assert.ok(seen.plainReads > 0,
                 'an unauthorized credential-tier ask must fall back to the ordinary read, not give up');
         });
+}
 
+// The sentinel never reaches a child, and only the optional live indexer is dropped.
+function registerSentinelAndOptionalIndexerTests() {
     it('never lets the sentinel reach a child, whatever else it does', async function () {
         // The single property the whole item is about, asserted over every
         // credential the rig passes on rather than over one of them.
@@ -360,146 +379,169 @@ describe('oracleBatchReplay: the credential path', function () {
             assert.match(String(node.liveIndexerUnavailable), /INDEXER_DB_PASS/,
                 'the reason must name the credential that could not be resolved');
         });
+}
 
-    describe('the store order', function () {
-        const { resolveServiceCredential } = require('../helpers/oracleBatchReplay.js');
+function sidecarDir(contents) {
+    const dir = fs2.mkdtempSync(path2.join(os2.tmpdir(), 'xc2114-'));
+    fs2.writeFileSync(path2.join(dir, COIN + '-' + NET + '.local'), contents);
+    return dir;
+}
 
-        function sidecarDir(contents) {
-            const dir = fs2.mkdtempSync(path2.join(os2.tmpdir(), 'xc2114-'));
-            fs2.writeFileSync(path2.join(dir, COIN + '-' + NET + '.local'), contents);
-            return dir;
+// Environment ahead of the oracle, the oracle ahead of the sidecar.
+function registerStorePrecedenceTests(resolveServiceCredential) {
+    it('takes an explicit environment credential ahead of everything else', function () {
+        process.env.COIN = 'DOGE';
+        process.env.DECODER_DB_PASS = 'from-the-environment';
+        const out = resolveServiceCredential({
+            oracle: { user: 'decoder_reader', pass: LIVE_DECODER_PASS },
+            coin: COIN, network: NET, passKey: 'DECODER_DB_PASS', userKey: 'DECODER_DB_USER'
+        });
+        assert.strictEqual(out.pass, 'from-the-environment');
+        assert.match(out.source, /environment/);
+    });
+
+    it('takes the oracle\'s live value ahead of the sidecar, which holds the pre-recreate copy', function () {
+        process.env.XCHAIN_NODE_CONFIG_DIR = sidecarDir('DECODER_DB_PASS=stale-sidecar-copy\n');
+        const out = resolveServiceCredential({
+            oracle: { user: 'decoder_reader', pass: LIVE_DECODER_PASS },
+            coin: COIN, network: NET, passKey: 'DECODER_DB_PASS', userKey: 'DECODER_DB_USER'
+        });
+        assert.strictEqual(out.pass, LIVE_DECODER_PASS,
+            'the stale sidecar copy beat the live value the oracle served');
+        assert.match(out.source, /config oracle/);
+    });
+}
+
+// The sidecar fallback, the other-coin environment, and the sentinel refusal.
+function registerStoreFallbackTests(resolveServiceCredential) {
+    it('falls back to the sidecar when the oracle served the redacted tier', function () {
+        process.env.XCHAIN_NODE_CONFIG_DIR = sidecarDir('DECODER_DB_PASS=only-the-sidecar-has-it\n');
+        const out = resolveServiceCredential({
+            oracle: { user: 'decoder_reader', pass: SENTINEL },
+            coin: COIN, network: NET, passKey: 'DECODER_DB_PASS', userKey: 'DECODER_DB_USER'
+        });
+        assert.strictEqual(out.pass, 'only-the-sidecar-has-it');
+        assert.match(out.source, /xc2114-/);
+    });
+
+    it('ignores the environment entirely when it describes another coin', function () {
+        // The AT5 trap: taking Bitcoin's decoder account for a DOGE decoder
+        // authenticates and then fails ER_TABLEACCESS_DENIED on a database it
+        // holds no grant for, which reads as a broken decoder.
+        process.env.DECODER_DB_PASS = 'bitcoins-credential';
+        const out = resolveServiceCredential({
+            oracle: { user: 'decoder_reader', pass: LIVE_DECODER_PASS },
+            coin: COIN, network: NET, allowEnv: false,
+            passKey: 'DECODER_DB_PASS', userKey: 'DECODER_DB_USER'
+        });
+        assert.strictEqual(out.pass, LIVE_DECODER_PASS);
+        assert.strictEqual(out.user, 'decoder_reader');
+    });
+
+    it('never returns the sentinel as a password', function () {
+        const out = resolveServiceCredential({
+            oracle: { user: 'decoder_reader', pass: SENTINEL },
+            coin: 'nosuchcoin', network: 'nosuchnet', passKey: 'DECODER_DB_PASS'
+        });
+        assert.strictEqual(out.pass, undefined, 'the sentinel was handed back as a password');
+        assert.match(out.problem, /redacts every password/);
+    });
+}
+
+function registerStoreOrderTests() {
+    const { resolveServiceCredential } = require('../helpers/oracleBatchReplay.js');
+
+    registerStorePrecedenceTests(resolveServiceCredential);
+    registerStoreFallbackTests(resolveServiceCredential);
+}
+
+function registerEnvDescribesCoinTests() {
+    const { envDescribesCoin } = require('../helpers/oracleBatchReplay.js');
+
+    it('is false when the environment declares no coin, rather than guessing', function () {
+        delete process.env.COIN;
+        delete process.env.INDEXER_COIN;
+        assert.strictEqual(envDescribesCoin('dogecoin'), false);
+    });
+
+    it('is true only for the coin the environment declares', function () {
+        process.env.COIN = 'BTC';
+        assert.strictEqual(envDescribesCoin('bitcoin'), true);
+        assert.strictEqual(envDescribesCoin('dogecoin'), false);
+    });
+}
+
+function registerReadHubConfigTreeTests() {
+    const { readHubConfigTree } = require('../helpers/oracleBatchReplay.js');
+
+    it('reports a served credential tier as unredacted', async function () {
+        const { StubHubConnector } = hubServing({ authorized: true });
+        const out = await readHubConfigTree(new StubHubConnector());
+        assert.strictEqual(out.secretsRedacted, false);
+        assert.strictEqual(out.configs[COIN][NET]['xchain-decoder'].pass, LIVE_DECODER_PASS);
+    });
+
+    it('treats a hub too old to carry the flag as redacting', async function () {
+        class OldHub {
+            async ['_call']() { return { configs: configTree(true), seq: 1 }; }
+            async getAllConfig() { return configTree(true); }
         }
-
-        it('takes an explicit environment credential ahead of everything else', function () {
-            process.env.COIN = 'DOGE';
-            process.env.DECODER_DB_PASS = 'from-the-environment';
-            const out = resolveServiceCredential({
-                oracle: { user: 'decoder_reader', pass: LIVE_DECODER_PASS },
-                coin: COIN, network: NET, passKey: 'DECODER_DB_PASS', userKey: 'DECODER_DB_USER'
-            });
-            assert.strictEqual(out.pass, 'from-the-environment');
-            assert.match(out.source, /environment/);
-        });
-
-        it('takes the oracle\'s live value ahead of the sidecar, which holds the pre-recreate copy', function () {
-            process.env.XCHAIN_NODE_CONFIG_DIR = sidecarDir('DECODER_DB_PASS=stale-sidecar-copy\n');
-            const out = resolveServiceCredential({
-                oracle: { user: 'decoder_reader', pass: LIVE_DECODER_PASS },
-                coin: COIN, network: NET, passKey: 'DECODER_DB_PASS', userKey: 'DECODER_DB_USER'
-            });
-            assert.strictEqual(out.pass, LIVE_DECODER_PASS,
-                'the stale sidecar copy beat the live value the oracle served');
-            assert.match(out.source, /config oracle/);
-        });
-
-        it('falls back to the sidecar when the oracle served the redacted tier', function () {
-            process.env.XCHAIN_NODE_CONFIG_DIR = sidecarDir('DECODER_DB_PASS=only-the-sidecar-has-it\n');
-            const out = resolveServiceCredential({
-                oracle: { user: 'decoder_reader', pass: SENTINEL },
-                coin: COIN, network: NET, passKey: 'DECODER_DB_PASS', userKey: 'DECODER_DB_USER'
-            });
-            assert.strictEqual(out.pass, 'only-the-sidecar-has-it');
-            assert.match(out.source, /xc2114-/);
-        });
-
-        it('ignores the environment entirely when it describes another coin', function () {
-            // The AT5 trap: taking Bitcoin's decoder account for a DOGE decoder
-            // authenticates and then fails ER_TABLEACCESS_DENIED on a database it
-            // holds no grant for, which reads as a broken decoder.
-            process.env.DECODER_DB_PASS = 'bitcoins-credential';
-            const out = resolveServiceCredential({
-                oracle: { user: 'decoder_reader', pass: LIVE_DECODER_PASS },
-                coin: COIN, network: NET, allowEnv: false,
-                passKey: 'DECODER_DB_PASS', userKey: 'DECODER_DB_USER'
-            });
-            assert.strictEqual(out.pass, LIVE_DECODER_PASS);
-            assert.strictEqual(out.user, 'decoder_reader');
-        });
-
-        it('never returns the sentinel as a password', function () {
-            const out = resolveServiceCredential({
-                oracle: { user: 'decoder_reader', pass: SENTINEL },
-                coin: 'nosuchcoin', network: 'nosuchnet', passKey: 'DECODER_DB_PASS'
-            });
-            assert.strictEqual(out.pass, undefined, 'the sentinel was handed back as a password');
-            assert.match(out.problem, /redacts every password/);
-        });
+        const out = await readHubConfigTree(new OldHub());
+        assert.strictEqual(out.secretsRedacted, true,
+            'a tree with no secrets_redacted flag must be assumed redacted, or the sentinel is passed on');
     });
 
-    describe('envDescribesCoin: which coin the harness environment is about', function () {
-        const { envDescribesCoin } = require('../helpers/oracleBatchReplay.js');
-
-        it('is false when the environment declares no coin, rather than guessing', function () {
-            delete process.env.COIN;
-            delete process.env.INDEXER_COIN;
-            assert.strictEqual(envDescribesCoin('dogecoin'), false);
-        });
-
-        it('is true only for the coin the environment declares', function () {
-            process.env.COIN = 'BTC';
-            assert.strictEqual(envDescribesCoin('bitcoin'), true);
-            assert.strictEqual(envDescribesCoin('dogecoin'), false);
-        });
+    it('falls back to the ordinary read for a connector with no transport of its own', async function () {
+        class PlainOnly {
+            async getAllConfig() { return configTree(true); }
+        }
+        const out = await readHubConfigTree(new PlainOnly());
+        assert.strictEqual(out.secretsRedacted, true);
+        assert.ok(out.configs[COIN], 'the fallback read returned no tree');
     });
 
-    describe('readHubConfigTree: which tier answered', function () {
-        const { readHubConfigTree } = require('../helpers/oracleBatchReplay.js');
-
-        it('reports a served credential tier as unredacted', async function () {
-            const { StubHubConnector } = hubServing({ authorized: true });
-            const out = await readHubConfigTree(new StubHubConnector());
-            assert.strictEqual(out.secretsRedacted, false);
-            assert.strictEqual(out.configs[COIN][NET]['xchain-decoder'].pass, LIVE_DECODER_PASS);
-        });
-
-        it('treats a hub too old to carry the flag as redacting', async function () {
-            class OldHub {
-                async ['_call']() { return { configs: configTree(true), seq: 1 }; }
-                async getAllConfig() { return configTree(true); }
-            }
-            const out = await readHubConfigTree(new OldHub());
-            assert.strictEqual(out.secretsRedacted, true,
-                'a tree with no secrets_redacted flag must be assumed redacted, or the sentinel is passed on');
-        });
-
-        it('falls back to the ordinary read for a connector with no transport of its own', async function () {
-            class PlainOnly {
-                async getAllConfig() { return configTree(true); }
-            }
-            const out = await readHubConfigTree(new PlainOnly());
-            assert.strictEqual(out.secretsRedacted, true);
-            assert.ok(out.configs[COIN], 'the fallback read returned no tree');
-        });
-
-        it('is null when no tree can be read at all', async function () {
-            class DeadHub {
-                async ['_call']() { return null; }
-                async getAllConfig() { return null; }
-            }
-            assert.strictEqual(await readHubConfigTree(new DeadHub()), null);
-        });
+    it('is null when no tree can be read at all', async function () {
+        class DeadHub {
+            async ['_call']() { return null; }
+            async getAllConfig() { return null; }
+        }
+        assert.strictEqual(await readHubConfigTree(new DeadHub()), null);
     });
+}
+
+describe('oracleBatchReplay: the credential path', function () {
+    this.timeout(20000);
+
+    registerCredentialEnvIsolation();
+
+    registerCredentialTierTests();
+
+    registerSentinelAndOptionalIndexerTests();
+
+    describe('the store order', registerStoreOrderTests);
+
+    describe('envDescribesCoin: which coin the harness environment is about', registerEnvDescribesCoinTests);
+
+    describe('readHubConfigTree: which tier answered', registerReadHubConfigTreeTests);
 });
 
-describe('oracleBatchBarrierTestnet: the launcher environment contract (row 41)', function () {
+// The complete set the launcher exports, by name.
+function fullEnv() {
+    return {
+        AT5_DECODER_DB_HOST: 'db.internal', AT5_DECODER_DB_PORT: '3306',
+        AT5_DECODER_DB_NAME: 'XChain_TDOGE_Decoder', AT5_DECODER_DB_USER: 'decoder_reader',
+        AT5_DECODER_DB_PASS: 'decoder-secret',
+        AT5_NODE_HOST: 'node.internal', AT5_NODE_PORT: '44555',
+        AT5_NODE_USER: 'rpc', AT5_NODE_PASS: 'rpc-secret',
+        AT5_TRACKER_HOST: 'tracker.internal', AT5_TRACKER_PORT: '3033',
+        AT5_FEE_DESTINATION: 'nsFeeDestinationAddress',
+        BTC_SERVICE_HOST: 'btc.internal', BTC_INDEXER_API_PORT: '3014',
+        BTC_INDEXER_API_KEY: 'btc-secret'
+    };
+}
 
-    const drill = require('../drills/lib/oracle_batch_barrier_testnet.js');
-
-    // The complete set the launcher exports, by name.
-    function fullEnv() {
-        return {
-            AT5_DECODER_DB_HOST: 'db.internal', AT5_DECODER_DB_PORT: '3306',
-            AT5_DECODER_DB_NAME: 'XChain_TDOGE_Decoder', AT5_DECODER_DB_USER: 'decoder_reader',
-            AT5_DECODER_DB_PASS: 'decoder-secret',
-            AT5_NODE_HOST: 'node.internal', AT5_NODE_PORT: '44555',
-            AT5_NODE_USER: 'rpc', AT5_NODE_PASS: 'rpc-secret',
-            AT5_TRACKER_HOST: 'tracker.internal', AT5_TRACKER_PORT: '3033',
-            AT5_FEE_DESTINATION: 'nsFeeDestinationAddress',
-            BTC_SERVICE_HOST: 'btc.internal', BTC_INDEXER_API_PORT: '3014',
-            BTC_INDEXER_API_KEY: 'btc-secret'
-        };
-    }
-
+// The launcher env composes the override shape, and a gap is named.
+function registerLauncherEnvCompositionTests(drill) {
     it('composes exactly the shape the rig\'s override validator accepts', function () {
         const live = drill.composeLiveChainFromEnv(fullEnv());
         assert.deepStrictEqual(live, {
@@ -543,7 +585,10 @@ describe('oracleBatchBarrierTestnet: the launcher environment contract (row 41)'
         blank.AT5_NODE_PASS = '   ';
         assert.throws(() => drill.composeLiveChainFromEnv(blank), /AT5_NODE_PASS/);
     });
+}
 
+// Settings defaults and the deferral line the indexer prints.
+function registerSettingsAndDeferralTests(drill) {
     it('defaults the observation budget, the origin control and the explorer', function () {
         const s = drill.readSettings({});
         assert.strictEqual(s.observeBlocks, 6);
@@ -581,7 +626,10 @@ describe('oracleBatchBarrierTestnet: the launcher environment contract (row 41)'
         assert.strictEqual(drill.parseDeferral('Deferring block 12 (oracle sync):  Error: x'), null);
         assert.strictEqual(drill.parseDeferral('Parsed block 67879480'), null);
     });
+}
 
+// Which escape opened the barrier, and what the summary may claim.
+function registerEscapeAndSummaryTests(drill) {
     it('classifies which escape opened the barrier, from what the node held', function () {
         const blockTime = 1_788_914_673;
         const deferral = [{ height: 1, mirrorMaxRoundTs: 0, streamWatermark: 0, line: 'x' }];
@@ -634,4 +682,15 @@ describe('oracleBatchBarrierTestnet: the launcher environment contract (row 41)'
         assert.strictEqual(summary.originIndexerUnavailable, 'unauthorized (-32001)',
             'an unreadable control must be reported, never smoothed into "no lag"');
     });
+}
+
+describe('oracleBatchBarrierTestnet: the launcher environment contract (row 41)', function () {
+
+    const drill = require('../drills/lib/oracle_batch_barrier_testnet.js');
+
+    registerLauncherEnvCompositionTests(drill);
+
+    registerSettingsAndDeferralTests(drill);
+
+    registerEscapeAndSummaryTests(drill);
 });
