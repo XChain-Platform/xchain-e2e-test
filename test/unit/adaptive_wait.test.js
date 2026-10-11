@@ -318,24 +318,24 @@ function registerIndexerLagBlocksTests() {
     })
 }
 
-    function withConnector(connector, fn){
-        const saved = global.nodeConnector
-        if (connector === undefined) delete global.nodeConnector; else global.nodeConnector = connector
-        return Promise.resolve(fn()).finally(() => {
-            if (saved === undefined) delete global.nodeConnector; else global.nodeConnector = saved
-        })
-    }
+function withConnector(connector, fn){
+    const saved = global.nodeConnector
+    if (connector === undefined) delete global.nodeConnector; else global.nodeConnector = connector
+    return Promise.resolve(fn()).finally(() => {
+        if (saved === undefined) delete global.nodeConnector; else global.nodeConnector = saved
+    })
+}
 
-    function dbWithRows(rows){
-        const db = Object.create(Database.prototype)
-        db.WAIT_LAG_PROBE_MS = 500
-        db.queries = []
-        db.pool = { getConnection: async () => ({
-            query:   async (sql) => { db.queries.push(sql); return rows },
-            release: async () => {}
-        }) }
-        return db
-    }
+function dbWithRows(rows){
+    const db = Object.create(Database.prototype)
+    db.WAIT_LAG_PROBE_MS = 500
+    db.queries = []
+    db.pool = { getConnection: async () => ({
+        query:   async (sql) => { db.queries.push(sql); return rows },
+        release: async () => {}
+    }) }
+    return db
+}
 
 function registerPipelineProgressShapeTests() {
     it('names a missing database pool for both unavailable signals', async () => {
@@ -430,20 +430,20 @@ function registerPipelineProgressFailureTests() {
     })
 }
 
-    function captureLog(fn){
-        const lines = []
-        const orig = console.log
-        console.log = (...a) => lines.push(a.join(' '))
-        return Promise.resolve(fn()).finally(() => { console.log = orig }).then(() => lines)
-    }
+function captureLog(fn){
+    const lines = []
+    const orig = console.log
+    console.log = (...a) => lines.push(a.join(' '))
+    return Promise.resolve(fn()).finally(() => { console.log = orig }).then(() => lines)
+}
 
-    async function gaveUpFor(progress, configure){
-        const db = makeDb()
-        db['_pipelineProgress'] = async () => progress
-        if (configure) configure(db)
-        const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
-        return lines.find(l => l.includes('GAVE UP'))
-    }
+async function gaveUpFor(progress, configure){
+    const db = makeDb()
+    db['_pipelineProgress'] = async () => progress
+    if (configure) configure(db)
+    const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
+    return lines.find(l => l.includes('GAVE UP'))
+}
 
 function registerGiveUpSignalTests() {
     it('reports zero lag distinctly, which is the case the current signal cannot see', async () => {
