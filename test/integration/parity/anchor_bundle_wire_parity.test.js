@@ -105,8 +105,7 @@ async function indexerParse(wire) {
     return { data, rows };
 }
 
-describe('ANCHOR v0 bundle wire cross-service parity', function () {
-
+function registerHubProducerTests() {
     it('the hub producer reproduces the frozen vector byte-for-byte', function () {
         assert.strictEqual(hubBuild(hubSections), WIRE,
             'StateAnchorPublisher.buildV7Payload drifted from the frozen ANCHOR v0 vector');
@@ -123,7 +122,9 @@ describe('ANCHOR v0 bundle wire cross-service parity', function () {
         assert.strictEqual(hubBuild(hubSections.slice().reverse()), WIRE,
             'reversing the input sections changed the bundle bytes');
     });
+}
 
+function registerIndexerReadbackTests() {
     it('the indexer parser reads the frozen vector back to the hub section fields', async function () {
         const { data, rows } = await indexerParse(WIRE);
 
@@ -163,7 +164,9 @@ describe('ANCHOR v0 bundle wire cross-service parity', function () {
                 row.CHAIN + ' signature list must round-trip in PUBKEY order');
         }
     });
+}
 
+function registerSdkReadbackTests() {
     it('the SDK parser reads the frozen vector back to the same section fields', function () {
         const parsed = sdkLight.parseAnchorV0(WIRE);
 
@@ -191,7 +194,9 @@ describe('ANCHOR v0 bundle wire cross-service parity', function () {
             assert.strictEqual(sec.block_merkle_version, src.block_merkle_version, sec.chain + ' block_merkle_version');
         }
     });
+}
 
+function registerParserAgreementTests() {
     it('the indexer and the SDK agree field for field on every section', async function () {
         // The two parsers are read by different consumers (the indexer writes the row an
         // explorer serves; the SDK verifies a bundle a third party decoded itself), so
@@ -226,7 +231,9 @@ describe('ANCHOR v0 bundle wire cross-service parity', function () {
         assert.strictEqual(sdkLight.anchorBundleSection(WIRE, 'XMR'), null,
             'an absent chain must read as null, not an error');
     });
+}
 
+function registerSnapshotBlockTests() {
     it('the header SNAPSHOT_BLOCK is the MAX over sections, and a lagging section keeps its own', async function () {
         // D6: a chain whose round threw at the current seq rides at its own older block,
         // and its signatures were produced there. The header block is what the election
@@ -250,4 +257,12 @@ describe('ANCHOR v0 bundle wire cross-service parity', function () {
         assert.strictEqual(bad.data['STATUS'], 'invalid: SNAPSHOT_BLOCK (not the section maximum)',
             'a header block above every section must invalidate the bundle');
     });
+}
+
+describe('ANCHOR v0 bundle wire cross-service parity', function () {
+    registerHubProducerTests();
+    registerIndexerReadbackTests();
+    registerSdkReadbackTests();
+    registerParserAgreementTests();
+    registerSnapshotBlockTests();
 });
