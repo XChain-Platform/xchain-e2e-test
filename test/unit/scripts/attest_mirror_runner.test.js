@@ -79,22 +79,21 @@ async function captureStdout (action) {
     }
 }
 
-describe('attest-mirror aggregate runner', function () {
-    let savedLog = null
-    let savedState = null
+const CLI = path.join(__dirname, '..', '..', '..', 'scripts', 'run-attest-mirror.js')
 
-    beforeEach(function () {
-        savedLog = process.env.FAKE_LOG
-        savedState = process.env.FAKE_STATE
-    })
+function runCli (options) {
+    return spawnSync(process.execPath, [CLI], Object.assign({ encoding: 'utf8' }, options))
+}
 
-    afterEach(function () {
-        if (savedLog === undefined) delete process.env.FAKE_LOG
-        else process.env.FAKE_LOG = savedLog
-        if (savedState === undefined) delete process.env.FAKE_STATE
-        else process.env.FAKE_STATE = savedState
-    })
+function fixtureEnv (f, extra) {
+    return Object.assign({}, process.env, {
+        ATTEST_MIRROR_STACK_DRIVER: f.driver,
+        FAKE_LOG: f.log,
+        FAKE_STATE: f.state,
+    }, extra)
+}
 
+function registerSelectionTests () {
     it('caps concurrency at three and rejects oversubscription', function () {
         assert.strictEqual(runner.concurrencyFrom(undefined), 3)
         assert.strictEqual(runner.concurrencyFrom('1'), 1)
@@ -112,7 +111,9 @@ describe('attest-mirror aggregate runner', function () {
             'test/attestMirror/barrier_family/c.test.js',
         ])
     })
+}
 
+function registerLifecycleTests () {
     it('allocates a unique stack per leg, waits for both readiness gates and tears every stack down', async function () {
         const f = fixture()
         process.env.FAKE_LOG = f.log
@@ -150,7 +151,9 @@ describe('attest-mirror aggregate runner', function () {
         assert.deepStrictEqual(fs.readdirSync(f.state), [])
         assert.match(fs.readFileSync(f.log, 'utf8'), /run-end .*\ndown /)
     })
+}
 
+function registerPreflightTests () {
     it('refuses a missing readiness dependency before allocating a stack', async function () {
         const f = fixture()
         fs.writeFileSync(f.helper, "'use strict'\nrequire('module-that-is-deliberately-absent')\n")
@@ -190,7 +193,9 @@ describe('attest-mirror aggregate runner', function () {
             '[attest-mirror] allocate am-silent-preflight-1 slot=0 leg=' + f.legs[0] + '\n' +
             '[attest-mirror] release am-silent-preflight-1 exit=0\n')
     })
+}
 
+function registerAbortTests () {
     it('aborts after consecutive ready failures and names the phase and legs', async function () {
         const f = fixture()
         const unallocated = [
@@ -239,7 +244,9 @@ describe('attest-mirror aggregate runner', function () {
         const tornDown = events.filter((event) => event.phase === 'down').map((event) => event.stack).sort()
         assert.deepStrictEqual(tornDown, allocated)
     })
+}
 
+function registerCliSelectionTests () {
     it('keeps refusing a zero-leg selection', async function () {
         const f = fixture()
         for (const leg of f.legs) fs.unlinkSync(path.join(f.root, leg))
@@ -251,15 +258,11 @@ describe('attest-mirror aggregate runner', function () {
 
     it('refuses an explicit empty CLI selection before allocating a stack', function () {
         const f = fixture()
-        const result = spawnSync(process.execPath, [path.join(__dirname, '..', '..', '..', 'scripts', 'run-attest-mirror.js')], {
+        const result = runCli({
             cwd: f.root,
-            env: Object.assign({}, process.env, {
-                ATTEST_MIRROR_STACK_DRIVER: f.driver,
+            env: fixtureEnv(f, {
                 ATTEST_MIRROR_LEGS: ' , ',
-                FAKE_LOG: f.log,
-                FAKE_STATE: f.state,
             }),
-            encoding: 'utf8',
         })
         assert.strictEqual(result.status, 1)
         assert.match(result.stderr, /no attest-mirror legs selected/)
@@ -271,17 +274,13 @@ describe('attest-mirror aggregate runner', function () {
         const f = fixture()
         const selected = ['test/attestMirror/at0_anti_wedge.test.js',
             'test/attestMirror/barrier_family/ab4_below_activation.test.js']
-        const result = spawnSync(process.execPath, [path.join(__dirname, '..', '..', '..', 'scripts', 'run-attest-mirror.js')], {
+        const result = runCli({
             cwd: f.root,
-            env: Object.assign({}, process.env, {
-                ATTEST_MIRROR_STACK_DRIVER: f.driver,
+            env: fixtureEnv(f, {
                 ATTEST_MIRROR_CONCURRENCY: '2',
                 ATTEST_MIRROR_RUN_ID: 'cli-proof',
                 ATTEST_MIRROR_LEGS: selected.join(','),
-                FAKE_LOG: f.log,
-                FAKE_STATE: f.state,
             }),
-            encoding: 'utf8',
         })
         assert.strictEqual(result.status, 0, result.stderr)
         assert.match(result.stdout, /2 legs passed, 0 failed; failures by phase: none/)
@@ -290,7 +289,9 @@ describe('attest-mirror aggregate runner', function () {
         assert.strictEqual(lines.filter((line) => line.startsWith('up ')).length, 2)
         assert.strictEqual(lines.filter((line) => line.startsWith('down ')).length, 2)
     })
+}
 
+function registerCliSummaryTests () {
     it('summarizes a mixed run by failure phase', function () {
         const f = fixture()
         const selected = [
@@ -303,18 +304,14 @@ describe('attest-mirror aggregate runner', function () {
             [selected[1]]: 'seed',
             [selected[2]]: 'run',
         }
-        const result = spawnSync(process.execPath, [path.join(__dirname, '..', '..', '..', 'scripts', 'run-attest-mirror.js')], {
+        const result = runCli({
             cwd: f.root,
-            env: Object.assign({}, process.env, {
-                ATTEST_MIRROR_STACK_DRIVER: f.driver,
+            env: fixtureEnv(f, {
                 ATTEST_MIRROR_CONCURRENCY: '1',
                 ATTEST_MIRROR_RUN_ID: 'summary-proof',
                 ATTEST_MIRROR_LEGS: selected.join(','),
                 FAKE_FAILURES: JSON.stringify(failures),
-                FAKE_LOG: f.log,
-                FAKE_STATE: f.state,
             }),
-            encoding: 'utf8',
         })
         assert.strictEqual(result.status, 3, result.stderr)
         assert.match(result.stdout,
@@ -328,28 +325,48 @@ describe('attest-mirror aggregate runner', function () {
             'test/attestMirror/at1_mirror_finalize.test.js',
         ]
         const failures = Object.fromEntries(selected.map((leg) => [leg, 'run']))
-        const result = spawnSync(process.execPath, [path.join(__dirname, '..', '..', '..', 'scripts', 'run-attest-mirror.js')], {
+        const result = runCli({
             cwd: f.root,
-            env: Object.assign({}, process.env, {
-                ATTEST_MIRROR_STACK_DRIVER: f.driver,
+            env: fixtureEnv(f, {
                 ATTEST_MIRROR_CONCURRENCY: '2',
                 ATTEST_MIRROR_RUN_ID: 'exit-proof',
                 ATTEST_MIRROR_LEGS: selected.join(','),
                 FAKE_FAILURES: JSON.stringify(failures),
-                FAKE_LOG: f.log,
-                FAKE_STATE: f.state,
             }),
-            encoding: 'utf8',
         })
         assert.strictEqual(result.status, selected.length, result.stderr)
         assert.match(result.stdout, /0 legs passed, 2 failed; failures by phase: run=2/)
     })
 
     it('requires a lifecycle driver at the npm entry point', function () {
-        const result = spawnSync(process.execPath, [path.join(__dirname, '..', '..', '..', 'scripts', 'run-attest-mirror.js')], {
-            cwd: path.join(__dirname, '..', '..', '..'), env: Object.assign({}, process.env, { ATTEST_MIRROR_STACK_DRIVER: '' }), encoding: 'utf8',
+        const result = runCli({
+            cwd: path.join(__dirname, '..', '..', '..'), env: Object.assign({}, process.env, { ATTEST_MIRROR_STACK_DRIVER: '' }),
         })
         assert.strictEqual(result.status, 1)
         assert.match(result.stderr, /ATTEST_MIRROR_STACK_DRIVER/)
     })
+}
+
+describe('attest-mirror aggregate runner', function () {
+    let savedLog = null
+    let savedState = null
+
+    beforeEach(function () {
+        savedLog = process.env.FAKE_LOG
+        savedState = process.env.FAKE_STATE
+    })
+
+    afterEach(function () {
+        if (savedLog === undefined) delete process.env.FAKE_LOG
+        else process.env.FAKE_LOG = savedLog
+        if (savedState === undefined) delete process.env.FAKE_STATE
+        else process.env.FAKE_STATE = savedState
+    })
+
+    registerSelectionTests()
+    registerLifecycleTests()
+    registerPreflightTests()
+    registerAbortTests()
+    registerCliSelectionTests()
+    registerCliSummaryTests()
 })

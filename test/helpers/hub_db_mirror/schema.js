@@ -24,7 +24,8 @@ const MIRROR_SQL = Object.freeze({
     list_snapshots: '../../../../xchain-indexer/src/sql/list_snapshots.sql',
     state_checkpoints: '../../../../xchain-indexer/src/sql/state_checkpoints.sql',
     anchor_reward_attestations: '../../../../xchain-indexer/src/sql/anchor_reward_attestations.sql',
-    attestation_responses: '../../../../xchain-indexer/src/sql/attestation_responses.sql'
+    attestation_responses: '../../../../xchain-indexer/src/sql/attestation_responses.sql',
+    remote_token_snapshots: '../../../../xchain-indexer/src/sql/remote_token_snapshots.sql'
 })
 
 function readDDL(rel){

@@ -7,12 +7,12 @@ const {
     readHubsReading,
 } = require('../../attestMirror/helpers/hubsReading')
 
-describe('hubs reading', function () {
-    const hubs = [
-        { index: 2, apiUrl: 'http://hub-2.test' },
-        { index: 7, apiUrl: 'http://hub-7.test' },
-    ]
+const hubs = [
+    { index: 2, apiUrl: 'http://hub-2.test' },
+    { index: 7, apiUrl: 'http://hub-7.test' },
+]
 
+function registerComposeTests() {
     it('composes venue-ordered hubs with split markers and both health shapes', function () {
         const firstStats = { chainReconcileLandedWindows: 3, windowsPublished: 1 }
         const secondStats = { chainReconcileLandedWindows: 0 }
@@ -51,7 +51,9 @@ describe('hubs reading', function () {
 
         assert.deepStrictEqual(result.map((entry) => entry.stats), [{}, {}])
     })
+}
 
+function registerReadTests() {
     it('posts health exactly once per hub and contains a thrown call', async function () {
         const calls = []
         const result = await readHubsReading(hubs, [
@@ -83,4 +85,9 @@ describe('hubs reading', function () {
             { hub: 'hub-7', stats: {}, markers: [] },
         ])
     })
+}
+
+describe('hubs reading', function () {
+    registerComposeTests()
+    registerReadTests()
 })

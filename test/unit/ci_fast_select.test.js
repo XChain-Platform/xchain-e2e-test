@@ -60,7 +60,7 @@ function scratchCommit(cwd, message, files){
     ])
 }
 
-describe('ci fast selector mappings', function(){
+function registerMappingCases(){
     it('maps a changed helper to its unit test and the always-run guards', function(){
         const plan = select(['test/helpers/addressHelper.js'])
         const files = plan.tests.map(test => test.file)
@@ -87,7 +87,9 @@ describe('ci fast selector mappings', function(){
             assert.ok(plan.reasons.includes('consensus: ' + file), file)
         }
     })
+}
 
+function registerManifestCases(){
     // Fail on a moved file, which would otherwise drop its consensus widening silently.
     it('resolves every consensus prefix to a tracked file', function(){
         const tracked = git(['ls-files']).split('\n').filter(Boolean)
@@ -127,7 +129,9 @@ describe('ci fast selector mappings', function(){
         })
         assert.deepStrictEqual(plan.tests.map(test => test.file), ALWAYS)
     })
+}
 
+function registerReplayCase(){
     it('replays develop history, compares narrowing, and checks required selections', function(){
         const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-fast-select-replay-'))
         try {
@@ -181,6 +185,12 @@ describe('ci fast selector mappings', function(){
             fs.rmSync(cwd, { recursive: true, force: true })
         }
     })
+}
+
+describe('ci fast selector mappings', function(){
+    registerMappingCases()
+    registerManifestCases()
+    registerReplayCase()
 })
 
 describe('ci fast selector dependency widening', function(){

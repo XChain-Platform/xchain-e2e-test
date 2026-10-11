@@ -64,7 +64,7 @@ async function runRailTests(tests) {
     }
 }
 
-describe('PRICE v1 canonical-bound rail cases', function () {
+function registerCaseListTests() {
     it('pins the ordered case list', function () {
         assert.deepStrictEqual(PRICE_V1_CASES, [
             { name: 'honest control', value: '1.5', fee: '0.01', expect: 'valid' },
@@ -94,7 +94,9 @@ describe('PRICE v1 canonical-bound rail cases', function () {
                 testCase.name + ' must prepend exactly one zero');
         }
     });
+}
 
+function registerRailExecutionTests() {
     it('executes every rail case with a fresh oracle and the expected status', async function () {
         const harness = loadRailSuite((address, price, validationStatus) => ({
             price: {
@@ -121,7 +123,9 @@ describe('PRICE v1 canonical-bound rail cases', function () {
             assert.strictEqual(call[2], PRICE_V1_CASES[i].expect === 'valid' ? 'valid' : 'invalid');
         }
     });
+}
 
+function registerFailureTests() {
     it('fails when the indexed PRICE row is absent', async function () {
         const harness = loadRailSuite(() => ({ price: null }));
 
@@ -152,4 +156,10 @@ describe('PRICE v1 canonical-bound rail cases', function () {
             return true;
         });
     });
+}
+
+describe('PRICE v1 canonical-bound rail cases', function () {
+    registerCaseListTests();
+    registerRailExecutionTests();
+    registerFailureTests();
 });

@@ -51,7 +51,7 @@ function withTempDir (run) {
     }
 }
 
-describe('token bridge rail drive report', function () {
+function registerRenderTests () {
     it('renders both drives green with heads, counts and a trailing newline', function () {
         const report = renderDriveReport(reportInput())
 
@@ -96,7 +96,9 @@ describe('token bridge rail drive report', function () {
         ]
         for (const [input, expected] of cases) assert.throws(() => renderDriveReport(input), expected)
     })
+}
 
+function registerCliTests () {
     it('writes a passing report and exits 0', function () {
         withTempDir((dir) => {
             fs.writeFileSync(path.join(dir, 'token.jsonl'), journal(28))
@@ -142,4 +144,9 @@ describe('token bridge rail drive report', function () {
         }
         assert.match(writes.join(''), /--token-journal is required/)
     })
+}
+
+describe('token bridge rail drive report', function () {
+    registerRenderTests()
+    registerCliTests()
 })

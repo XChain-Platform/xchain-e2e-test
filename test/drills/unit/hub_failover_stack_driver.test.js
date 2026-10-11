@@ -15,7 +15,7 @@ const {
     reportsForHub,
 } = require('../../../scripts/hub-failover-stack-driver')
 
-describe('two-hub failover stack driver', function () {
+function registerDefaultTargetTests () {
     it('is the non-skipping default for the failover drill', function () {
         const entry = fs.readFileSync(path.resolve(__dirname, '../hub_failover.test.js'), 'utf8')
         assert.match(entry, /hub-failover-stack-driver\.js/)
@@ -28,7 +28,9 @@ describe('two-hub failover stack driver', function () {
         assert.match(config.stateFile, /xchain-e2e-test[/]tmp[/]hub-failover-driver-state\.json$/)
         assert.strictEqual(config.project, 'hub-failover')
     })
+}
 
+function registerIndexerStatusTests () {
     it('normalizes the followed hub and move evidence from indexer status', function () {
         const definition = { id: 'btc-indexer', coin: 'BTC', role: 'failover' }
         const normalized = normalizeIndexer(definition, {
@@ -47,7 +49,9 @@ describe('two-hub failover stack driver', function () {
             hubMirror: { connected: true, bootstrapped: true, moveCount: 2 },
         })
     })
+}
 
+function registerPrepareTests () {
     it('restarts seed-driven indexers until each follows hub-a ready, with a 15 restart bound', async function () {
         const restarts = []
         const reads = new Map()
@@ -95,7 +99,9 @@ describe('two-hub failover stack driver', function () {
             fs.rmSync(directory, { recursive: true, force: true })
         }
     })
+}
 
+function registerReadyFrameTests () {
     it('retries ready-frame connection errors and keeps the first ready frame', async function () {
         let connections = 0
         class FakeWebSocket extends EventEmitter {
@@ -116,7 +122,9 @@ describe('two-hub failover stack driver', function () {
         assert.deepStrictEqual(frame, { type: 'ready', caught_up: false })
         assert.strictEqual(connections, 2)
     })
+}
 
+function registerValidationAndMappingTests () {
     it('refuses status that cannot prove a followed hub or move count', function () {
         const definition = { id: 'btc-indexer', coin: 'BTC', role: 'failover' }
         assert.throws(() => normalizeIndexer(definition, {
@@ -144,4 +152,12 @@ describe('two-hub failover stack driver', function () {
         assert.deepStrictEqual(reportsForHub(state, false), [])
         assert.deepStrictEqual(reportsForHub(state, true), ['push:7'])
     })
+}
+
+describe('two-hub failover stack driver', function () {
+    registerDefaultTargetTests()
+    registerIndexerStatusTests()
+    registerPrepareTests()
+    registerReadyFrameTests()
+    registerValidationAndMappingTests()
 })
