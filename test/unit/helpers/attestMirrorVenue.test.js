@@ -318,12 +318,19 @@ describe('attestMirrorVenue: hub environment', function () {
     })
 
     it('leaves the hub keyless and DECLARES it, which is what lets it boot', () => {
-        // Validator mode with no key refuses to boot unless the posture is
-        // declared; and an unset key is what leaves /hub-db/snapshot/* open to the
-        // venue's own indexers.
+        // Validator mode with no write key refuses to boot unless the posture is
+        // declared, and the venue's registervalidator calls carry no key.
         const env = buildHubEnv(hubSpec())
         assert.strictEqual(env.HUB_API_KEY, undefined)
         assert.strictEqual(env.HUB_ALLOW_UNAUTHENTICATED, 'true')
+    })
+
+    it('carries the venue feed key, so peers can catch up from its P2P port', () => {
+        // Without a feed key the P2P port stays gossip-only, every peer's catch-up
+        // walk answers 404, and the hub holds its admission heights at an empty
+        // floor forever.
+        assert.strictEqual(buildHubEnv(hubSpec({ feedApiKey: 'f'.repeat(48) })).HUB_FEED_API_KEY, 'f'.repeat(48))
+        assert.strictEqual(buildHubEnv(hubSpec()).HUB_FEED_API_KEY, undefined)
     })
 
     it('carries the regtest-only timing seams as plain integer spellings', () => {
@@ -390,6 +397,11 @@ describe('attestMirrorVenue: indexer environment', function () {
         const env = buildIndexerEnv(indexerSpec({ hubApiUrl: 'http://127.0.0.1:41004' }))
         assert.strictEqual(env.HUB_DB_SYNC_ENABLED, 'true')
         assert.strictEqual(env.HUB_API_URL, 'http://127.0.0.1:41004')
+    })
+
+    it('carries the followed hub\'s feed key, which its snapshot route demands', () => {
+        assert.strictEqual(buildIndexerEnv(indexerSpec({ hubFeedApiKey: 'f'.repeat(48) })).HUB_FEED_API_KEY, 'f'.repeat(48))
+        assert.strictEqual(buildIndexerEnv(indexerSpec()).HUB_FEED_API_KEY, undefined)
     })
 
     it('gives two indexers two DIFFERENT hubs and two different mirrors', () => {
