@@ -41,6 +41,7 @@ const { resolveDogeFeeDestination } = require('../../../helpers/rail_preflight/p
 const { requireHealthyHub } = require('../../../helpers/rail_preflight/hub_health_gate');
 const fixture = require('../../../attestMirror/helpers/mirrorDrillFixture');
 const { settleReleaseBatch, waitForCapabilityBaseline } = require('./release_batch');
+const { checkBootstrapGas } = require('./gas_budget');
 const { installStandingHubConnector } = require('./standing_hub');
 const {
     resolveVenueQuorum,
@@ -309,11 +310,21 @@ async function mintBootstrapGas(address, amount) {
     let left = await donor;
     const limit = BigInt(gasHelper.GAS_MAX_MINT);
     while (left > 0n) {
+        // Chunked so one faucet holder can cover each grant; fundGas sends from the faucet
+        // first and mints only while MAX_SUPPLY has room.
         const chunk = left < limit ? left : limit;
         await seedBootstrapPrices(false);
-        await mineBootstrapWork(() => gasHelper.mintGas(address, String(chunk)));
+        await mineBootstrapWork(() => gasHelper.fundGas(address, String(chunk)));
         left -= chunk;
     }
+}
+
+// Refuse before any stake is funded when donors, faucet and MINT headroom cannot cover them.
+async function requireBootstrapGas(need) {
+    const donors = (await loadBootstrapDonorLedger()).map((row) => row.available);
+    const budget = await checkBootstrapGas({ db: indexerDatabase, need, donors });
+    if (!budget.ok) throw new Error(budget.reason);
+    console.log('POLICY RAIL: gas budget ' + budget.summary);
 }
 
 async function prepareBootstrapStaker(identity, index, stake) {
@@ -493,6 +504,7 @@ async function ensurePolicyQuorum() {
     const identities = createBootstrapIdentities(rows);
     const stake = Math.max(BOOTSTRAP_MIN_STAKE,
         Math.floor((2 * totalStake) / identities.length) + BOOTSTRAP_MIN_STAKE);
+    await requireBootstrapGas(identities.length * (stake + 1000));
     const addresses = [];
     for (let i = 0; i < identities.length; i++) {
         addresses.push(await prepareBootstrapStaker(identities[i], i, stake));
