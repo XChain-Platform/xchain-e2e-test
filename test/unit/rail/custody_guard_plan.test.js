@@ -13,7 +13,7 @@
 const assert = require('assert')
 const { custodyWires, DEPOSIT_CASES, WITHDRAW_CASES } = require('../../rail/custody_guard/helpers/plan')
 
-describe('custody guard rail plan', function () {
+function registerTokenControllerWire () {
     it('builds the token controller wire field by field', function () {
         const wires = custodyWires({ tick: 'FRESHTICK', controllerIndex: 42 })
 
@@ -21,7 +21,9 @@ describe('custody guard rail plan', function () {
             'ISSUE', '6', 'FRESHTICK', '42', 'transfer', '0', '0', 'cverify'
         ])
     })
+}
 
+function registerAddressControllerWire () {
     it('builds the address controller wire field by field', function () {
         const wires = custodyWires({ tick: 'IGNORED', controllerIndex: 42 })
 
@@ -29,7 +31,9 @@ describe('custody guard rail plan', function () {
             'ADDRESS', '1', '42', 'transfer', '0', '0', 'cverify'
         ])
     })
+}
 
+function registerDepositCases () {
     it('freezes the ordered deposit cases', function () {
         assert(Object.isFrozen(DEPOSIT_CASES))
         assert(DEPOSIT_CASES.every(Object.isFrozen))
@@ -54,7 +58,9 @@ describe('custody guard rail plan', function () {
             }
         ])
     })
+}
 
+function registerWithdrawCases () {
     it('freezes the ordered withdrawal cases', function () {
         assert(Object.isFrozen(WITHDRAW_CASES))
         assert(WITHDRAW_CASES.every(Object.isFrozen))
@@ -73,4 +79,11 @@ describe('custody guard rail plan', function () {
             }
         ])
     })
+}
+
+describe('custody guard rail plan', function () {
+    registerTokenControllerWire()
+    registerAddressControllerWire()
+    registerDepositCases()
+    registerWithdrawCases()
 })
