@@ -26,7 +26,7 @@ function loadDrill(runCrossChainSettle = async () => ({ ok: true })) {
     return { drill, submit };
 }
 
-describe('testnet cross-chain settlement drill', function () {
+function registerLoadAndDepsTests() {
     it('does not start the live run when required', function () {
         let runs = 0;
         const runCrossChainSettle = async () => {
@@ -58,7 +58,9 @@ describe('testnet cross-chain settlement drill', function () {
             explorerUrl: 'https://explorer.example'
         });
     });
+}
 
+function registerFailureAndRunnerTests() {
     it('names a missing treasury key without exposing the supplied wif', function () {
         const { drill } = loadDrill();
         const env = { ...ENV };
@@ -90,4 +92,9 @@ describe('testnet cross-chain settlement drill', function () {
         assert.strictEqual(runnerArgs.log instanceof Function, true);
         assert.deepStrictEqual(JSON.parse(output.at(-1)), verdict);
     });
+}
+
+describe('testnet cross-chain settlement drill', function () {
+    registerLoadAndDepsTests();
+    registerFailureAndRunnerTests();
 });
