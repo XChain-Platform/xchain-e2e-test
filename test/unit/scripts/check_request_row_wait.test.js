@@ -31,7 +31,7 @@ function run (args) {
     return cp.spawnSync(process.execPath, [script].concat(args), { encoding: 'utf8' })
 }
 
-describe('check-request-row-wait classifications', function () {
+function registerWaitClassifications () {
     it('recognises a height wait on the emitted request block as guarded', function () {
         const hits = scan([
             'async function check(request) {',
@@ -67,7 +67,9 @@ describe('check-request-row-wait classifications', function () {
         ])
         assert.strictEqual(hits[0].status, 'unguarded')
     })
+}
 
+function registerControlFlowClassifications () {
     it('credits a dominating wait outside a loop and explains the loop path', function () {
         const hits = scan([
             'async function check(request) {',
@@ -92,7 +94,9 @@ describe('check-request-row-wait classifications', function () {
         ])
         assert.strictEqual(hits[0].status, 'unguarded')
     })
+}
 
+function registerMarkerClassifications () {
     it('reports an annotated deliberate exception instead of calling it clean', function () {
         const hits = scan([
             'async function check(requestId) {',
@@ -113,6 +117,12 @@ describe('check-request-row-wait classifications', function () {
         ])
         assert.strictEqual(hits[0].status, 'unguarded')
     })
+}
+
+describe('check-request-row-wait classifications', function () {
+    registerWaitClassifications()
+    registerControlFlowClassifications()
+    registerMarkerClassifications()
 })
 
 describe('check-request-row-wait calibration fixtures', function () {
@@ -146,7 +156,7 @@ describe('check-request-row-wait calibration fixtures', function () {
     })
 })
 
-describe('check-request-row-wait input refusal', function () {
+function registerScanExitCodes () {
     it('exits one and names an unguarded request-row read', function () {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'request-row-wait-bad-'))
         const file = path.join(dir, 'bad.js')
@@ -187,7 +197,9 @@ describe('check-request-row-wait input refusal', function () {
             fs.rmSync(dir, { recursive: true, force: true })
         }
     })
+}
 
+function registerUnreadableInputRefusals () {
     it('distinguishes a missing path from an empty directory', function () {
         const missing = path.join(os.tmpdir(), 'request-row-wait-missing-' + process.pid)
         const result = run([missing])
@@ -208,4 +220,9 @@ describe('check-request-row-wait input refusal', function () {
             fs.rmSync(dir, { recursive: true, force: true })
         }
     })
+}
+
+describe('check-request-row-wait input refusal', function () {
+    registerScanExitCodes()
+    registerUnreadableInputRefusals()
 })
