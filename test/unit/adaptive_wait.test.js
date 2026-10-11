@@ -69,6 +69,37 @@ function checkThing() { return null }
 describe('adaptive wait deadline', function () {
     this.timeout(10000)
 
+    registerSucceedAndLagTests()
+    registerThresholdTests()
+    registerNoSignalTests()
+
+    // Signal change. Every observed failure was a wait for a ROW while the
+    // indexer kept pace with blocks, so lag read zero, no extension was granted and
+    // the case failed on a row that turned up in the database moments later. Lag
+    // alone cannot see a stack that is busy but not behind; action-row writes can.
+    describe('row-write signal', registerRowWriteSignalTests)
+
+    registerIndexerLagBlocksTests()
+
+    describe('_pipelineProgress', () => {
+        registerPipelineProgressShapeTests()
+        registerPipelineProgressFailureTests()
+    })
+
+    // Diagnosability. Extensions were logged only when GRANTED, so a wait
+    // that gave up without one emitted nothing, and the guidance
+    // ("if this recurs with extensions=0, change the SIGNAL, not the budget") could
+    // not be evaluated from a run's output: zero lines is what a never-eligible
+    // wait, a zero-lag wait and a dead probe all look like. These pin the three
+    // apart by name, so the next failing run says which case it was.
+    describe('give-up diagnostics', () => {
+        registerGiveUpSignalTests()
+        registerGiveUpReasonTests()
+        registerGiveUpEligibilityTests()
+    })
+})
+
+function registerSucceedAndLagTests() {
     it('returns the row as soon as the check succeeds', async () => {
         const db = makeDb({ lag: 0 })
         let calls = 0
@@ -113,7 +144,9 @@ describe('adaptive wait deadline', function () {
                 'a wait must extend while the indexer is ' + lag + ' block(s) behind: that block may hold the row')
         }
     })
+}
 
+function registerThresholdTests() {
     it('honours an explicit E2E_WAIT_LAG_BLOCKS=0 and refuses junk', () => {
         // The tunable the way the constructor computes it (src/db.js), checked
         // here without standing up a Database: `parseInt('0') || 2` was 2, so an
@@ -152,7 +185,9 @@ describe('adaptive wait deadline', function () {
                 'lag ' + lag + ' at threshold ' + threshold + ' must not extend')
         }
     })
+}
 
+function registerNoSignalTests() {
     it('does not extend when the lag signal is unavailable', async () => {
         // No signal is not the same as "behind": without one, waiting longer is
         // indistinguishable from hanging, so the fixed deadline stands.
@@ -173,75 +208,73 @@ describe('adaptive wait deadline', function () {
         }, {}, TIMEMAX)
         assert.deepStrictEqual(row, { id: 3 }, 'a transient error must not abort the wait')
     })
+}
 
-    // Signal change. Every observed failure was a wait for a ROW while the
-    // indexer kept pace with blocks, so lag read zero, no extension was granted and
-    // the case failed on a row that turned up in the database moments later. Lag
-    // alone cannot see a stack that is busy but not behind; action-row writes can.
-    describe('row-write signal', () => {
-        // 6-7 polls per budget, samples every other poll: enough history for the
-        // deadline to ask whether rows landed recently.
-        const SLOW = TICK * 7
-        const EVERY = TICK * 2
+// 6-7 polls per budget, samples every other poll: enough history for the
+// deadline to ask whether rows landed recently.
+const SLOW = TICK * 7
+const EVERY = TICK * 2
 
-        it('extends when the indexer is NOT behind but is still writing action rows', async () => {
-            let mark = 1000
-            const db = makeDb({ lag: 0, writes: () => ++mark, probeEvery: EVERY })
-            const started = Date.now()
-            const row = await db['_waitFor'](
-                function checkThing(){ return Date.now() - started > SLOW * 1.4 ? { id: 9 } : null },
-                {}, SLOW)
-            assert.deepStrictEqual(row, { id: 9 },
-                'a busy-but-caught-up indexer must buy the row more time; this is the case '
-                + 'the lag-only signal could not see')
-        })
-
-        it('does not extend when action writes have stopped, so an absent row still fails', async () => {
-            // An idle regtest stack still mines, but empty blocks write no actions,
-            // so the mark stands still and the original deadline holds.
-            const db = makeDb({ lag: 0, writes: 4242, probeEvery: EVERY })
-            const started = Date.now()
-            const row = await db['_waitFor'](checkThing, {}, SLOW)
-            assert.strictEqual(row, null)
-            assert(Date.now() - started < SLOW * 2,
-                'a stalled write mark must not extend the wait (elapsed ' + (Date.now() - started) + 'ms)')
-        })
-
-        it('stops extending once writes go quiet, rather than riding an old advance', async () => {
-            // Rows land early in the wait and then stop. The wait must not treat a
-            // long-past advance as evidence the row is still coming.
-            let calls = 0
-            const db = makeDb({ lag: 0, writes: () => (++calls <= 2 ? 1000 + calls : 1002), probeEvery: EVERY })
-            db.WAIT_WRITE_IDLE_MS = EVERY   // "recent" means within one sample here
-            const started = Date.now()
-            const row = await db['_waitFor'](checkThing, {}, SLOW)
-            assert.strictEqual(row, null)
-            assert(Date.now() - started < SLOW * 3,
-                'a stale advance must not keep buying extensions (elapsed ' + (Date.now() - started) + 'ms)')
-        })
-
-        it('caps extensions even while writes keep advancing', async () => {
-            let mark = 0
-            const db = makeDb({ lag: 0, writes: () => ++mark, maxExtensions: 2, probeEvery: EVERY })
-            const started = Date.now()
-            const row = await db['_waitFor'](checkThing, {}, SLOW)
-            assert.strictEqual(row, null, 'a permanently busy stack must still terminate')
-            assert(Date.now() - started < SLOW * 5,
-                'the extension cap must bound a busy stack too (elapsed ' + (Date.now() - started) + 'ms)')
-        })
-
-        it('ignores the write signal on waits too short to qualify for an extension', async () => {
-            let mark = 0
-            const db = makeDb({ lag: 0, writes: () => ++mark, probeEvery: EVERY })
-            db.WAIT_MIN_FOR_EXTENSION = 10000   // far above SLOW
-            const started = Date.now()
-            const row = await db['_waitFor'](checkThing, {}, SLOW)
-            assert.strictEqual(row, null)
-            assert.strictEqual(db.lagCalls, 0, 'an ineligible wait must not probe at all')
-            assert(Date.now() - started < SLOW * 2, 'an ineligible wait must not be extended')
-        })
+function registerRowWriteSignalTests() {
+    it('extends when the indexer is NOT behind but is still writing action rows', async () => {
+        let mark = 1000
+        const db = makeDb({ lag: 0, writes: () => ++mark, probeEvery: EVERY })
+        const started = Date.now()
+        const row = await db['_waitFor'](
+            function checkThing(){ return Date.now() - started > SLOW * 1.4 ? { id: 9 } : null },
+            {}, SLOW)
+        assert.deepStrictEqual(row, { id: 9 },
+            'a busy-but-caught-up indexer must buy the row more time; this is the case '
+            + 'the lag-only signal could not see')
     })
 
+    it('does not extend when action writes have stopped, so an absent row still fails', async () => {
+        // An idle regtest stack still mines, but empty blocks write no actions,
+        // so the mark stands still and the original deadline holds.
+        const db = makeDb({ lag: 0, writes: 4242, probeEvery: EVERY })
+        const started = Date.now()
+        const row = await db['_waitFor'](checkThing, {}, SLOW)
+        assert.strictEqual(row, null)
+        assert(Date.now() - started < SLOW * 2,
+            'a stalled write mark must not extend the wait (elapsed ' + (Date.now() - started) + 'ms)')
+    })
+
+    it('stops extending once writes go quiet, rather than riding an old advance', async () => {
+        // Rows land early in the wait and then stop. The wait must not treat a
+        // long-past advance as evidence the row is still coming.
+        let calls = 0
+        const db = makeDb({ lag: 0, writes: () => (++calls <= 2 ? 1000 + calls : 1002), probeEvery: EVERY })
+        db.WAIT_WRITE_IDLE_MS = EVERY   // "recent" means within one sample here
+        const started = Date.now()
+        const row = await db['_waitFor'](checkThing, {}, SLOW)
+        assert.strictEqual(row, null)
+        assert(Date.now() - started < SLOW * 3,
+            'a stale advance must not keep buying extensions (elapsed ' + (Date.now() - started) + 'ms)')
+    })
+
+    it('caps extensions even while writes keep advancing', async () => {
+        let mark = 0
+        const db = makeDb({ lag: 0, writes: () => ++mark, maxExtensions: 2, probeEvery: EVERY })
+        const started = Date.now()
+        const row = await db['_waitFor'](checkThing, {}, SLOW)
+        assert.strictEqual(row, null, 'a permanently busy stack must still terminate')
+        assert(Date.now() - started < SLOW * 5,
+            'the extension cap must bound a busy stack too (elapsed ' + (Date.now() - started) + 'ms)')
+    })
+
+    it('ignores the write signal on waits too short to qualify for an extension', async () => {
+        let mark = 0
+        const db = makeDb({ lag: 0, writes: () => ++mark, probeEvery: EVERY })
+        db.WAIT_MIN_FOR_EXTENSION = 10000   // far above SLOW
+        const started = Date.now()
+        const row = await db['_waitFor'](checkThing, {}, SLOW)
+        assert.strictEqual(row, null)
+        assert.strictEqual(db.lagCalls, 0, 'an ineligible wait must not probe at all')
+        assert(Date.now() - started < SLOW * 2, 'an ineligible wait must not be extended')
+    })
+}
+
+function registerIndexerLagBlocksTests() {
     it('_indexerLagBlocks returns null when no node connector is wired', async () => {
         const db = Object.create(Database.prototype)
         db.WAIT_LAG_PROBE_MS = 500
@@ -283,264 +316,264 @@ describe('adaptive wait deadline', function () {
             if (saved === undefined) delete global.nodeConnector; else global.nodeConnector = saved
         }
     })
+}
 
-    describe('_pipelineProgress', () => {
-        function withConnector(connector, fn){
-            const saved = global.nodeConnector
-            if (connector === undefined) delete global.nodeConnector; else global.nodeConnector = connector
-            return Promise.resolve(fn()).finally(() => {
-                if (saved === undefined) delete global.nodeConnector; else global.nodeConnector = saved
-            })
-        }
+function withConnector(connector, fn){
+    const saved = global.nodeConnector
+    if (connector === undefined) delete global.nodeConnector; else global.nodeConnector = connector
+    return Promise.resolve(fn()).finally(() => {
+        if (saved === undefined) delete global.nodeConnector; else global.nodeConnector = saved
+    })
+}
 
-        function dbWithRows(rows){
-            const db = Object.create(Database.prototype)
-            db.WAIT_LAG_PROBE_MS = 500
-            db.queries = []
-            db.pool = { getConnection: async () => ({
-                query:   async (sql) => { db.queries.push(sql); return rows },
-                release: async () => {}
-            }) }
-            return db
-        }
+function dbWithRows(rows){
+    const db = Object.create(Database.prototype)
+    db.WAIT_LAG_PROBE_MS = 500
+    db.queries = []
+    db.pool = { getConnection: async () => ({
+        query:   async (sql) => { db.queries.push(sql); return rows },
+        release: async () => {}
+    }) }
+    return db
+}
 
-        it('names a missing database pool for both unavailable signals', async () => {
-            const db = Object.create(Database.prototype)
+function registerPipelineProgressShapeTests() {
+    it('names a missing database pool for both unavailable signals', async () => {
+        const db = Object.create(Database.prototype)
+        assert.deepStrictEqual(await db['_pipelineProgress'](), {
+            lag: null, lagReason: 'no database pool wired',
+            writes: null, writesReason: 'no database pool wired'
+        })
+    })
+
+    it('reports lag and the action-write mark from one round trip', async () => {
+        const db = dbWithRows([{ tip: 4970, writes: 88123 }])
+        await withConnector({ getBlockCount: async () => 5000 }, async () => {
             assert.deepStrictEqual(await db['_pipelineProgress'](), {
-                lag: null, lagReason: 'no database pool wired',
-                writes: null, writesReason: 'no database pool wired'
+                lag: 30, lagReason: null, writes: 88123, writesReason: null
             })
         })
+        assert.strictEqual(db.queries.length, 1,
+            'sampling twice as often must not cost twice as many round trips')
+    })
 
-        it('reports lag and the action-write mark from one round trip', async () => {
-            const db = dbWithRows([{ tip: 4970, writes: 88123 }])
-            await withConnector({ getBlockCount: async () => 5000 }, async () => {
-                assert.deepStrictEqual(await db['_pipelineProgress'](), {
-                    lag: 30, lagReason: null, writes: 88123, writesReason: null
-                })
-            })
-            assert.strictEqual(db.queries.length, 1,
-                'sampling twice as often must not cost twice as many round trips')
-        })
-
-        it('still reports writes when the chain tip is not observable', async () => {
-            // No node connector means no lag signal, but the write signal does not
-            // need the chain: it is exactly the case lag cannot cover.
-            const db = dbWithRows([{ tip: 4970, writes: 5 }])
-            await withConnector(undefined, async () => {
-                assert.deepStrictEqual(await db['_pipelineProgress'](), {
-                    lag: null, lagReason: 'no node connector wired',
-                    writes: 5, writesReason: null
-                })
-            })
-        })
-
-        it('reports nulls, not NaN, on an empty database', async () => {
-            const db = dbWithRows([{ tip: null, writes: null }])
-            await withConnector({ getBlockCount: async () => 5000 }, async () => {
-                assert.deepStrictEqual(await db['_pipelineProgress'](), {
-                    lag: null, lagReason: 'blocks table held no rows',
-                    writes: null, writesReason: 'actions table held no rows'
-                })
-            })
-        })
-
-        it('degrades to nulls rather than throwing when the probe fails', async () => {
-            const db = Object.create(Database.prototype)
-            db.WAIT_LAG_PROBE_MS = 500
-            db.pool = { getConnection: async () => { throw new Error('pool exhausted') } }
-            await withConnector({ getBlockCount: async () => 5000 }, async () => {
-                assert.deepStrictEqual(await db['_pipelineProgress'](), {
-                    lag: null, lagReason: 'probe failed: pool exhausted',
-                    writes: null, writesReason: 'probe failed: pool exhausted'
-                })
-            })
-        })
-
-        it('says once why a failing probe went blind, instead of degrading silently', async () => {
-            // A probe that can never answer sends every wait back to a fixed deadline
-            // and reports nothing, which is how this mechanism stayed unproven.
-            const db = Object.create(Database.prototype)
-            db.WAIT_LAG_PROBE_MS = 500
-            db.pool = { getConnection: async () => { throw new Error("Table 'actions' doesn't exist") } }
-            const lines = []
-            const orig = console.log
-            console.log = (...a) => lines.push(a.join(' '))
-            try {
-                await withConnector({ getBlockCount: async () => 1 }, async () => {
-                    await db['_pipelineProgress']()
-                    await db['_pipelineProgress']()
-                    await db['_pipelineProgress']()
-                })
-            } finally { console.log = orig }
-            const warnings = lines.filter(l => l.includes('probe unavailable'))
-            assert.strictEqual(warnings.length, 1,
-                'the cause must be named once, not once per poll: ' + JSON.stringify(lines))
-            assert(/actions/.test(warnings[0]), 'the warning must carry the driver error: ' + warnings[0])
-        })
-
-        it('gives up on a probe that hangs, so it can never block the wait it advises', async () => {
-            const db = Object.create(Database.prototype)
-            db.WAIT_LAG_PROBE_MS = 50
-            db.pool = { getConnection: () => new Promise(() => {}) }
-            await withConnector({ getBlockCount: async () => 5000 }, async () => {
-                const started = Date.now()
-                assert.deepStrictEqual(await db['_pipelineProgress'](), {
-                    lag: null, lagReason: 'probe timed out',
-                    writes: null, writesReason: 'probe timed out'
-                })
-                assert(Date.now() - started < 1000, 'the probe must be time-capped')
+    it('still reports writes when the chain tip is not observable', async () => {
+        // No node connector means no lag signal, but the write signal does not
+        // need the chain: it is exactly the case lag cannot cover.
+        const db = dbWithRows([{ tip: 4970, writes: 5 }])
+        await withConnector(undefined, async () => {
+            assert.deepStrictEqual(await db['_pipelineProgress'](), {
+                lag: null, lagReason: 'no node connector wired',
+                writes: 5, writesReason: null
             })
         })
     })
 
-    // Diagnosability. Extensions were logged only when GRANTED, so a wait
-    // that gave up without one emitted nothing, and the guidance
-    // ("if this recurs with extensions=0, change the SIGNAL, not the budget") could
-    // not be evaluated from a run's output: zero lines is what a never-eligible
-    // wait, a zero-lag wait and a dead probe all look like. These pin the three
-    // apart by name, so the next failing run says which case it was.
-    describe('give-up diagnostics', () => {
-        function captureLog(fn){
-            const lines = []
-            const orig = console.log
-            console.log = (...a) => lines.push(a.join(' '))
-            return Promise.resolve(fn()).finally(() => { console.log = orig }).then(() => lines)
-        }
-
-        async function gaveUpFor(progress, configure){
-            const db = makeDb()
-            db['_pipelineProgress'] = async () => progress
-            if (configure) configure(db)
-            const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
-            return lines.find(l => l.includes('GAVE UP'))
-        }
-
-        it('reports zero lag distinctly, which is the case the current signal cannot see', async () => {
-            const db = makeDb({ lag: 0 })
-            const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
-            const gaveUp = lines.find(l => l.includes('GAVE UP'))
-            assert(gaveUp, 'a timed-out wait must report why it gave up')
-            assert(/checkThing/.test(gaveUp), 'the report names the wait')
-            assert(/0\/3 extensions/.test(gaveUp), 'the report carries the extension count')
-            assert(/last indexer lag 0 blocks/.test(gaveUp),
-                'zero lag must be stated, not implied by silence: ' + gaveUp)
-        })
-
-        it('preserves polls, extensions and timeMax in their established order', async () => {
-            const gaveUp = await gaveUpFor({
-                lag: 0, lagReason: null, writes: 0, writesReason: null
-            })
-            assert(/GAVE UP after \d+ms \(\d+ polls, 0\/3 extensions, timeMax 60ms, /.test(gaveUp),
-                'the stable diagnostic fields changed shape or order: ' + gaveUp)
-        })
-
-        it('reports whether action rows were still landing when it gave up', async () => {
-            // Separates "the stack was busy and we ran out of budget" from "the stack
-            // was idle and the row is genuinely absent", which read identically before.
-            const db = makeDb({ lag: 0, writes: 7777 })
-            const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
-            const gaveUp = lines.find(l => l.includes('GAVE UP'))
-            assert(/action writes idle at index 7777/.test(gaveUp),
-                'a stalled write mark must be named in the give-up report: ' + gaveUp)
-        })
-
-        it('names the extension it granted for writes, not for lag', async () => {
-            let mark = 500
-            const db = makeDb({ lag: 0, writes: () => ++mark, maxExtensions: 1, probeEvery: TICK * 2 })
-            const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TICK * 7))
-            const granted = lines.find(l => l.includes('extending the wait'))
-            assert(granted, 'a write-driven extension must be logged like a lag-driven one')
-            assert(/still writing action rows/.test(granted),
-                'the log must say which signal bought the time: ' + granted)
-        })
-
-        it('distinguishes a probe that could not answer from a zero-lag probe', async () => {
-            const db = makeDb({ lag: null })
-            const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
-            const gaveUp = lines.find(l => l.includes('GAVE UP'))
-            assert(/probe failed: test probe unavailable/.test(gaveUp),
-                'an unanswerable probe must say so: ' + gaveUp)
-        })
-
-        it('names a missing database pool for each signal', async () => {
-            const gaveUp = await gaveUpFor({
-                lag: null, lagReason: 'no database pool wired',
-                writes: null, writesReason: 'no database pool wired'
-            })
-            assert(/last indexer lag unavailable \(no database pool wired\)/.test(gaveUp), gaveUp)
-            assert(/action writes unavailable \(no database pool wired\)/.test(gaveUp), gaveUp)
-        })
-
-        it('names a missing node connector without hiding a readable action mark', async () => {
-            const gaveUp = await gaveUpFor({
-                lag: null, lagReason: 'no node connector wired',
-                writes: 0, writesReason: null
-            })
-            assert(/last indexer lag unavailable \(no node connector wired\)/.test(gaveUp), gaveUp)
-            assert(/action writes idle at index 0/.test(gaveUp), gaveUp)
-        })
-
-        it('names each empty table independently', async () => {
-            const gaveUp = await gaveUpFor({
+    it('reports nulls, not NaN, on an empty database', async () => {
+        const db = dbWithRows([{ tip: null, writes: null }])
+        await withConnector({ getBlockCount: async () => 5000 }, async () => {
+            assert.deepStrictEqual(await db['_pipelineProgress'](), {
                 lag: null, lagReason: 'blocks table held no rows',
                 writes: null, writesReason: 'actions table held no rows'
             })
-            assert(/last indexer lag unavailable \(blocks table held no rows\)/.test(gaveUp), gaveUp)
-            assert(/action writes unavailable \(actions table held no rows\)/.test(gaveUp), gaveUp)
         })
+    })
+}
 
-        it('names a timed-out probe for each signal', async () => {
-            const gaveUp = await gaveUpFor({
+function registerPipelineProgressFailureTests() {
+    it('degrades to nulls rather than throwing when the probe fails', async () => {
+        const db = Object.create(Database.prototype)
+        db.WAIT_LAG_PROBE_MS = 500
+        db.pool = { getConnection: async () => { throw new Error('pool exhausted') } }
+        await withConnector({ getBlockCount: async () => 5000 }, async () => {
+            assert.deepStrictEqual(await db['_pipelineProgress'](), {
+                lag: null, lagReason: 'probe failed: pool exhausted',
+                writes: null, writesReason: 'probe failed: pool exhausted'
+            })
+        })
+    })
+
+    it('says once why a failing probe went blind, instead of degrading silently', async () => {
+        // A probe that can never answer sends every wait back to a fixed deadline
+        // and reports nothing, which is how this mechanism stayed unproven.
+        const db = Object.create(Database.prototype)
+        db.WAIT_LAG_PROBE_MS = 500
+        db.pool = { getConnection: async () => { throw new Error("Table 'actions' doesn't exist") } }
+        const lines = []
+        const orig = console.log
+        console.log = (...a) => lines.push(a.join(' '))
+        try {
+            await withConnector({ getBlockCount: async () => 1 }, async () => {
+                await db['_pipelineProgress']()
+                await db['_pipelineProgress']()
+                await db['_pipelineProgress']()
+            })
+        } finally { console.log = orig }
+        const warnings = lines.filter(l => l.includes('probe unavailable'))
+        assert.strictEqual(warnings.length, 1,
+            'the cause must be named once, not once per poll: ' + JSON.stringify(lines))
+        assert(/actions/.test(warnings[0]), 'the warning must carry the driver error: ' + warnings[0])
+    })
+
+    it('gives up on a probe that hangs, so it can never block the wait it advises', async () => {
+        const db = Object.create(Database.prototype)
+        db.WAIT_LAG_PROBE_MS = 50
+        db.pool = { getConnection: () => new Promise(() => {}) }
+        await withConnector({ getBlockCount: async () => 5000 }, async () => {
+            const started = Date.now()
+            assert.deepStrictEqual(await db['_pipelineProgress'](), {
                 lag: null, lagReason: 'probe timed out',
                 writes: null, writesReason: 'probe timed out'
             })
-            assert(/last indexer lag unavailable \(probe timed out\)/.test(gaveUp), gaveUp)
-            assert(/action writes unavailable \(probe timed out\)/.test(gaveUp), gaveUp)
-        })
-
-        it('reduces a thrown probe value to its message without logging the object', async () => {
-            const db = makeDb()
-            db['_pipelineProgress'] = Database.prototype['_pipelineProgress']
-            db.pool = { getConnection: async () => {
-                throw { message: 'safe probe failure', toString: () => 'connection object with secret' }
-            } }
-            const saved = global.nodeConnector
-            global.nodeConnector = { getBlockCount: async () => 1 }
-            let lines
-            try {
-                lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
-            } finally {
-                if (saved === undefined) delete global.nodeConnector; else global.nodeConnector = saved
-            }
-            const gaveUp = lines.find(l => l.includes('GAVE UP'))
-            assert(/probe failed: safe probe failure/.test(gaveUp), gaveUp)
-            assert(!lines.join('\n').includes('connection object with secret'),
-                'the thrown object reached the log: ' + JSON.stringify(lines))
-        })
-
-        it('says when the wait was too short to ever qualify for an extension', async () => {
-            const db = makeDb({ lag: 0 })
-            db.WAIT_MIN_FOR_EXTENSION = 10000   // far above TIMEMAX
-            const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
-            const gaveUp = lines.find(l => l.includes('GAVE UP'))
-            assert(/probe was never run because the wait was not eligible for extension/.test(gaveUp),
-                'an ineligible wait must not be reported as a zero-lag one: ' + gaveUp)
-        })
-
-        it('says when an eligible wait exhausted its budget before any probe ran', async () => {
-            const db = makeDb({ maxExtensions: 0 })
-            const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
-            const gaveUp = lines.find(l => l.includes('GAVE UP'))
-            assert(/probe was never run before give-up/.test(gaveUp),
-                'an unrun eligible probe needs its own reason: ' + gaveUp)
-        })
-
-        it('stays silent on the success path, so the log only grows when something went wrong', async () => {
-            const db = makeDb({ lag: 0 })
-            const lines = await captureLog(() =>
-                db['_waitFor'](function checkThing(){ return { id: 1 } }, {}, TIMEMAX))
-            assert.strictEqual(lines.filter(l => l.includes('GAVE UP')).length, 0)
+            assert(Date.now() - started < 1000, 'the probe must be time-capped')
         })
     })
-})
+}
+
+function captureLog(fn){
+    const lines = []
+    const orig = console.log
+    console.log = (...a) => lines.push(a.join(' '))
+    return Promise.resolve(fn()).finally(() => { console.log = orig }).then(() => lines)
+}
+
+async function gaveUpFor(progress, configure){
+    const db = makeDb()
+    db['_pipelineProgress'] = async () => progress
+    if (configure) configure(db)
+    const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
+    return lines.find(l => l.includes('GAVE UP'))
+}
+
+function registerGiveUpSignalTests() {
+    it('reports zero lag distinctly, which is the case the current signal cannot see', async () => {
+        const db = makeDb({ lag: 0 })
+        const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
+        const gaveUp = lines.find(l => l.includes('GAVE UP'))
+        assert(gaveUp, 'a timed-out wait must report why it gave up')
+        assert(/checkThing/.test(gaveUp), 'the report names the wait')
+        assert(/0\/3 extensions/.test(gaveUp), 'the report carries the extension count')
+        assert(/last indexer lag 0 blocks/.test(gaveUp),
+            'zero lag must be stated, not implied by silence: ' + gaveUp)
+    })
+
+    it('preserves polls, extensions and timeMax in their established order', async () => {
+        const gaveUp = await gaveUpFor({
+            lag: 0, lagReason: null, writes: 0, writesReason: null
+        })
+        assert(/GAVE UP after \d+ms \(\d+ polls, 0\/3 extensions, timeMax 60ms, /.test(gaveUp),
+            'the stable diagnostic fields changed shape or order: ' + gaveUp)
+    })
+
+    it('reports whether action rows were still landing when it gave up', async () => {
+        // Separates "the stack was busy and we ran out of budget" from "the stack
+        // was idle and the row is genuinely absent", which read identically before.
+        const db = makeDb({ lag: 0, writes: 7777 })
+        const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
+        const gaveUp = lines.find(l => l.includes('GAVE UP'))
+        assert(/action writes idle at index 7777/.test(gaveUp),
+            'a stalled write mark must be named in the give-up report: ' + gaveUp)
+    })
+
+    it('names the extension it granted for writes, not for lag', async () => {
+        let mark = 500
+        const db = makeDb({ lag: 0, writes: () => ++mark, maxExtensions: 1, probeEvery: TICK * 2 })
+        const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TICK * 7))
+        const granted = lines.find(l => l.includes('extending the wait'))
+        assert(granted, 'a write-driven extension must be logged like a lag-driven one')
+        assert(/still writing action rows/.test(granted),
+            'the log must say which signal bought the time: ' + granted)
+    })
+
+    it('distinguishes a probe that could not answer from a zero-lag probe', async () => {
+        const db = makeDb({ lag: null })
+        const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
+        const gaveUp = lines.find(l => l.includes('GAVE UP'))
+        assert(/probe failed: test probe unavailable/.test(gaveUp),
+            'an unanswerable probe must say so: ' + gaveUp)
+    })
+}
+
+function registerGiveUpReasonTests() {
+    it('names a missing database pool for each signal', async () => {
+        const gaveUp = await gaveUpFor({
+            lag: null, lagReason: 'no database pool wired',
+            writes: null, writesReason: 'no database pool wired'
+        })
+        assert(/last indexer lag unavailable \(no database pool wired\)/.test(gaveUp), gaveUp)
+        assert(/action writes unavailable \(no database pool wired\)/.test(gaveUp), gaveUp)
+    })
+
+    it('names a missing node connector without hiding a readable action mark', async () => {
+        const gaveUp = await gaveUpFor({
+            lag: null, lagReason: 'no node connector wired',
+            writes: 0, writesReason: null
+        })
+        assert(/last indexer lag unavailable \(no node connector wired\)/.test(gaveUp), gaveUp)
+        assert(/action writes idle at index 0/.test(gaveUp), gaveUp)
+    })
+
+    it('names each empty table independently', async () => {
+        const gaveUp = await gaveUpFor({
+            lag: null, lagReason: 'blocks table held no rows',
+            writes: null, writesReason: 'actions table held no rows'
+        })
+        assert(/last indexer lag unavailable \(blocks table held no rows\)/.test(gaveUp), gaveUp)
+        assert(/action writes unavailable \(actions table held no rows\)/.test(gaveUp), gaveUp)
+    })
+
+    it('names a timed-out probe for each signal', async () => {
+        const gaveUp = await gaveUpFor({
+            lag: null, lagReason: 'probe timed out',
+            writes: null, writesReason: 'probe timed out'
+        })
+        assert(/last indexer lag unavailable \(probe timed out\)/.test(gaveUp), gaveUp)
+        assert(/action writes unavailable \(probe timed out\)/.test(gaveUp), gaveUp)
+    })
+}
+
+function registerGiveUpEligibilityTests() {
+    it('reduces a thrown probe value to its message without logging the object', async () => {
+        const db = makeDb()
+        db['_pipelineProgress'] = Database.prototype['_pipelineProgress']
+        db.pool = { getConnection: async () => {
+            throw { message: 'safe probe failure', toString: () => 'connection object with secret' }
+        } }
+        const saved = global.nodeConnector
+        global.nodeConnector = { getBlockCount: async () => 1 }
+        let lines
+        try {
+            lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
+        } finally {
+            if (saved === undefined) delete global.nodeConnector; else global.nodeConnector = saved
+        }
+        const gaveUp = lines.find(l => l.includes('GAVE UP'))
+        assert(/probe failed: safe probe failure/.test(gaveUp), gaveUp)
+        assert(!lines.join('\n').includes('connection object with secret'),
+            'the thrown object reached the log: ' + JSON.stringify(lines))
+    })
+
+    it('says when the wait was too short to ever qualify for an extension', async () => {
+        const db = makeDb({ lag: 0 })
+        db.WAIT_MIN_FOR_EXTENSION = 10000   // far above TIMEMAX
+        const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
+        const gaveUp = lines.find(l => l.includes('GAVE UP'))
+        assert(/probe was never run because the wait was not eligible for extension/.test(gaveUp),
+            'an ineligible wait must not be reported as a zero-lag one: ' + gaveUp)
+    })
+
+    it('says when an eligible wait exhausted its budget before any probe ran', async () => {
+        const db = makeDb({ maxExtensions: 0 })
+        const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
+        const gaveUp = lines.find(l => l.includes('GAVE UP'))
+        assert(/probe was never run before give-up/.test(gaveUp),
+            'an unrun eligible probe needs its own reason: ' + gaveUp)
+    })
+
+    it('stays silent on the success path, so the log only grows when something went wrong', async () => {
+        const db = makeDb({ lag: 0 })
+        const lines = await captureLog(() =>
+            db['_waitFor'](function checkThing(){ return { id: 1 } }, {}, TIMEMAX))
+        assert.strictEqual(lines.filter(l => l.includes('GAVE UP')).length, 0)
+    })
+}
