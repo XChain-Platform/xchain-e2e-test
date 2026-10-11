@@ -3,78 +3,99 @@
 const assert = require('assert')
 const { runHubFailoverDrill } = require('../lib/hubFailoverDrill')
 
-function fakeVenue (overrides) {
-    let now = 0
-    let stopped = false
-    let moved = false
-    let queued = null
-    let mined = false
-    let restarted = false
-    let caughtUp = false
-    const hashes = {
+function initialVenueState () {
+    return {
+        now: 0,
+        stopped: false,
+        moved: false,
+        queued: null,
+        mined: false,
+        restarted: false,
+        caughtUp: false,
+    }
+}
+
+function venueHashes () {
+    return {
         block_index: 102,
         ledger_hash: 'ledger', actions_hash: 'actions', contract_hash: 'contract', state_hash: 'state',
     }
-    function indexer (id, coin, role, pinned) {
-        return {
-            id, coin, role,
-            followedHub: pinned ? 'hub-b' : (moved ? 'hub-b' : 'hub-a'),
-            indexerBlock: mined ? 102 : 100,
-            stallReason: null,
-            hubMirror: { connected: true, bootstrapped: true, moveCount: pinned ? 0 : (moved ? 1 : 0) },
-        }
-    }
+}
 
-    function observe () {
-        if (stopped && now >= 1000) moved = true
-        if (restarted && now >= 2500) caughtUp = true
-        const survivorRows = queued ? { oracle_prices: [queued.rowKey] } : { oracle_prices: [] }
-        const targetRows = caughtUp && queued ? { oracle_prices: [queued.rowKey] } : { oracle_prices: [] }
-        const snapshot = {
-            hubs: [
-                { id: 'hub-a', running: !stopped || restarted, caught_up: restarted ? caughtUp : !stopped,
-                    reports: caughtUp && queued ? [queued.reportId] : [], rows: targetRows },
-                { id: 'hub-b', running: true, caught_up: true,
-                    reports: queued ? [queued.reportId] : [], rows: survivorRows },
-            ],
-            indexers: [
-                indexer('btc', 'BTC', 'failover'), indexer('ltc', 'LTC', 'failover'),
-                indexer('doge', 'DOGE', 'failover'), indexer('control', 'BTC', 'pinned-control', true),
-            ],
-        }
-        return overrides && overrides.transformObservation
-            ? overrides.transformObservation(snapshot, { now })
-            : snapshot
+function fakeIndexer (state, id, coin, role, pinned) {
+    return {
+        id, coin, role,
+        followedHub: pinned ? 'hub-b' : (state.moved ? 'hub-b' : 'hub-a'),
+        indexerBlock: state.mined ? 102 : 100,
+        stallReason: null,
+        hubMirror: { connected: true, bootstrapped: true, moveCount: pinned ? 0 : (state.moved ? 1 : 0) },
     }
+}
 
-    const driver = {
+function fakeSnapshot (state) {
+    const queued = state.queued
+    const survivorRows = queued ? { oracle_prices: [queued.rowKey] } : { oracle_prices: [] }
+    const targetRows = state.caughtUp && queued ? { oracle_prices: [queued.rowKey] } : { oracle_prices: [] }
+    return {
+        hubs: [
+            { id: 'hub-a', running: !state.stopped || state.restarted,
+                caught_up: state.restarted ? state.caughtUp : !state.stopped,
+                reports: state.caughtUp && queued ? [queued.reportId] : [], rows: targetRows },
+            { id: 'hub-b', running: true, caught_up: true,
+                reports: queued ? [queued.reportId] : [], rows: survivorRows },
+        ],
+        indexers: [
+            fakeIndexer(state, 'btc', 'BTC', 'failover'), fakeIndexer(state, 'ltc', 'LTC', 'failover'),
+            fakeIndexer(state, 'doge', 'DOGE', 'failover'),
+            fakeIndexer(state, 'control', 'BTC', 'pinned-control', true),
+        ],
+    }
+}
+
+function observeVenue (state, overrides) {
+    if (state.stopped && state.now >= 1000) state.moved = true
+    if (state.restarted && state.now >= 2500) state.caughtUp = true
+    const snapshot = fakeSnapshot(state)
+    return overrides && overrides.transformObservation
+        ? overrides.transformObservation(snapshot, { now: state.now })
+        : snapshot
+}
+
+function fakeDriver (state, overrides) {
+    const hashes = venueHashes()
+    return {
         prepare: async () => ({ followedAddress: 'http://hub-a:10000' }),
-        observe: async () => observe(),
-        stopHub: async (id) => { assert.strictEqual(id, 'hub-a'); stopped = true; return { stopped: id } },
+        observe: async () => observeVenue(state, overrides),
+        stopHub: async (id) => { assert.strictEqual(id, 'hub-a'); state.stopped = true; return { stopped: id } },
         queueReport: async () => {
-            queued = { reportId: 'report-1', table: 'oracle_prices', rowKey: 'BTC:42' }
-            return queued
+            state.queued = { reportId: 'report-1', table: 'oracle_prices', rowKey: 'BTC:42' }
+            return state.queued
         },
-        mine: async (blocks) => { mined = true; return { blocks } },
+        mine: async (blocks) => { state.mined = true; return { blocks } },
         startHub: async (id) => {
             assert.strictEqual(id, 'hub-a')
-            restarted = true
-            if (overrides && overrides.firstReadyCaughtUp === true) caughtUp = true
+            state.restarted = true
+            if (overrides && overrides.firstReadyCaughtUp === true) state.caughtUp = true
             return { firstReady: { caught_up: !!(overrides && overrides.firstReadyCaughtUp) } }
         },
         blockHashes: async () => hashes,
     }
+}
+
+function fakeVenue (overrides) {
+    const state = initialVenueState()
+    const driver = fakeDriver(state, overrides)
     Object.assign(driver, overrides && overrides.driver)
     return {
         driver,
         clock: {
-            now: () => now,
-            sleep: async (ms) => { now += ms },
+            now: () => state.now,
+            sleep: async (ms) => { state.now += ms },
         },
     }
 }
 
-describe('hub failover drill verdict', function () {
+function registerHappyPathTests () {
     it('proves the move, catch-up, report fan-out, dwell, and four-hash parity', async function () {
         const venue = fakeVenue()
         const startHub = venue.driver.startHub
@@ -94,7 +115,9 @@ describe('hub failover drill verdict', function () {
         assert.ok(evidence.noFlapSamples > 0)
         assert.strictEqual(startCalls, 1)
     })
+}
 
+function registerFirstReadyTests () {
     it('accepts a caught_up first ready frame when the restarted hub already holds the outage row', async function () {
         const venue = fakeVenue({ firstReadyCaughtUp: true })
         const evidence = await runHubFailoverDrill(venue.driver, {
@@ -113,7 +136,9 @@ describe('hub failover drill verdict', function () {
             dwellMs: 0, pollMs: 100, clock: venue.clock,
         }), /caught_up true before it held the outage row/)
     })
+}
 
+function registerRestartAndFlapTests () {
     it('prepares before observing and restarts the target after a drill failure', async function () {
         const calls = []
         const venue = fakeVenue()
@@ -147,7 +172,9 @@ describe('hub failover drill verdict', function () {
             dwellMs: 2000, pollMs: 100, clock: venue.clock,
         }), /btc flapped away from hub-b/)
     })
+}
 
+function registerParityAndAdvanceTests () {
     it('fails when the moved BTC state hash differs from the pinned control', async function () {
         let reads = 0
         const venue = fakeVenue({
@@ -172,4 +199,11 @@ describe('hub failover drill verdict', function () {
             dwellMs: 0, pollMs: 100, clock: venue.clock,
         }), /every indexer to advance/)
     })
+}
+
+describe('hub failover drill verdict', function () {
+    registerHappyPathTests()
+    registerFirstReadyTests()
+    registerRestartAndFlapTests()
+    registerParityAndAdvanceTests()
 })
