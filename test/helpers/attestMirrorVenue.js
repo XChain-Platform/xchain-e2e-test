@@ -80,6 +80,7 @@
  ********************************************************************/
 
 const fs   = require('fs');
+const crypto = require('crypto');
 const net  = require('net');
 const os   = require('os');
 const http = require('http');
@@ -858,12 +859,11 @@ function resolveWindowKeyingFrom(pub, dbProto) {
  *     (`xchain-hub/src/secret_env.js`), but the `_SECRET` spelling is the one an
  *     operator's redaction filter catches, and setting BOTH to different values
  *     is a hard error in the hub, so only one is set.
- *   - `HUB_API_KEY` is deliberately ABSENT. The `/hub-db/snapshot` middleware
- *     passes every request through when no key is configured, which is the
- *     posture the venue wants; setting a key would additionally require the
- *     indexers to carry it and buys the drill nothing. Keyless operation in
- *     validator mode must be DECLARED, hence `HUB_ALLOW_UNAUTHENTICATED`, or the
- *     hub refuses to boot.
+ *   - `HUB_API_KEY` is ABSENT, so `registervalidator` stays open; keyless
+ *     writes must be DECLARED (`HUB_ALLOW_UNAUTHENTICATED`) or the hub won't boot.
+ *   - `HUB_FEED_API_KEY` is set from `feedApiKey`. Without it a peer's catch-up
+ *     walk gets 404, the hub never reports caught up, and its admission heights
+ *     stay empty, so every height barrier parks. It also gates the snapshot route.
  *   - `P2P_VALIDATOR_ADDR` and every peer address name the DELAY PROXY's port,
  *     not the hub's own P2P port. See P2pDelayProxy for why the proxy is always
  *     in the path even when its delay is zero.
@@ -965,6 +965,7 @@ function buildHubEnv(spec) {
             ? DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS : s.attestationRoundTimeoutMs)
     };
     if (s.btcIndexerApiKey) env.BTC_INDEXER_API_KEY = String(s.btcIndexerApiKey);
+    if (s.feedApiKey) env.HUB_FEED_API_KEY = String(s.feedApiKey);
     // EXPLICIT ONLY, and never defaulted from an interactive CLAUDE_CONFIG_DIR: the llm
     // provider reads a real credential store, and a hub that silently picked up whichever
     // one the operator happened to be logged into would be borrowing a human's.
@@ -1071,6 +1072,9 @@ function buildIndexerEnv(spec) {
         env.FEE_DESTINATION = String(s.feeDestination);
     }
     if (s.indexerApiKey) env.INDEXER_API_KEY = String(s.indexerApiKey);
+    // The followed hub's feed key, which its snapshot route and subscribe socket
+    // demand once the hub carries one (see buildHubEnv).
+    if (s.hubFeedApiKey) env.HUB_FEED_API_KEY = String(s.hubFeedApiKey);
     if (s.extraEnv) Object.assign(env, s.extraEnv);
     return env;
 }
@@ -2427,6 +2431,10 @@ class AttestMirrorVenue {
     }
 
     async ['_startHubs'](ports, stamp) {
+        // One feed key for the whole mesh, because a hub's peer catch-up presents its
+        // own key to every peer (see buildHubEnv). Random per venue and held only on
+        // the hub records and in the children's environment, never logged.
+        const feedKey = crypto.randomBytes(24).toString('hex');
         // Proxies first: a hub whose seed list names a proxy that is not
         // listening yet spends its whole reconnect backoff catching up.
         for (let i = 0; i < this.hubCount; i++) {
@@ -2446,6 +2454,8 @@ class AttestMirrorVenue {
                 connector: null,
                 frozen:    false
             });
+            // Non-enumerable, so no dump or inspect of a hub record can print it.
+            Object.defineProperty(this.hubs[this.hubs.length - 1], 'feedKey', { value: feedKey, enumerable: false });
         }
 
         // Sequential, so log lines interleave cleanly and the hubs' schema
@@ -2473,6 +2483,7 @@ class AttestMirrorVenue {
             oracleEpochStart: this.oracleEpochStart,
             btcIndexerApiUrl: this['_live'].btcOracle.url,
             btcIndexerApiKey: this['_live'].btcOracle.apiKey,
+            feedApiKey:   hub.feedKey,
             capabilityConfigPath: this['_capabilityConfigPath'],
             forwardS:     this.forwardS,
             batchWindowS: this.batchWindowS,
@@ -2983,6 +2994,9 @@ class AttestMirrorVenue {
             indexerDbName: ix.indexerDbName,
             mirrorDbName:  ix.mirrorDbName,
             hubApiUrl:     ix.hubApiUrl,
+            // The followed hub's own key; an attached venue's records are the owner's,
+            // so this follows the hubs it borrows too.
+            hubFeedApiKey: (this.hubs.find((h) => h.index === ix.followsHub) || {}).feedKey,
             db:      { host: this.hubDb.host, port: this.hubDb.port, user: this.hubDb.user, pass: this.hubDb.pass },
             decoder: this['_live'].decoder,
             node:    this['_live'].node,
@@ -3847,7 +3861,9 @@ class AttestMirrorVenue {
         if (!hub) throw new Error('attestMirrorVenue: no hub ' + hubIndex);
         const url = hub.apiUrl + '/hub-db/snapshot/attestation_responses' +
             '?since_id=' + (opts.sinceId || 0) + (opts.limit ? '&limit=' + opts.limit : '');
-        const res = await axios.get(url, { timeout: opts.timeoutMs || 10_000, validateStatus: () => true });
+        // The route is gated once the hub carries a feed key (see buildHubEnv).
+        const headers = hub.feedKey ? { 'x-api-key': hub.feedKey } : {};
+        const res = await axios.get(url, { timeout: opts.timeoutMs || 10_000, headers: headers, validateStatus: () => true });
         if (res.status !== 200) {
             throw new Error('attestMirrorVenue: hub ' + hubIndex + ' answered ' + res.status +
                 ' on the attestation_responses snapshot route');
