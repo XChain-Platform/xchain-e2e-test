@@ -120,7 +120,13 @@ module.exports = {
             throw new Error(`The utxo tracker couldn't parse the utxo (${syncStr})`)
         }
 
-        if (seedGas) {
+        // Off BTC every XCHAIN unit is bridged in, so a run that turned the off-BTC gas
+        // bootstrap off (a native-fee suite on a venue with no bridge relay, see
+        // initial_check) skips this per-address seed too: it would wait on the same
+        // federation credit that never comes.
+        if (seedGas && process.env.E2E_GAS_BOOTSTRAP === "off" && global.COIN_CODE !== "BTC") {
+            console.log("Skipping the XCHAIN gas seed for " + newAddress + ": E2E_GAS_BOOTSTRAP=off on " + global.COIN_CODE)
+        } else if (seedGas) {
             // UNIFIED_FEES + ISSUANCE_FEE activate at block 0 on regtest/testnet, so a
             // freshly funded address can't pay gas-schedule fees (ISSUE = 1 XCHAIN).
             // XCHAIN is an open-mint faucet on test networks; grab gas here so every
