@@ -134,8 +134,7 @@ describe('getConnection()', function () {
 // A stale venue credential must not make a drill hang: getConnection retrying an
 // unreachable pool forever would leave a run that neither ends nor says which
 // database it could not reach. These hold the bound and the diagnosis in place.
-describe('getConnection() gives up loudly on an unreachable pool', function () {
-
+function registerConnectAttemptCapTests() {
     it('stops after the attempt cap instead of retrying forever', async function () {
         db.CONNECT_MAX_ATTEMPTS = 4
         mockPool.getConnection.rejects(new Error('ECONNREFUSED'))
@@ -169,7 +168,9 @@ describe('getConnection() gives up loudly on an unreachable pool', function () {
         )
         assert.ok(!err.message.includes('pass'), 'the password is not part of the diagnosis')
     })
+}
 
+function registerConnectBudgetAndCredentialTests() {
     it('gives up on the wall clock even while attempts remain', async function () {
         // A host that is simply unreachable burns the driver's acquire timeout per
         // attempt, so the attempt cap alone would let a dead venue run for minutes.
@@ -206,7 +207,9 @@ describe('getConnection() gives up loudly on an unreachable pool', function () {
         assert.ok(/hub.*stale|stale.*hub/i.test(err.message), 'says the hub copy is the one that goes stale')
         assert.strictEqual(err.cause, denied)
     })
+}
 
+function registerConnectFatalAndTransientTests() {
     it('sees a credential rejection the pool wrapped in its own timeout error', async function () {
         // The pool reports an unusable credential as ER_GET_CONNECTION_TIMEOUT with the
         // real refusal on `cause`. Reading only the outer error would retry a password
@@ -237,7 +240,9 @@ describe('getConnection() gives up loudly on an unreachable pool', function () {
         assert.strictEqual(conn, goodConn)
         assert.strictEqual(mockPool.getConnection.callCount, 4)
     })
+}
 
+function registerConnectDefaultsTests() {
     it('defaults leave a dead venue failing well inside a minute', async function () {
         // The worst case is the budget plus the one attempt that crosses it plus its
         // sleep. The drill's contract is a non-zero exit within a minute, so the
@@ -258,6 +263,13 @@ describe('getConnection() gives up loudly on an unreachable pool', function () {
             else process.env.E2E_DB_CONNECT_ATTEMPTS = before
         }
     })
+}
+
+describe('getConnection() gives up loudly on an unreachable pool', function () {
+    registerConnectAttemptCapTests()
+    registerConnectBudgetAndCredentialTests()
+    registerConnectFatalAndTransientTests()
+    registerConnectDefaultsTests()
 })
 
 describe('adaptive-wait tunable env parsing', function () {
@@ -888,7 +900,7 @@ describe('checkContract()', function () {
     })
 })
 
-describe('checkList()', function () {
+function registerCheckListMatchTests() {
     it('returns the list row when items match for type=2 (address)', async function () {
         const listRow  = { id: 1, action_index: 42, type: 2 }
         const itemRows = [{ item_name: 'addr_a' }, { item_name: 'addr_b' }]
@@ -921,7 +933,9 @@ describe('checkList()', function () {
 
         assert.strictEqual(result, null)
     })
+}
 
+function registerCheckListMissAndTickTests() {
     it('returns null when item values mismatch', async function () {
         const listRow  = { id: 1, action_index: 42, type: 2 }
         const itemRows = [{ item_name: 'addr_a' }, { item_name: 'addr_c' }]
@@ -963,60 +977,72 @@ describe('checkList()', function () {
         const itemSql = conn2.query.firstCall.args[0]
         assert.ok(itemSql.includes('index_tickers'))
     })
+}
+
+function wireOneListRow(listRow, itemRows){
+    const conn1 = { query: sinon.stub().resolves([listRow]), release: sinon.stub().resolves() }
+    const conn2 = { query: sinon.stub().resolves(itemRows), release: sinon.stub().resolves() }
+    mockPool.getConnection.onFirstCall().resolves(conn1)
+    mockPool.getConnection.onSecondCall().resolves(conn2)
+    return conn1
+}
+
+function registerListMemoProjectionTests() {
+    it('projects the memo through the index_memos join', async function () {
+        const conn1 = wireOneListRow({ id: 1, action_index: 42, type: 1, memo: 'hello' }, [{ item_name: 'TICK' }])
+
+        const result = await db.checkList({ type: 1, items: ['TICK'] })
+
+        const sql = conn1.query.firstCall.args[0]
+        assert.ok(sql.includes('LEFT JOIN index_memos im ON im.id = l.memo_id'), 'joins index_memos on l.memo_id')
+        assert.ok(sql.includes('im.memo AS memo'), 'projects the memo column')
+        assert.strictEqual(result.memo, 'hello')
+    })
+
+    it('binds a non-empty memo as an equality filter', async function () {
+        const conn1 = wireOneListRow({ id: 1, action_index: 42, type: 1, memo: 'hello' }, [{ item_name: 'TICK' }])
+
+        await db.checkList({ type: 1, memo: 'hello', items: ['TICK'] })
+
+        const [sql, values] = conn1.query.firstCall.args
+        assert.ok(sql.includes('im.memo = ?'), 'emits the equality clause')
+        assert.ok(values.includes('hello'), 'binds the memo value')
+    })
+}
+
+function registerListMemoFilterTests() {
+    it('treats an empty memo as the NULL the indexer stores', async function () {
+        const conn1 = wireOneListRow({ id: 1, action_index: 42, type: 1, memo: null }, [{ item_name: 'TICK' }])
+
+        await db.checkList({ type: 1, memo: '', items: ['TICK'] })
+
+        const [sql, values] = conn1.query.firstCall.args
+        assert.ok(sql.includes('im.memo IS NULL'), 'an empty memo asserts NULL, not an empty string')
+        assert.ok(!values.includes(''), 'nothing is bound for the NULL check')
+    })
+
+    it('filters listActionIndex against the l alias this query actually declares', async function () {
+        const conn1 = wireOneListRow({ id: 1, action_index: 42, type: 1 }, [{ item_name: 'TICK' }])
+
+        await db.checkList({ type: 1, listActionIndex: 7, items: ['TICK'] })
+
+        const [sql, values] = conn1.query.firstCall.args
+        assert.ok(sql.includes('l.list_action_index = ?'), 'uses the bound alias')
+        assert.ok(!/\bb\.list_action_index\b/.test(sql), 'no unbound b alias')
+        assert.ok(values.includes(7))
+    })
+}
+
+describe('checkList()', function () {
+    registerCheckListMatchTests()
+    registerCheckListMissAndTickTests()
 
     // LIST gained MEMO on the wire and a memo_id column on the lists table, but this
     // checker joined neither, so waitForList({memo}) was a silent no-op: a wrong,
     // dropped or unlinked LIST memo was unobservable end to end.
     describe('memo support', function () {
-        function wireOneListRow(listRow, itemRows){
-            const conn1 = { query: sinon.stub().resolves([listRow]), release: sinon.stub().resolves() }
-            const conn2 = { query: sinon.stub().resolves(itemRows), release: sinon.stub().resolves() }
-            mockPool.getConnection.onFirstCall().resolves(conn1)
-            mockPool.getConnection.onSecondCall().resolves(conn2)
-            return conn1
-        }
-
-        it('projects the memo through the index_memos join', async function () {
-            const conn1 = wireOneListRow({ id: 1, action_index: 42, type: 1, memo: 'hello' }, [{ item_name: 'TICK' }])
-
-            const result = await db.checkList({ type: 1, items: ['TICK'] })
-
-            const sql = conn1.query.firstCall.args[0]
-            assert.ok(sql.includes('LEFT JOIN index_memos im ON im.id = l.memo_id'), 'joins index_memos on l.memo_id')
-            assert.ok(sql.includes('im.memo AS memo'), 'projects the memo column')
-            assert.strictEqual(result.memo, 'hello')
-        })
-
-        it('binds a non-empty memo as an equality filter', async function () {
-            const conn1 = wireOneListRow({ id: 1, action_index: 42, type: 1, memo: 'hello' }, [{ item_name: 'TICK' }])
-
-            await db.checkList({ type: 1, memo: 'hello', items: ['TICK'] })
-
-            const [sql, values] = conn1.query.firstCall.args
-            assert.ok(sql.includes('im.memo = ?'), 'emits the equality clause')
-            assert.ok(values.includes('hello'), 'binds the memo value')
-        })
-
-        it('treats an empty memo as the NULL the indexer stores', async function () {
-            const conn1 = wireOneListRow({ id: 1, action_index: 42, type: 1, memo: null }, [{ item_name: 'TICK' }])
-
-            await db.checkList({ type: 1, memo: '', items: ['TICK'] })
-
-            const [sql, values] = conn1.query.firstCall.args
-            assert.ok(sql.includes('im.memo IS NULL'), 'an empty memo asserts NULL, not an empty string')
-            assert.ok(!values.includes(''), 'nothing is bound for the NULL check')
-        })
-
-        it('filters listActionIndex against the l alias this query actually declares', async function () {
-            const conn1 = wireOneListRow({ id: 1, action_index: 42, type: 1 }, [{ item_name: 'TICK' }])
-
-            await db.checkList({ type: 1, listActionIndex: 7, items: ['TICK'] })
-
-            const [sql, values] = conn1.query.firstCall.args
-            assert.ok(sql.includes('l.list_action_index = ?'), 'uses the bound alias')
-            assert.ok(!/\bb\.list_action_index\b/.test(sql), 'no unbound b alias')
-            assert.ok(values.includes(7))
-        })
+        registerListMemoProjectionTests()
+        registerListMemoFilterTests()
     })
 })
 
@@ -1076,16 +1102,7 @@ describe('_waitFor()', function () {
     })
 })
 
-// A failed query and an absent row must not give a wait the same null, or every
-// "this row must not exist" assertion passes against a query that never ran.
-describe('_waitFor() never-answered vs absent', function () {
-    const TX = 'a'.repeat(64)
-
-    // Pace polls at 10ms so a 50ms wait makes a handful of polls, not thousands.
-    beforeEach(function () {
-        db.sleep = () => new Promise(resolve => setTimeout(resolve, 10))
-    })
-
+function registerWaitNoAnswerSendTests(TX) {
     it('throws WAIT_NO_ANSWER when every poll of a real check* query fails', async function () {
         mockConnection.query.rejects(new Error("ER_BAD_FIELD_ERROR: Unknown column 'x'"))
         await assert.rejects(db.waitForSend({ txHash: TX }, 50), err => {
@@ -1108,7 +1125,9 @@ describe('_waitFor() never-answered vs absent', function () {
         mockConnection.query.rejects(new Error('ER_CONNECTION_LOST'))
         assert.strictEqual(await db.waitForSend({ txHash: TX }, 50), null)
     })
+}
 
+function registerWaitNoAnswerScopeTests(TX) {
     it('throws WAIT_NO_ANSWER for a list wait whose list query always fails', async function () {
         mockConnection.query.rejects(new Error('ER_NO_SUCH_TABLE'))
         await assert.rejects(db.waitForList({ txHash: TX, type: 1, items: ['A'] }, 50),
@@ -1143,6 +1162,20 @@ describe('_waitFor() never-answered vs absent', function () {
         assert.strictEqual(directRow, null)
         assert.ok(waitErr && waitErr.code === 'WAIT_NO_ANSWER', 'the wait itself still refuses')
     })
+}
+
+// A failed query and an absent row must not give a wait the same null, or every
+// "this row must not exist" assertion passes against a query that never ran.
+describe('_waitFor() never-answered vs absent', function () {
+    const TX = 'a'.repeat(64)
+
+    // Pace polls at 10ms so a 50ms wait makes a handful of polls, not thousands.
+    beforeEach(function () {
+        db.sleep = () => new Promise(resolve => setTimeout(resolve, 10))
+    })
+
+    registerWaitNoAnswerSendTests(TX)
+    registerWaitNoAnswerScopeTests(TX)
 })
 
 describe('waitForDestroy() delegation to _waitFor', function () {

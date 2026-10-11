@@ -23,7 +23,7 @@ function run (input) {
     return spawnSync(process.execPath, [checkerPath, input], { encoding: 'utf8' })
 }
 
-describe('check-mirror-pendings', function () {
+function registerSkipReasonCases () {
     it('reports and accepts an it.skip with a stated reason', function () {
         const root = fixture({
             'at1-example.test.js': "describe('AT1', () => { it.skip('covers the slow edge (needs 257 rounds)', () => {}) })",
@@ -57,7 +57,9 @@ describe('check-mirror-pendings', function () {
         assert.strictEqual(parsed.pending[0].line, 3)
         assert.match(parsed.pending[0].title, /before hook/)
     })
+}
 
+function registerCrossReferenceAndInputCases () {
     it('resolves a named leg whose active case title covers the deferred claim', function () {
         const root = fixture({
             'at2.test.js': "describe('AT2', () => { it.skip('holds delivery past the forward margin (DRIVEN in at2b: \"holds the barrier\")', () => {}) })",
@@ -100,7 +102,9 @@ describe('check-mirror-pendings', function () {
         assert.match(result.stderr, /input path does not exist/)
         assert.match(result.stderr, /read zero files from input/)
     })
+}
 
+function registerCensusLineCases () {
     it('refuses a file with no pending tests after reporting one file read', function () {
         const root = fixture({ 'clean.test.js': "describe('clean', () => { it('runs', () => {}) })" })
         const result = run(path.join(root, 'clean.test.js'))
@@ -148,6 +152,12 @@ describe('check-mirror-pendings', function () {
         ].join('\n')
         assert.deepStrictEqual(checker.parseSource(source, 'at0.test.js').pending, [])
     })
+}
+
+describe('check-mirror-pendings', function () {
+    registerSkipReasonCases()
+    registerCrossReferenceAndInputCases()
+    registerCensusLineCases()
 })
 
 const LEG_SUITE = "describe('delivery past the forward margin', () => { it('holds the barrier', () => {}) })"
