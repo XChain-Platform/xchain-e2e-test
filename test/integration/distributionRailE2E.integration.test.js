@@ -92,21 +92,15 @@ function lockLeg(identities){
     return HUB.signRecord(row, identities);
 }
 
-describe('Distribution rail drill (base AT7): mint, lock, mirror-credit, airdrop', function(){
-    this.timeout(120_000);
-
-    let ids, validators;
-    before(function(){
-        ids = HUB.makeIdentities(3);
-        validators = HUB.capabilitySet(ids);
-    });
-
+// Step 1: the XBRIDGE v0 lock leg, applied by the real settle pass, credits the operator.
+// fixture.ids and fixture.validators are filled by the top-level before() hook.
+function registerLockLandsOnDoge(fixture){
     describe('step 1 (venue-free, reuses the proven settle pass): the lock lands on DOGE', function(){
 
         it('credits exactly 30 XCHAIN to the operator-held DOGE address, identity not count', async function(){
-            const row = lockLeg(ids);
+            const row = lockLeg(fixture.ids);
             const { ctx, state } = SETTLE.makeSettleContext({
-                coin: 'DOGE', validators: validators, tokens: XCHAIN_ROW,
+                coin: 'DOGE', validators: fixture.validators, tokens: XCHAIN_ROW,
                 blockIndex: BLOCK, blockTime: BLOCK_TIME,
                 proof: SETTLE.buildEscrowProof({ destChain: 'DOGE', tick: 'XCHAIN',
                                                  balance: AMOUNT_LOCKED, height: CP_HEIGHT })
@@ -122,9 +116,9 @@ describe('Distribution rail drill (base AT7): mint, lock, mirror-credit, airdrop
         });
 
         it('FALSIFICATION: a forged escrow proof credits nothing, even at this drill\'s own amount', async function(){
-            const row = lockLeg(ids);
+            const row = lockLeg(fixture.ids);
             const { ctx, state } = SETTLE.makeSettleContext({
-                coin: 'DOGE', validators: validators, tokens: XCHAIN_ROW,
+                coin: 'DOGE', validators: fixture.validators, tokens: XCHAIN_ROW,
                 blockIndex: BLOCK, blockTime: BLOCK_TIME,
                 proof: SETTLE.buildEscrowProof({ destChain: 'DOGE', tick: 'XCHAIN',
                                                  balance: AMOUNT_LOCKED, height: CP_HEIGHT,
@@ -137,7 +131,10 @@ describe('Distribution rail drill (base AT7): mint, lock, mirror-credit, airdrop
             assert.deepStrictEqual(state.credits, [], 'a forged proof still credited the operator address');
         });
     });
+}
 
+// Step 2: the real Airdrop class redistributes the credited balance on DOGE.
+function registerAirdropRedistributes(){
     describe('step 2 (venue-free, new code this row adds): the AIRDROP redistributes on DOGE', function(){
 
         it('lands exactly 10 XCHAIN on each of the three recipients, debiting the operator for all 30', async function(){
@@ -179,7 +176,10 @@ describe('Distribution rail drill (base AT7): mint, lock, mirror-credit, airdrop
             assert.deepStrictEqual(res.state.credits, [], 'a refused airdrop still credited recipients');
         });
     });
+}
 
+// Step 3: the real Issue class refuses a broadcast ISSUE XCHAIN off BTC, before and after.
+function registerIssueRefusedOnDoge(){
     describe('step 3 (venue-free): a broadcast ISSUE XCHAIN on DOGE is refused throughout', function(){
 
         it('refuses BEFORE the airdrop, off BTC, from the GAS address, on regtest', async function(){
@@ -210,7 +210,10 @@ describe('Distribution rail drill (base AT7): mint, lock, mirror-credit, airdrop
                 'the same broadcast on BTC did not validate: ' + res.data.STATUS);
         });
     });
+}
 
+// Step 4: getbridgeinvariant over the ledger state this drill produced.
+function registerInvariantReadsEqual(){
     describe('step 4 (venue-free): getbridgeinvariant reads equal, in-flight 0', function(){
 
         it('DOGE supply 30, BTC escrow 30 for DOGE, delta 0, in_flight 0, after the whole drill', async function(){
@@ -246,4 +249,19 @@ describe('Distribution rail drill (base AT7): mint, lock, mirror-credit, airdrop
                 'a real escrow shortfall did not read as a deficit: ' + JSON.stringify(inv.XCHAIN.DOGE));
         });
     });
+}
+
+describe('Distribution rail drill (base AT7): mint, lock, mirror-credit, airdrop', function(){
+    this.timeout(120_000);
+
+    const fixture = { ids: null, validators: null };
+    before(function(){
+        fixture.ids = HUB.makeIdentities(3);
+        fixture.validators = HUB.capabilitySet(fixture.ids);
+    });
+
+    registerLockLandsOnDoge(fixture);
+    registerAirdropRedistributes();
+    registerIssueRefusedOnDoge();
+    registerInvariantReadsEqual();
 });
