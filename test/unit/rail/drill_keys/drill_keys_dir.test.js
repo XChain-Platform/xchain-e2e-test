@@ -20,7 +20,8 @@ describe('drill_keys_dir main checkout', function () {
     let lane
 
     before(function () {
-        scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'drill-keys-'))
+        // Git records worktree paths with symlinks resolved (macOS /var is /private/var), so compare real paths.
+        scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'drill-keys-')))
         main = path.join(scratch, 'xchain-e2e-test')
         lane = path.join(scratch, 'tmp', 'lanes', 'lane-1', 'xchain-e2e-test')
         fs.mkdirSync(main)
