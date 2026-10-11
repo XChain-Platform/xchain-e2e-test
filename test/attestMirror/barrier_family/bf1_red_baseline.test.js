@@ -225,7 +225,8 @@ function assertRedBaseline (ctx) {
 // label, not the future-stamp wait this leg enumerates.
 
 // The walker names only members this leg can hold: the eight the ladder graces and the withheld
-// snapshot. list_share has no grace and passes on its empty mirror, so it is never reached.
+// snapshot. list_share has no grace and runs only once mirror admission is armed, which this
+// leg keeps inert, so it is never reached.
 function reachableReasons () {
     const reachable = new Set(rows.ladderReasons().concat(['snapshot_sync_barrier']))
     return fixture.FAMILY_REASONS_LOOP_ORDER.filter((r) => reachable.has(r))
