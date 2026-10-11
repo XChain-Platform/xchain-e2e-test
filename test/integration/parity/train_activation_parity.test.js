@@ -102,8 +102,9 @@ function probeHeights(map) {
     return [...out].sort((a, b) => a - b);
 }
 
-describe('TRAIN_ACTIVATION cross-service parity (SHARED registry part 5)', function () {
-
+// Each registrar adds one case to the enclosing describe; the describe below calls them
+// in the order the cases have always run, so titles and order are unchanged.
+function registerValueEqualityCase() {
     it('the TRAIN_ACTIVATION row is value-equal across all five local registries and the canonical SoT', function () {
         const canonical = protocolConstants.TRAIN_ACTIVATION;
         assert.ok(canonical, 'documentation/protocol/constants.js must export TRAIN_ACTIVATION');
@@ -112,7 +113,9 @@ describe('TRAIN_ACTIVATION cross-service parity (SHARED registry part 5)', funct
                 name + ' TRAIN_ACTIVATION drifted from the canonical protocol constant');
         }
     });
+}
 
+function registerShapeCase() {
     it('every registry names the same rule-set versions, and the same networks within each version', function () {
         // The value case above holds the heights; this pins the SHAPE. A rule set present
         // in one copy and absent in another resolves to a DIFFERENT active rule set on the
@@ -130,7 +133,9 @@ describe('TRAIN_ACTIVATION cross-service parity (SHARED registry part 5)', funct
             }
         }
     });
+}
 
+function registerVerdictCase() {
     it('both train gates return the same halt verdict for every copy of the map', function () {
         // This is the behaviour the row exists to drive. evaluateTrainActivation halts a
         // node whose map does not CONTAIN the rule set the signed release manifest requires
@@ -164,7 +169,9 @@ describe('TRAIN_ACTIVATION cross-service parity (SHARED registry part 5)', funct
             }
         }
     });
+}
 
+function registerByteTwinCase() {
     it('shared_rows_5.js is byte-identical across the indexer canonical and all five copies', function () {
         // The cases above grade ONE row. This grades the whole part, which is what
         // frozen-twins.json actually registers: every other row in part 5
@@ -183,4 +190,11 @@ describe('TRAIN_ACTIVATION cross-service parity (SHARED registry part 5)', funct
                 rel + ' drifted from the canonical ' + canonRel);
         }
     });
+}
+
+describe('TRAIN_ACTIVATION cross-service parity (SHARED registry part 5)', function () {
+    registerValueEqualityCase();
+    registerShapeCase();
+    registerVerdictCase();
+    registerByteTwinCase();
 });

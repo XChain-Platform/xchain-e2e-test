@@ -97,7 +97,7 @@ function logLines (f) {
     return fs.readFileSync(f.log, 'utf8').trim().split('\n')
 }
 
-describe('attest-mirror concrete stack driver', function () {
+function registerPhaseTests () {
     it('passes the prepared real-checkout root only to BF6', function () {
         const f = fixture()
         try {
@@ -114,7 +114,9 @@ describe('attest-mirror concrete stack driver', function () {
             fs.rmSync(f.root, { recursive: true, force: true })
         }
     })
+}
 
+function registerVolumeSweepTests () {
     it('sweeps a stale project volume before booting the replacement stack', function () {
         const f = fixture()
         try {
@@ -146,7 +148,9 @@ describe('attest-mirror concrete stack driver', function () {
             fs.rmSync(f.root, { recursive: true, force: true })
         }
     })
+}
 
+function registerLookupScopeTests () {
     it('scopes every stale-resource lookup to the selected project label', function () {
         const f = fixture()
         try {
@@ -163,7 +167,9 @@ describe('attest-mirror concrete stack driver', function () {
             fs.rmSync(f.root, { recursive: true, force: true })
         }
     })
+}
 
+function registerSeedAndPathTests () {
     it('seed phase hands run-leg.sh a reseed spec that exists on disk', function () {
         const f = fixture()
         try {
@@ -189,4 +195,11 @@ describe('attest-mirror concrete stack driver', function () {
         const missing = named.filter((rel) => !fs.existsSync(path.join(ROOT, rel)))
         assert.deepStrictEqual(missing, [], 'driver names a test path that does not exist')
     })
+}
+
+describe('attest-mirror concrete stack driver', function () {
+    registerPhaseTests()
+    registerVolumeSweepTests()
+    registerLookupScopeTests()
+    registerSeedAndPathTests()
 })

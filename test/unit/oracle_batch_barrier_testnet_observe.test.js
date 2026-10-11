@@ -199,67 +199,417 @@ async function liveObservations(stalls, opts) {
 }
 
 // ---------------------------------------------------------------------------
+// Registrars: each adds one group of cases to the describe block that calls it
+// ---------------------------------------------------------------------------
+
+// classifyBlockFreshness over run 3's blocks and over a live one.
+function registerFreshnessVerdictTests() {
+    it('refuses every block run 3 graded, and names them a backlog', function () {
+        for (const b of RUN3) {
+            const f = drill.classifyBlockFreshness({
+                blockTime: RUN3_BASE_BLOCK_TIME,
+                firstSeenAt: RUN3_BASE_BLOCK_TIME + b.ageAtFirstSeenS,
+                maxAgeS: DEFAULTS.maxBlockAgeS
+            });
+            assert.strictEqual(f.usable, false,
+                'height ' + b.height + ' was ' + b.ageAtFirstSeenS + 's old when first seen');
+            assert.strictEqual(f.reason, 'stale-backlog');
+            assert.strictEqual(f.ageAtFirstSeenS, b.ageAtFirstSeenS);
+        }
+    });
+
+    it('accepts a block first seen a poll after it was mined', function () {
+        const f = drill.classifyBlockFreshness({
+            blockTime: 1_757_500_000, firstSeenAt: 1_757_500_018, maxAgeS: DEFAULTS.maxBlockAgeS
+        });
+        assert.deepStrictEqual(
+            { usable: f.usable, reason: f.reason, ageAtFirstSeenS: f.ageAtFirstSeenS },
+            { usable: true, reason: 'live', ageAtFirstSeenS: 18 });
+    });
+}
+
+// classifyBlockFreshness at its boundary, ahead of the clock, and blind.
+function registerFreshnessEdgeTests() {
+    it('puts the boundary exactly at maxAgeS, inclusive', function () {
+        const at = drill.classifyBlockFreshness({ blockTime: 1000, firstSeenAt: 1000 + 120, maxAgeS: 120 });
+        const past = drill.classifyBlockFreshness({ blockTime: 1000, firstSeenAt: 1000 + 121, maxAgeS: 120 });
+        assert.strictEqual(at.usable, true, 'a block exactly at the limit is still live');
+        assert.strictEqual(past.usable, false, 'one second past the limit is a backlog');
+        assert.strictEqual(past.reason, 'stale-backlog');
+    });
+
+    it('separates a chain clock running ahead from a backlog', function () {
+        const ahead = drill.classifyBlockFreshness({ blockTime: 10_000, firstSeenAt: 9_000, maxAgeS: 120 });
+        assert.strictEqual(ahead.usable, false);
+        assert.strictEqual(ahead.reason, 'block-time-ahead-of-clock');
+        assert.strictEqual(ahead.ageAtFirstSeenS, -1000);
+        // A header a few seconds ahead of this host is normal and must not
+        // throw a block away.
+        const slight = drill.classifyBlockFreshness({ blockTime: 10_000, firstSeenAt: 9_995, maxAgeS: 120 });
+        assert.strictEqual(slight.usable, true);
+        assert.strictEqual(slight.reason, 'live');
+    });
+
+    it('grades nothing when a reading is missing', function () {
+        for (const input of [
+            { blockTime: null, firstSeenAt: 1000, maxAgeS: 120 },
+            { blockTime: 1000, firstSeenAt: undefined, maxAgeS: 120 },
+            { blockTime: 1000, firstSeenAt: 1000, maxAgeS: null },
+            {}
+        ]) {
+            const f = drill.classifyBlockFreshness(input);
+            assert.strictEqual(f.usable, false, JSON.stringify(input));
+            assert.strictEqual(f.reason, 'unknown-arrival');
+            assert.strictEqual(f.ageAtFirstSeenS, null);
+        }
+    });
+}
+
+// evaluateCatchUp: a node still replaying, one at the barrier working point,
+// and the boundary between them.
+function registerCatchUpWorkingPointTests(settings) {
+    it('holds a node that is still replaying, however it is measured', function () {
+        const v = drill.evaluateCatchUp(Object.assign({
+            nodeHeight: 67_876_000, decoderTip: 67_879_827,
+            nodeBlockTime: 1_757_270_000, nowSec: 1_757_390_000     // the block is 33 h old
+        }, settings));
+        assert.strictEqual(v.caughtUp, false);
+        assert.strictEqual(v.reason, 'replaying-backlog');
+        assert.strictEqual(v.blocksBehind, 3827);
+        assert.strictEqual(v.frontierAgeS, 120_000);
+    });
+
+    it('releases a node held at the barrier working point, which is the only place this node can be', function () {
+        // The measured shape at the end of run 3's replay: about 150 blocks
+        // behind the tip, and the block it is working on about 4,450 s old,
+        // which is the steady state the watermark escape imposes. It can never
+        // be nearer the tip than this, so waiting for the tip would never end.
+        const v = drill.evaluateCatchUp(Object.assign({
+            nodeHeight: 67_879_677, decoderTip: 67_879_827,
+            nodeBlockTime: 1_757_385_547, nowSec: 1_757_390_000
+        }, settings));
+        assert.strictEqual(v.caughtUp, true);
+        assert.strictEqual(v.reason, 'barrier-working-point');
+        assert.strictEqual(v.blocksBehind, 150);
+        assert.strictEqual(v.frontierAgeS, 4453);
+    });
+
+    it('puts the working-point boundary exactly at grace + tolerance', function () {
+        const base = { nodeHeight: 100, decoderTip: 1000, nowSec: 1_000_000 };
+        const limit = GRACE_S + DEFAULTS.catchUpToleranceS;
+        const at = drill.evaluateCatchUp(Object.assign({}, base, settings,
+            { nodeBlockTime: 1_000_000 - limit }));
+        const past = drill.evaluateCatchUp(Object.assign({}, base, settings,
+            { nodeBlockTime: 1_000_000 - limit - 1 }));
+        assert.strictEqual(at.caughtUp, true, 'exactly at the working point counts as caught up');
+        assert.strictEqual(past.caughtUp, false, 'one second further back is still backlog');
+        assert.strictEqual(past.reason, 'replaying-backlog');
+    });
+}
+
+// evaluateCatchUp: a node at the tip, and a reading it could not take.
+function registerCatchUpEdgeTests(settings) {
+    it('releases a node that reached the tip, whatever its block times say', function () {
+        // Nothing guarantees a chain-only node gets here (D61 says it will not),
+        // but a node that DID must not be made to wait on the second condition.
+        const v = drill.evaluateCatchUp(Object.assign({
+            nodeHeight: 67_879_826, decoderTip: 67_879_827,
+            nodeBlockTime: 1_000_000, nowSec: 9_000_000
+        }, settings));
+        assert.strictEqual(v.caughtUp, true);
+        assert.strictEqual(v.reason, 'at-tip');
+        assert.strictEqual(v.blocksBehind, 1);
+    });
+
+    it('concludes nothing from a reading it could not take', function () {
+        const noTip = drill.evaluateCatchUp(Object.assign({
+            nodeHeight: 67_879_826, decoderTip: null, nodeBlockTime: 1_757_389_000, nowSec: 1_757_390_000
+        }, settings));
+        assert.strictEqual(noTip.caughtUp, false);
+        assert.strictEqual(noTip.reason, 'unknown');
+
+        // A tip it can see and a block time it cannot: the tip test still runs,
+        // and a node far behind stays held rather than defaulting to satisfied.
+        const noBlockTime = drill.evaluateCatchUp(Object.assign({
+            nodeHeight: 67_876_000, decoderTip: 67_879_827, nodeBlockTime: null, nowSec: 1_757_390_000
+        }, settings));
+        assert.strictEqual(noBlockTime.caughtUp, false);
+        assert.strictEqual(noBlockTime.reason, 'replaying-backlog');
+        assert.strictEqual(noBlockTime.frontierAgeS, null);
+    });
+}
+
+// The observation record for run 3's own blocks.
+function registerObservationRecordRun3Tests() {
+    it('marks run 3\'s blocks unusable, on the record the drill actually writes', async function () {
+        const obs = await run3Observations();
+        assert.strictEqual(obs.length, 6);
+        for (let i = 0; i < obs.length; i++) {
+            assert.strictEqual(obs[i].usable, false, 'height ' + obs[i].height);
+            assert.strictEqual(obs[i].unusableReason, 'stale-backlog');
+            assert.strictEqual(obs[i].ageAtFirstSeenS, RUN3[i].ageAtFirstSeenS);
+            // The record run 3 wrote, reproduced: no wait, no deferral, and a
+            // "stall" that is only the block's age.
+            assert.strictEqual(obs[i].waitS, 0);
+            // Run 3 recorded `escape: "none"` here. Since row 56 there is no
+            // such value: nothing sampled the barrier for these blocks, so the
+            // record says UNKNOWN and carries the reason. Reading an
+            // unattributed block as an instant pass is what left TA5's
+            // "never before the barrier permits" half unmeasured.
+            assert.strictEqual(obs[i].escape, 'unknown');
+            assert.ok(/never sampled/.test(obs[i].escapeEvidence.reason),
+                obs[i].escapeEvidence.reason);
+            assert.strictEqual(obs[i].escapeEvidence.beforePermission, 'unknown');
+            // The superseded log-scraping reading is kept beside it, so run
+            // 3's own numbers stay reproducible.
+            assert.strictEqual(obs[i].escapeEvidence.deferralLineReading, 'none');
+            assert.strictEqual(obs[i].escapeEvidence.deferralCount, 0);
+            assert.strictEqual(obs[i].stallS, RUN3[i].ageAtFirstSeenS);
+        }
+    });
+}
+
+// The observation record for a live block the barrier held.
+function registerObservationRecordLiveTests() {
+    it('marks a live block usable and keeps every measurement it already carried', async function () {
+        const [o] = await liveObservations([GRACE_S + 30]);
+        assert.strictEqual(o.usable, true);
+        assert.strictEqual(o.unusableReason, null);
+        assert.strictEqual(o.ageAtFirstSeenS, 18);
+        assert.strictEqual(o.maxBlockAgeS, DEFAULTS.maxBlockAgeS);
+        // Nothing the record carried before the gate was added may have been
+        // dropped or weakened by it.
+        assert.strictEqual(o.stallS, GRACE_S + 30);
+        assert.strictEqual(o.waitS, GRACE_S + 12);
+        assert.strictEqual(o.escape, 'watermark');
+        // Attributed from a sampled crossing now, not inferred from the
+        // absence of a content round: the record names when the barrier was
+        // first seen open and when it was last seen closed (row 56).
+        assert.strictEqual(o.escapeEvidence.beforePermission, 'no');
+        assert.ok(o.escapeEvidence.permittedAt, 'the crossing must be named');
+        assert.ok(o.escapeEvidence.lastClosedAt, 'the last closed reading must be named');
+        assert.strictEqual(o.escapeEvidence.corroborated, true);
+        assert.strictEqual(o.escapeEvidence.graceS, GRACE_S);
+        assert.strictEqual(o.escapeEvidence.deferralCount, 1);
+        assert.ok(o.escapeEvidence.firstDeferral && o.escapeEvidence.firstDeferral.height === o.height);
+        assert.strictEqual(o.mirrorNewestRound, null);
+        assert.strictEqual(o.hubNewestRound, null);
+        assert.strictEqual(o.originNewestRound, null);
+        assert.ok(o.holes && o.holes.missingFromHub && o.holes.missingFromMirror);
+        assert.deepStrictEqual(o.actions, []);
+        assert.strictEqual(o.verdictAgreements, 0);
+        assert.deepStrictEqual(o.verdictDisagreements, []);
+    });
+}
+
+// The observation record's escape attribution: early and unsampled.
+function registerObservationRecordEscapeTests() {
+    it('still contradicts a watermark escape that fired before the grace', async function () {
+        // A hub whose stream watermark is already past blockTime + grace while
+        // barely any wall time has passed: the escape is genuinely OBSERVED
+        // open, so it is reported, and the stall that is too short to justify
+        // it is reported beside it rather than asserted away.
+        const [o] = await liveObservations([GRACE_S - 1], {
+            barrierSamples: (blockTime, firstSeenAt) => [{
+                at: firstSeenAt, source: 'status', bootstrapped: true,
+                priceSyncMaxTimestamp: blockTime - 5000,
+                streamWatermark: blockTime + GRACE_S
+            }]
+        });
+        assert.strictEqual(o.usable, true, 'the block was live; the barrier is what is in question');
+        assert.strictEqual(o.escape, 'watermark');
+        assert.strictEqual(o.escapeEvidence.corroborated, false);
+    });
+
+    it('records an unattributed block as unknown WITH its reason, never as a pass', async function () {
+        // The same live block, with the barrier never sampled: the honest
+        // answer is that nobody knows which escape opened it.
+        const [o] = await liveObservations([GRACE_S + 30], { barrierSamples: () => [] });
+        assert.strictEqual(o.usable, true);
+        assert.strictEqual(o.escape, 'unknown');
+        assert.ok(o.escapeEvidence.reason && o.escapeEvidence.reason.length > 0);
+        assert.strictEqual(o.escapeEvidence.permittedAt, null);
+        // And the reading it replaces is still there to compare against: the
+        // old code would have called this one 'watermark' on no evidence.
+        assert.strictEqual(o.escapeEvidence.deferralLineReading, 'watermark');
+    });
+}
+
+// summarize over run 3 and over a run whose blocks arrived live.
+function registerSummarizeGradingTests() {
+    it('says the barrier was NOT measured for run 3, and says why', async function () {
+        const s = drill.summarize({ observations: await run3Observations(), originLagSeries: [] });
+        assert.strictEqual(s.barrierMeasured, false);
+        assert.strictEqual(s.blocksGraded, 0);
+        assert.strictEqual(s.blocksUnusable, 6);
+        assert.deepStrictEqual(s.unusableReasons, { 'stale-backlog': 6 });
+        assert.strictEqual(s.maxAgeAtFirstSeenS, 4453);
+        assert.strictEqual(s.gradedStallsWithinGracePlusConfirm, 0);
+        assert.strictEqual(s.gradedMaxStallS, null);
+        assert.deepStrictEqual(s.gradedEscapes, {});
+        // The clauses the run already carried are untouched: run 3's own six
+        // observations, its own escape histogram, its own 0-of-6 bound count.
+        assert.strictEqual(s.blocksObserved, 6);
+        // 'unknown' where run 3 wrote 'none' (row 56): nothing sampled the
+        // barrier, so nothing is attributed, and the histogram says so.
+        assert.deepStrictEqual(s.escapes, { unknown: 6 });
+        assert.strictEqual(s.stallsWithinGracePlusConfirm, 0);
+        assert.strictEqual(s.maxStallS, 4453);
+        assert.strictEqual(s.minStallS, 4303);
+        assert.strictEqual(s.verdictsCompared, 0);
+        assert.strictEqual(s.holesTotal, 0);
+    });
+
+    it('scores a run whose blocks did arrive live', async function () {
+        const obs = await liveObservations([GRACE_S + 5, GRACE_S + 40, GRACE_S + 12]);
+        const s = drill.summarize({ observations: obs, originLagSeries: [] });
+        assert.strictEqual(s.barrierMeasured, true);
+        assert.strictEqual(s.blocksGraded, 3);
+        assert.strictEqual(s.blocksUnusable, 0);
+        assert.strictEqual(s.gradedStallsWithinGracePlusConfirm, 3);
+        assert.strictEqual(s.gradedMinStallS, GRACE_S + 5);
+        assert.strictEqual(s.gradedMaxStallS, GRACE_S + 40);
+        assert.deepStrictEqual(s.gradedEscapes, { watermark: 3 });
+        assert.strictEqual(s.maxAgeAtFirstSeenS, 18);
+        // Row 56's own numbers: every graded block was attributed, none was
+        // seen processed before the barrier permitted it.
+        assert.strictEqual(s.gradedEscapesAttributed, 3);
+        assert.strictEqual(s.gradedEscapesUnattributed, 0);
+        assert.strictEqual(s.escapeAttributionMeasured, true);
+        assert.strictEqual(s.gradedProcessedBeforePermission, 0);
+        assert.strictEqual(s.gradedEscapesUncorroborated, 0);
+        assert.strictEqual(s.gradedBarrierApplied, 3);
+        assert.strictEqual(s.gradedBarrierNotApplicable, 0);
+    });
+}
+
+// summarize over transaction-free, unattributed and early-released blocks.
+function registerSummarizeEscapeTests() {
+    it('does not score a transaction-free block as an escape either way', async function () {
+        // The barrier is never entered for a block with no transaction, so it
+        // can carry no escape and cannot break the TA5 bound. On this chain
+        // those are nearly all the blocks, so counting them either way would
+        // bury the handful the barrier really held.
+        const obs = await liveObservations([GRACE_S + 5, GRACE_S + 40],
+            { blockTransactionCount: 0 });
+        const s = drill.summarize({ observations: obs, originLagSeries: [] });
+        assert.strictEqual(s.blocksGraded, 2);
+        assert.deepStrictEqual(s.gradedEscapes, { 'not-applicable': 2 });
+        assert.strictEqual(s.gradedBarrierApplied, 0);
+        assert.strictEqual(s.gradedBarrierNotApplicable, 2);
+        assert.strictEqual(s.gradedEscapesAttributed, 0);
+        assert.strictEqual(s.gradedEscapesUnattributed, 0);
+        assert.strictEqual(s.gradedProcessedBeforePermission, 0);
+        assert.strictEqual(s.escapeAttributionMeasured, false,
+            'a run that only ever saw empty blocks has measured no escape');
+    });
+
+    it('refuses to call the escape half measured when nothing was attributed', async function () {
+        // Three live blocks, graded on every other axis, with the barrier
+        // never sampled. The stall numbers still read fine; the escape half
+        // must NOT, which is the difference run 5 could not express.
+        const obs = await liveObservations([GRACE_S + 5, GRACE_S + 40, GRACE_S + 12],
+            { barrierSamples: () => [] });
+        const s = drill.summarize({ observations: obs, originLagSeries: [] });
+        assert.strictEqual(s.barrierMeasured, true, 'the blocks did arrive live');
+        assert.strictEqual(s.gradedStallsWithinGracePlusConfirm, 3);
+        assert.strictEqual(s.escapeAttributionMeasured, false,
+            'no escape was attributed, so the escape half was not measured');
+        assert.strictEqual(s.gradedEscapesAttributed, 0);
+        assert.strictEqual(s.gradedEscapesUnattributed, 3);
+        assert.deepStrictEqual(s.gradedEscapes, { unknown: 3 });
+    });
+
+    it('keeps the bound a REAL check on the blocks it does grade', async function () {
+        // One graded block leaves the barrier before the grace has passed. That
+        // is the failure the bound exists to catch, and the gate must not hide
+        // it by counting only the blocks that behaved.
+        const obs = await liveObservations([GRACE_S + 20, GRACE_S - 600, GRACE_S + 9]);
+        const s = drill.summarize({ observations: obs, originLagSeries: [] });
+        assert.strictEqual(s.blocksGraded, 3);
+        assert.strictEqual(s.gradedStallsWithinGracePlusConfirm, 2,
+            'the early release must still be visible as a shortfall against the graded count');
+        assert.strictEqual(s.gradedMinStallS, GRACE_S - 600);
+    });
+}
+
+// summarize over a stale block, and the catch-up evidence it carries.
+function registerSummarizeStaleAndCatchUpTests() {
+    it('never counts a stale block towards the bound, even when its age exceeds the grace', async function () {
+        // The trap the gate closes: a block old enough that its AGE alone
+        // clears the grace would have scored as a satisfied barrier wait.
+        const stale = await observe({
+            height: 67_879_900,
+            blockTime: 1_757_390_000,
+            firstSeenAt: 1_757_390_000 + 9000,
+            processedAt: 1_757_390_000 + 9000
+        });
+        const s = drill.summarize({ observations: [stale], originLagSeries: [] });
+        assert.strictEqual(stale.stallS, 9000, 'the raw stall does clear the grace');
+        assert.strictEqual(s.stallsWithinGracePlusConfirm, 1, 'and the ungraded count still sees it');
+        assert.strictEqual(s.barrierMeasured, false, 'but nothing was graded');
+        assert.strictEqual(s.gradedStallsWithinGracePlusConfirm, 0,
+            'so it must not be counted as a barrier wait');
+        assert.deepStrictEqual(s.unusableReasons, { 'stale-backlog': 1 });
+    });
+
+    it('carries the catch-up evidence through to the summary', function () {
+        const s = drill.summarize({
+            observations: [],
+            originLagSeries: [],
+            catchUp: { reason: 'barrier-working-point', durationS: 640 },
+            observe: { backlogSkipped: 150 }
+        });
+        assert.strictEqual(s.caughtUpBy, 'barrier-working-point');
+        assert.strictEqual(s.catchUpS, 640);
+        assert.strictEqual(s.backlogSkipped, 150);
+        assert.strictEqual(s.barrierMeasured, false);
+    });
+}
+
+// usableObservations: only what the gate passed is graded.
+function registerUsableObservationsTests() {
+    it('counts only the records the gate passed', async function () {
+        const mixed = (await run3Observations()).concat(await liveObservations([GRACE_S + 3, GRACE_S + 7]));
+        const graded = drill.usableObservations(mixed);
+        assert.strictEqual(mixed.length, 8);
+        assert.strictEqual(graded.length, 2);
+        assert.ok(graded.every((o) => o.usable === true));
+    });
+
+    it('treats anything that is not explicitly usable as ungraded', function () {
+        // The observe loop's stopping condition runs on this, so a record
+        // missing the field must hold the run open rather than end it.
+        assert.strictEqual(drill.usableObservations([{}, { usable: 'yes' }, null, { usable: 1 }]).length, 0);
+        assert.strictEqual(drill.usableObservations(null).length, 0);
+    });
+}
+
+// The gate settings the launcher can move.
+function registerGateSettingsTests() {
+    it('defaults to values a run can reason about, and takes an override', function () {
+        assert.strictEqual(DEFAULTS.maxBlockAgeS, 120);
+        assert.strictEqual(DEFAULTS.catchUpSlackBlocks, 2);
+        assert.strictEqual(DEFAULTS.catchUpToleranceS, 600);
+        const moved = drill.readSettings({
+            AT5_MAX_BLOCK_AGE_S: '45', AT5_CATCHUP_SLACK_BLOCKS: '4', AT5_CATCHUP_TOLERANCE_S: '900'
+        });
+        assert.strictEqual(moved.maxBlockAgeS, 45);
+        assert.strictEqual(moved.catchUpSlackBlocks, 4);
+        assert.strictEqual(moved.catchUpToleranceS, 900);
+        // A nonsense value takes the default rather than disabling the gate.
+        const junk = drill.readSettings({ AT5_MAX_BLOCK_AGE_S: 'soon' });
+        assert.strictEqual(junk.maxBlockAgeS, 120);
+    });
+}
+
+// ---------------------------------------------------------------------------
 
 describe('AT5 barrier drill: the observe-phase gate (row 46)', function () {
 
     describe('classifyBlockFreshness: was this block live when the drill saw it?', function () {
-
-        it('refuses every block run 3 graded, and names them a backlog', function () {
-            for (const b of RUN3) {
-                const f = drill.classifyBlockFreshness({
-                    blockTime: RUN3_BASE_BLOCK_TIME,
-                    firstSeenAt: RUN3_BASE_BLOCK_TIME + b.ageAtFirstSeenS,
-                    maxAgeS: DEFAULTS.maxBlockAgeS
-                });
-                assert.strictEqual(f.usable, false,
-                    'height ' + b.height + ' was ' + b.ageAtFirstSeenS + 's old when first seen');
-                assert.strictEqual(f.reason, 'stale-backlog');
-                assert.strictEqual(f.ageAtFirstSeenS, b.ageAtFirstSeenS);
-            }
-        });
-
-        it('accepts a block first seen a poll after it was mined', function () {
-            const f = drill.classifyBlockFreshness({
-                blockTime: 1_757_500_000, firstSeenAt: 1_757_500_018, maxAgeS: DEFAULTS.maxBlockAgeS
-            });
-            assert.deepStrictEqual(
-                { usable: f.usable, reason: f.reason, ageAtFirstSeenS: f.ageAtFirstSeenS },
-                { usable: true, reason: 'live', ageAtFirstSeenS: 18 });
-        });
-
-        it('puts the boundary exactly at maxAgeS, inclusive', function () {
-            const at = drill.classifyBlockFreshness({ blockTime: 1000, firstSeenAt: 1000 + 120, maxAgeS: 120 });
-            const past = drill.classifyBlockFreshness({ blockTime: 1000, firstSeenAt: 1000 + 121, maxAgeS: 120 });
-            assert.strictEqual(at.usable, true, 'a block exactly at the limit is still live');
-            assert.strictEqual(past.usable, false, 'one second past the limit is a backlog');
-            assert.strictEqual(past.reason, 'stale-backlog');
-        });
-
-        it('separates a chain clock running ahead from a backlog', function () {
-            const ahead = drill.classifyBlockFreshness({ blockTime: 10_000, firstSeenAt: 9_000, maxAgeS: 120 });
-            assert.strictEqual(ahead.usable, false);
-            assert.strictEqual(ahead.reason, 'block-time-ahead-of-clock');
-            assert.strictEqual(ahead.ageAtFirstSeenS, -1000);
-            // A header a few seconds ahead of this host is normal and must not
-            // throw a block away.
-            const slight = drill.classifyBlockFreshness({ blockTime: 10_000, firstSeenAt: 9_995, maxAgeS: 120 });
-            assert.strictEqual(slight.usable, true);
-            assert.strictEqual(slight.reason, 'live');
-        });
-
-        it('grades nothing when a reading is missing', function () {
-            for (const input of [
-                { blockTime: null, firstSeenAt: 1000, maxAgeS: 120 },
-                { blockTime: 1000, firstSeenAt: undefined, maxAgeS: 120 },
-                { blockTime: 1000, firstSeenAt: 1000, maxAgeS: null },
-                {}
-            ]) {
-                const f = drill.classifyBlockFreshness(input);
-                assert.strictEqual(f.usable, false, JSON.stringify(input));
-                assert.strictEqual(f.reason, 'unknown-arrival');
-                assert.strictEqual(f.ageAtFirstSeenS, null);
-            }
-        });
+        registerFreshnessVerdictTests();
+        registerFreshnessEdgeTests();
     });
 
     describe('evaluateCatchUp: has the node stopped burning backlog?', function () {
@@ -270,325 +620,25 @@ describe('AT5 barrier drill: the observe-phase gate (row 46)', function () {
             toleranceS: DEFAULTS.catchUpToleranceS
         };
 
-        it('holds a node that is still replaying, however it is measured', function () {
-            const v = drill.evaluateCatchUp(Object.assign({
-                nodeHeight: 67_876_000, decoderTip: 67_879_827,
-                nodeBlockTime: 1_757_270_000, nowSec: 1_757_390_000     // the block is 33 h old
-            }, settings));
-            assert.strictEqual(v.caughtUp, false);
-            assert.strictEqual(v.reason, 'replaying-backlog');
-            assert.strictEqual(v.blocksBehind, 3827);
-            assert.strictEqual(v.frontierAgeS, 120_000);
-        });
-
-        it('releases a node held at the barrier working point, which is the only place this node can be', function () {
-            // The measured shape at the end of run 3's replay: about 150 blocks
-            // behind the tip, and the block it is working on about 4,450 s old,
-            // which is the steady state the watermark escape imposes. It can never
-            // be nearer the tip than this, so waiting for the tip would never end.
-            const v = drill.evaluateCatchUp(Object.assign({
-                nodeHeight: 67_879_677, decoderTip: 67_879_827,
-                nodeBlockTime: 1_757_385_547, nowSec: 1_757_390_000
-            }, settings));
-            assert.strictEqual(v.caughtUp, true);
-            assert.strictEqual(v.reason, 'barrier-working-point');
-            assert.strictEqual(v.blocksBehind, 150);
-            assert.strictEqual(v.frontierAgeS, 4453);
-        });
-
-        it('puts the working-point boundary exactly at grace + tolerance', function () {
-            const base = { nodeHeight: 100, decoderTip: 1000, nowSec: 1_000_000 };
-            const limit = GRACE_S + DEFAULTS.catchUpToleranceS;
-            const at = drill.evaluateCatchUp(Object.assign({}, base, settings,
-                { nodeBlockTime: 1_000_000 - limit }));
-            const past = drill.evaluateCatchUp(Object.assign({}, base, settings,
-                { nodeBlockTime: 1_000_000 - limit - 1 }));
-            assert.strictEqual(at.caughtUp, true, 'exactly at the working point counts as caught up');
-            assert.strictEqual(past.caughtUp, false, 'one second further back is still backlog');
-            assert.strictEqual(past.reason, 'replaying-backlog');
-        });
-
-        it('releases a node that reached the tip, whatever its block times say', function () {
-            // Nothing guarantees a chain-only node gets here (D61 says it will not),
-            // but a node that DID must not be made to wait on the second condition.
-            const v = drill.evaluateCatchUp(Object.assign({
-                nodeHeight: 67_879_826, decoderTip: 67_879_827,
-                nodeBlockTime: 1_000_000, nowSec: 9_000_000
-            }, settings));
-            assert.strictEqual(v.caughtUp, true);
-            assert.strictEqual(v.reason, 'at-tip');
-            assert.strictEqual(v.blocksBehind, 1);
-        });
-
-        it('concludes nothing from a reading it could not take', function () {
-            const noTip = drill.evaluateCatchUp(Object.assign({
-                nodeHeight: 67_879_826, decoderTip: null, nodeBlockTime: 1_757_389_000, nowSec: 1_757_390_000
-            }, settings));
-            assert.strictEqual(noTip.caughtUp, false);
-            assert.strictEqual(noTip.reason, 'unknown');
-
-            // A tip it can see and a block time it cannot: the tip test still runs,
-            // and a node far behind stays held rather than defaulting to satisfied.
-            const noBlockTime = drill.evaluateCatchUp(Object.assign({
-                nodeHeight: 67_876_000, decoderTip: 67_879_827, nodeBlockTime: null, nowSec: 1_757_390_000
-            }, settings));
-            assert.strictEqual(noBlockTime.caughtUp, false);
-            assert.strictEqual(noBlockTime.reason, 'replaying-backlog');
-            assert.strictEqual(noBlockTime.frontierAgeS, null);
-        });
+        registerCatchUpWorkingPointTests(settings);
+        registerCatchUpEdgeTests(settings);
     });
 
     describe('the observation record carries the gate', function () {
-
-        it('marks run 3\'s blocks unusable, on the record the drill actually writes', async function () {
-            const obs = await run3Observations();
-            assert.strictEqual(obs.length, 6);
-            for (let i = 0; i < obs.length; i++) {
-                assert.strictEqual(obs[i].usable, false, 'height ' + obs[i].height);
-                assert.strictEqual(obs[i].unusableReason, 'stale-backlog');
-                assert.strictEqual(obs[i].ageAtFirstSeenS, RUN3[i].ageAtFirstSeenS);
-                // The record run 3 wrote, reproduced: no wait, no deferral, and a
-                // "stall" that is only the block's age.
-                assert.strictEqual(obs[i].waitS, 0);
-                // Run 3 recorded `escape: "none"` here. Since row 56 there is no
-                // such value: nothing sampled the barrier for these blocks, so the
-                // record says UNKNOWN and carries the reason. Reading an
-                // unattributed block as an instant pass is what left TA5's
-                // "never before the barrier permits" half unmeasured.
-                assert.strictEqual(obs[i].escape, 'unknown');
-                assert.ok(/never sampled/.test(obs[i].escapeEvidence.reason),
-                    obs[i].escapeEvidence.reason);
-                assert.strictEqual(obs[i].escapeEvidence.beforePermission, 'unknown');
-                // The superseded log-scraping reading is kept beside it, so run
-                // 3's own numbers stay reproducible.
-                assert.strictEqual(obs[i].escapeEvidence.deferralLineReading, 'none');
-                assert.strictEqual(obs[i].escapeEvidence.deferralCount, 0);
-                assert.strictEqual(obs[i].stallS, RUN3[i].ageAtFirstSeenS);
-            }
-        });
-
-        it('marks a live block usable and keeps every measurement it already carried', async function () {
-            const [o] = await liveObservations([GRACE_S + 30]);
-            assert.strictEqual(o.usable, true);
-            assert.strictEqual(o.unusableReason, null);
-            assert.strictEqual(o.ageAtFirstSeenS, 18);
-            assert.strictEqual(o.maxBlockAgeS, DEFAULTS.maxBlockAgeS);
-            // Nothing the record carried before the gate was added may have been
-            // dropped or weakened by it.
-            assert.strictEqual(o.stallS, GRACE_S + 30);
-            assert.strictEqual(o.waitS, GRACE_S + 12);
-            assert.strictEqual(o.escape, 'watermark');
-            // Attributed from a sampled crossing now, not inferred from the
-            // absence of a content round: the record names when the barrier was
-            // first seen open and when it was last seen closed (row 56).
-            assert.strictEqual(o.escapeEvidence.beforePermission, 'no');
-            assert.ok(o.escapeEvidence.permittedAt, 'the crossing must be named');
-            assert.ok(o.escapeEvidence.lastClosedAt, 'the last closed reading must be named');
-            assert.strictEqual(o.escapeEvidence.corroborated, true);
-            assert.strictEqual(o.escapeEvidence.graceS, GRACE_S);
-            assert.strictEqual(o.escapeEvidence.deferralCount, 1);
-            assert.ok(o.escapeEvidence.firstDeferral && o.escapeEvidence.firstDeferral.height === o.height);
-            assert.strictEqual(o.mirrorNewestRound, null);
-            assert.strictEqual(o.hubNewestRound, null);
-            assert.strictEqual(o.originNewestRound, null);
-            assert.ok(o.holes && o.holes.missingFromHub && o.holes.missingFromMirror);
-            assert.deepStrictEqual(o.actions, []);
-            assert.strictEqual(o.verdictAgreements, 0);
-            assert.deepStrictEqual(o.verdictDisagreements, []);
-        });
-
-        it('still contradicts a watermark escape that fired before the grace', async function () {
-            // A hub whose stream watermark is already past blockTime + grace while
-            // barely any wall time has passed: the escape is genuinely OBSERVED
-            // open, so it is reported, and the stall that is too short to justify
-            // it is reported beside it rather than asserted away.
-            const [o] = await liveObservations([GRACE_S - 1], {
-                barrierSamples: (blockTime, firstSeenAt) => [{
-                    at: firstSeenAt, source: 'status', bootstrapped: true,
-                    priceSyncMaxTimestamp: blockTime - 5000,
-                    streamWatermark: blockTime + GRACE_S
-                }]
-            });
-            assert.strictEqual(o.usable, true, 'the block was live; the barrier is what is in question');
-            assert.strictEqual(o.escape, 'watermark');
-            assert.strictEqual(o.escapeEvidence.corroborated, false);
-        });
-
-        it('records an unattributed block as unknown WITH its reason, never as a pass', async function () {
-            // The same live block, with the barrier never sampled: the honest
-            // answer is that nobody knows which escape opened it.
-            const [o] = await liveObservations([GRACE_S + 30], { barrierSamples: () => [] });
-            assert.strictEqual(o.usable, true);
-            assert.strictEqual(o.escape, 'unknown');
-            assert.ok(o.escapeEvidence.reason && o.escapeEvidence.reason.length > 0);
-            assert.strictEqual(o.escapeEvidence.permittedAt, null);
-            // And the reading it replaces is still there to compare against: the
-            // old code would have called this one 'watermark' on no evidence.
-            assert.strictEqual(o.escapeEvidence.deferralLineReading, 'watermark');
-        });
+        registerObservationRecordRun3Tests();
+        registerObservationRecordLiveTests();
+        registerObservationRecordEscapeTests();
     });
 
     describe('summarize: a backlog can never read as a measured barrier', function () {
-
-        it('says the barrier was NOT measured for run 3, and says why', async function () {
-            const s = drill.summarize({ observations: await run3Observations(), originLagSeries: [] });
-            assert.strictEqual(s.barrierMeasured, false);
-            assert.strictEqual(s.blocksGraded, 0);
-            assert.strictEqual(s.blocksUnusable, 6);
-            assert.deepStrictEqual(s.unusableReasons, { 'stale-backlog': 6 });
-            assert.strictEqual(s.maxAgeAtFirstSeenS, 4453);
-            assert.strictEqual(s.gradedStallsWithinGracePlusConfirm, 0);
-            assert.strictEqual(s.gradedMaxStallS, null);
-            assert.deepStrictEqual(s.gradedEscapes, {});
-            // The clauses the run already carried are untouched: run 3's own six
-            // observations, its own escape histogram, its own 0-of-6 bound count.
-            assert.strictEqual(s.blocksObserved, 6);
-            // 'unknown' where run 3 wrote 'none' (row 56): nothing sampled the
-            // barrier, so nothing is attributed, and the histogram says so.
-            assert.deepStrictEqual(s.escapes, { unknown: 6 });
-            assert.strictEqual(s.stallsWithinGracePlusConfirm, 0);
-            assert.strictEqual(s.maxStallS, 4453);
-            assert.strictEqual(s.minStallS, 4303);
-            assert.strictEqual(s.verdictsCompared, 0);
-            assert.strictEqual(s.holesTotal, 0);
-        });
-
-        it('scores a run whose blocks did arrive live', async function () {
-            const obs = await liveObservations([GRACE_S + 5, GRACE_S + 40, GRACE_S + 12]);
-            const s = drill.summarize({ observations: obs, originLagSeries: [] });
-            assert.strictEqual(s.barrierMeasured, true);
-            assert.strictEqual(s.blocksGraded, 3);
-            assert.strictEqual(s.blocksUnusable, 0);
-            assert.strictEqual(s.gradedStallsWithinGracePlusConfirm, 3);
-            assert.strictEqual(s.gradedMinStallS, GRACE_S + 5);
-            assert.strictEqual(s.gradedMaxStallS, GRACE_S + 40);
-            assert.deepStrictEqual(s.gradedEscapes, { watermark: 3 });
-            assert.strictEqual(s.maxAgeAtFirstSeenS, 18);
-            // Row 56's own numbers: every graded block was attributed, none was
-            // seen processed before the barrier permitted it.
-            assert.strictEqual(s.gradedEscapesAttributed, 3);
-            assert.strictEqual(s.gradedEscapesUnattributed, 0);
-            assert.strictEqual(s.escapeAttributionMeasured, true);
-            assert.strictEqual(s.gradedProcessedBeforePermission, 0);
-            assert.strictEqual(s.gradedEscapesUncorroborated, 0);
-            assert.strictEqual(s.gradedBarrierApplied, 3);
-            assert.strictEqual(s.gradedBarrierNotApplicable, 0);
-        });
-
-        it('does not score a transaction-free block as an escape either way', async function () {
-            // The barrier is never entered for a block with no transaction, so it
-            // can carry no escape and cannot break the TA5 bound. On this chain
-            // those are nearly all the blocks, so counting them either way would
-            // bury the handful the barrier really held.
-            const obs = await liveObservations([GRACE_S + 5, GRACE_S + 40],
-                { blockTransactionCount: 0 });
-            const s = drill.summarize({ observations: obs, originLagSeries: [] });
-            assert.strictEqual(s.blocksGraded, 2);
-            assert.deepStrictEqual(s.gradedEscapes, { 'not-applicable': 2 });
-            assert.strictEqual(s.gradedBarrierApplied, 0);
-            assert.strictEqual(s.gradedBarrierNotApplicable, 2);
-            assert.strictEqual(s.gradedEscapesAttributed, 0);
-            assert.strictEqual(s.gradedEscapesUnattributed, 0);
-            assert.strictEqual(s.gradedProcessedBeforePermission, 0);
-            assert.strictEqual(s.escapeAttributionMeasured, false,
-                'a run that only ever saw empty blocks has measured no escape');
-        });
-
-        it('refuses to call the escape half measured when nothing was attributed', async function () {
-            // Three live blocks, graded on every other axis, with the barrier
-            // never sampled. The stall numbers still read fine; the escape half
-            // must NOT, which is the difference run 5 could not express.
-            const obs = await liveObservations([GRACE_S + 5, GRACE_S + 40, GRACE_S + 12],
-                { barrierSamples: () => [] });
-            const s = drill.summarize({ observations: obs, originLagSeries: [] });
-            assert.strictEqual(s.barrierMeasured, true, 'the blocks did arrive live');
-            assert.strictEqual(s.gradedStallsWithinGracePlusConfirm, 3);
-            assert.strictEqual(s.escapeAttributionMeasured, false,
-                'no escape was attributed, so the escape half was not measured');
-            assert.strictEqual(s.gradedEscapesAttributed, 0);
-            assert.strictEqual(s.gradedEscapesUnattributed, 3);
-            assert.deepStrictEqual(s.gradedEscapes, { unknown: 3 });
-        });
-
-        it('keeps the bound a REAL check on the blocks it does grade', async function () {
-            // One graded block leaves the barrier before the grace has passed. That
-            // is the failure the bound exists to catch, and the gate must not hide
-            // it by counting only the blocks that behaved.
-            const obs = await liveObservations([GRACE_S + 20, GRACE_S - 600, GRACE_S + 9]);
-            const s = drill.summarize({ observations: obs, originLagSeries: [] });
-            assert.strictEqual(s.blocksGraded, 3);
-            assert.strictEqual(s.gradedStallsWithinGracePlusConfirm, 2,
-                'the early release must still be visible as a shortfall against the graded count');
-            assert.strictEqual(s.gradedMinStallS, GRACE_S - 600);
-        });
-
-        it('never counts a stale block towards the bound, even when its age exceeds the grace', async function () {
-            // The trap the gate closes: a block old enough that its AGE alone
-            // clears the grace would have scored as a satisfied barrier wait.
-            const stale = await observe({
-                height: 67_879_900,
-                blockTime: 1_757_390_000,
-                firstSeenAt: 1_757_390_000 + 9000,
-                processedAt: 1_757_390_000 + 9000
-            });
-            const s = drill.summarize({ observations: [stale], originLagSeries: [] });
-            assert.strictEqual(stale.stallS, 9000, 'the raw stall does clear the grace');
-            assert.strictEqual(s.stallsWithinGracePlusConfirm, 1, 'and the ungraded count still sees it');
-            assert.strictEqual(s.barrierMeasured, false, 'but nothing was graded');
-            assert.strictEqual(s.gradedStallsWithinGracePlusConfirm, 0,
-                'so it must not be counted as a barrier wait');
-            assert.deepStrictEqual(s.unusableReasons, { 'stale-backlog': 1 });
-        });
-
-        it('carries the catch-up evidence through to the summary', function () {
-            const s = drill.summarize({
-                observations: [],
-                originLagSeries: [],
-                catchUp: { reason: 'barrier-working-point', durationS: 640 },
-                observe: { backlogSkipped: 150 }
-            });
-            assert.strictEqual(s.caughtUpBy, 'barrier-working-point');
-            assert.strictEqual(s.catchUpS, 640);
-            assert.strictEqual(s.backlogSkipped, 150);
-            assert.strictEqual(s.barrierMeasured, false);
-        });
+        registerSummarizeGradingTests();
+        registerSummarizeEscapeTests();
+        registerSummarizeStaleAndCatchUpTests();
     });
 
-    describe('usableObservations', function () {
+    describe('usableObservations', registerUsableObservationsTests);
 
-        it('counts only the records the gate passed', async function () {
-            const mixed = (await run3Observations()).concat(await liveObservations([GRACE_S + 3, GRACE_S + 7]));
-            const graded = drill.usableObservations(mixed);
-            assert.strictEqual(mixed.length, 8);
-            assert.strictEqual(graded.length, 2);
-            assert.ok(graded.every((o) => o.usable === true));
-        });
-
-        it('treats anything that is not explicitly usable as ungraded', function () {
-            // The observe loop's stopping condition runs on this, so a record
-            // missing the field must hold the run open rather than end it.
-            assert.strictEqual(drill.usableObservations([{}, { usable: 'yes' }, null, { usable: 1 }]).length, 0);
-            assert.strictEqual(drill.usableObservations(null).length, 0);
-        });
-    });
-
-    describe('the gate settings the launcher can move', function () {
-
-        it('defaults to values a run can reason about, and takes an override', function () {
-            assert.strictEqual(DEFAULTS.maxBlockAgeS, 120);
-            assert.strictEqual(DEFAULTS.catchUpSlackBlocks, 2);
-            assert.strictEqual(DEFAULTS.catchUpToleranceS, 600);
-            const moved = drill.readSettings({
-                AT5_MAX_BLOCK_AGE_S: '45', AT5_CATCHUP_SLACK_BLOCKS: '4', AT5_CATCHUP_TOLERANCE_S: '900'
-            });
-            assert.strictEqual(moved.maxBlockAgeS, 45);
-            assert.strictEqual(moved.catchUpSlackBlocks, 4);
-            assert.strictEqual(moved.catchUpToleranceS, 900);
-            // A nonsense value takes the default rather than disabling the gate.
-            const junk = drill.readSettings({ AT5_MAX_BLOCK_AGE_S: 'soon' });
-            assert.strictEqual(junk.maxBlockAgeS, 120);
-        });
-    });
+    describe('the gate settings the launcher can move', registerGateSettingsTests);
 });
 
 describe('comparedVerdicts: the parity clause counts comparisons, not blocks', () => {
