@@ -47,6 +47,10 @@ const REASON = 'match_sync_barrier'
 const ARMED_RUN = process.env.BF3_ARMED !== '0'
 // The hold must cross the ceiling: the ceiling, one more barrier cycle, and slack.
 const CEILING_WAIT_MS = (fixture.HOLD_CEILING_S + (2 * fixture.BARRIER_CYCLE_S) + 120) * 1000
+// The drill block's stamp must outlive the hold: once the stream watermark passes it, the
+// admission-era stream escape releases the pinned block by time. The hold starts a barrier
+// cycle after the block, so a runner's stamp shortened to the ceiling commits it early.
+const DRILL_STAMP_AHEAD_S = Math.max(drive.STAMP_AHEAD_S, CEILING_WAIT_MS / 1000 + (2 * fixture.BARRIER_CYCLE_S))
 // How long the pinned heights map must read frozen while ts flows. Read BEFORE the ceiling
 // (the resync resets the age) and waited for, so the height dimension has had two minutes to fire.
 const FROZEN_MIN_MS = 2 * 60 * 1000
@@ -117,7 +121,7 @@ async function seedAndPin (ctx) {
     await drive.assertChainHeld(ctx.btc, tip, 'the BTC chain, before the drill block,')
     const wall = Math.floor(Date.now() / 1000)
     // Resumes the miner: the hold ends with the drill block.
-    ctx.block = await drive.mineStamped(ctx.btc, wall + drive.STAMP_AHEAD_S)
+    ctx.block = await drive.mineStamped(ctx.btc, wall + DRILL_STAMP_AHEAD_S)
     assert.strictEqual(ctx.block.height, ctx.B, 'the drill block landed at ' + ctx.block.height + ', not B=' + ctx.B)
     console.log('BF3 pinned ' + JSON.stringify(ctx.pin) + ' on indexer ' + PINNED + ' for B=' + ctx.B + ' stamped ' + ctx.block.blockTime)
 }
