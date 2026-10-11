@@ -48,6 +48,7 @@ const RegtestMinerConnector = require('../src/regtest_miner_connector.js')
 const Database = require('../src/db.js')
 const CryptoNetworks = require('../src/crypto_networks')
 const cryptoHelper = require('./helpers/core/cryptoHelper')
+const { hubNodePort } = require('./helpers/hub_node_port')
 const issueHelper = require('./helpers/issueHelper')
 const gasHelper = require('./helpers/gasHelper')
 const stakeHelper = require('./helpers/stakeHelper')
@@ -215,7 +216,8 @@ exports.mochaHooks = {
                         // Hub schema uses "port" (not "server_port"); DB fields live
                         // directly in the xchain-indexer entry (db_host/db_port/name/user/pass).
                         NODE_URL = "localhost"
-                        NODE_PORT = coinNet["node"]["port"]
+                        // An explicit NODE_PORT wins: the hub reports the in-network port.
+                        NODE_PORT = hubNodePort(process.env.NODE_PORT, coinNet["node"]["port"])
                         NODE_USER = coinNet["node"]["user"]
                         NODE_PASS = hubCredential(coinNet["node"]["pass"], process.env.NODE_PASS,
                             'the node RPC password (NODE_PASS)')
