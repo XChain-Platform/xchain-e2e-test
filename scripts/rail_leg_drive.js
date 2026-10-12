@@ -115,9 +115,27 @@ function printDryRun (command) {
     console.log('env keys set: ' + command.envKeys.join(', '))
 }
 
+function processStackPrefix (pid) {
+    let text
+    try {
+        text = fs.readFileSync('/proc/' + pid + '/environ', 'utf8')
+    } catch (error) {
+        return null
+    }
+    const key = 'ATTEST_MIRROR_STACK_PREFIX='
+    const entry = text.split('\0').find((item) => item.startsWith(key))
+    return entry ? entry.slice(key.length) || null : null
+}
+
 function findCompetingDrive () {
     const psText = execFileSync('ps', ['-eo', 'pid=,ppid=,args='], { encoding: 'utf8' })
-    return otherRailDrives(psText, ancestorPids(psText, process.pid))[0]
+    const drives = otherRailDrives(psText, ancestorPids(psText, process.pid))
+    const ownPrefix = process.env.ATTEST_MIRROR_STACK_PREFIX
+    if (process.env.RAIL_DRIVE_IGNORE_OTHER_STACKS !== '1' || !ownPrefix) return drives[0]
+    return drives.find((drive) => {
+        const prefix = processStackPrefix(drive.pid)
+        return prefix === null || prefix === ownPrefix
+    })
 }
 
 function runChild (command, limitMinutes, graceMinutes) {
