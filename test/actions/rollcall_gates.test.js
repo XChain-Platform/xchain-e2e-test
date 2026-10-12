@@ -126,7 +126,8 @@ describe('ROLLCALL acceptance: the rules-aware attestation set (ZC7)', function 
     async function capabilitySet(capability, buriedBlock, minStake){
         const params = { capability: capability, block_index: Number(buriedBlock) }
         if (minStake) params.min_stake = String(minStake)
-        const res = await indexerConnector.call('getcapabilityvalidators', params)
+        const res = await indexerConnector.getCapabilityValidators(
+            params.capability, params.block_index, params.min_stake)
         assert.ok(res && !res.error,
             'getcapabilityvalidators(' + capability + ') at buried block ' + buriedBlock + ' failed: ' +
             JSON.stringify(res && res.error))

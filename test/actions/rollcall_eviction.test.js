@@ -182,9 +182,7 @@ describe('ROLLCALL acceptance: eviction of an idle staking source (AT1-AT4)', fu
 
         // AT1's headline.
         await rc.mineBtcTo(ctx, C2 + 7, 'AT1 read height C + 7')
-        const caps = await indexerConnector.call('getcapabilityvalidators', {
-            capability: 'oracle_publish', block_index: C2 + 7,
-        })
+        const caps = await indexerConnector.getCapabilityValidators('oracle_publish', C2 + 7)
         assert.ok(caps && !caps.error, 'getcapabilityvalidators failed: ' + JSON.stringify(caps && caps.error))
         assert.strictEqual(caps.validators.length, 3,
             'AT1: getcapabilityvalidators(oracle_publish) at C + 7 = ' + (C2 + 7) + ' must return three rows once ' +
@@ -394,9 +392,7 @@ describe('ROLLCALL acceptance: eviction of an idle staking source (AT1-AT4)', fu
         assert.ok(Number.isFinite(activation), 'the re-entering stake must carry an activation_block')
         await rc.mineBtcTo(ctx, activation + 1, 'activation of the re-entering stake')
 
-        const caps = await indexerConnector.call('getcapabilityvalidators', {
-            capability: 'oracle_publish', block_index: activation + 1,
-        })
+        const caps = await indexerConnector.getCapabilityValidators('oracle_publish', activation + 1)
         assert.ok(caps.validators.some(v => String(v.pubkey).toLowerCase() === reentryPubkey.toLowerCase()),
             'AT4: the re-entering stake\'s key must be back in the oracle_publish capability set at ' +
             (activation + 1) + '; got ' + JSON.stringify(caps.validators.map(v => v.pubkey)))
