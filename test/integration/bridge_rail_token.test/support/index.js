@@ -443,6 +443,7 @@ function createRailDrive(cfg) {
         state,
         needsFederation,
         bridgeRailSuite,
+        recordCase,
     }, withDogeFeeSchedule(token.bind(state), state));
 }
 
