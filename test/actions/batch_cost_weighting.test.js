@@ -34,7 +34,6 @@ const issueHelper = require('../helpers/issueHelper')
 const batchHelper = require('../helpers/batchHelper')
 const gasHelper = require('../helpers/gasHelper')
 const vmHelper = require('../helpers/vmHelper')
-const nativeFeeHelper = require('../helpers/nativeFeeHelper')
 const envelopeHelper = require('../helpers/envelopeHelper')
 
 const WEIGHT_BUDGET  = 250
@@ -67,6 +66,7 @@ const CONTRACT = `
 `
 
 let FEE_DEST = null
+let nativeFeeHelper = null
 
 async function q(sql, args){
     const conn = await indexerDatabase.getConnection()
@@ -208,6 +208,7 @@ async function log(label, result){
 describe('BATCH cost weighting (BATCH_COST_WEIGHTING)', function () {
 
     before(async function () {
+        nativeFeeHelper = require('../helpers/nativeFeeHelper')
         const mode = await nativeFeeHelper.discoverFeeMode()
         FEE_DEST = mode.destination || null
         console.log('lane: COIN=' + COIN_CODE + ' feeDestination=' + (FEE_DEST ? 'resolved' : 'none') +

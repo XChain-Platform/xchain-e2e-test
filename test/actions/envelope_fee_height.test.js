@@ -44,7 +44,6 @@
 
 const assert = require('assert')
 const cryptoHelper = require('../helpers/core/cryptoHelper')
-const nativeFeeHelper = require('../helpers/nativeFeeHelper')
 const envelopeHelper = require('../helpers/envelopeHelper')
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
 const { NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
@@ -67,6 +66,7 @@ const CHEAP_COIN_USD = '1000.00000000'
 const GAP_BLOCKS = 6
 
 let FEE_DEST = null
+let nativeFeeHelper = null
 
 async function q(sql, params){
     const conn = await indexerDatabase.getConnection()
@@ -130,6 +130,7 @@ async function setupFeeDestination(mochaContext){
 
     // The fee destination has to be the one the decoder and indexer were
     // configured with, so it is discovered rather than assumed.
+    nativeFeeHelper = require('../helpers/nativeFeeHelper')
     const mode = await nativeFeeHelper.discoverFeeMode()
     if (!mode.enabled) mochaContext.skip()                          // a gas-only venue cannot carry this
     assert(mode.destination, 'native fees enabled but no FEE_DESTINATION resolvable')

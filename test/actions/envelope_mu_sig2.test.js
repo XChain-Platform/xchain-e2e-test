@@ -58,7 +58,6 @@ const ecc = require('tiny-secp256k1')
 bitcoin.initEccLib(ecc)
 
 const envelopeHelper = require('../helpers/envelopeHelper')
-const nativeFeeHelper = require('../helpers/nativeFeeHelper')
 const addressHelper = require('../helpers/addressHelper')
 
 // The SDK is a sibling checkout, resolved the way test/sdk/helpers/sdkHelper.js resolves
@@ -115,6 +114,7 @@ function loadMuSig2Modules(){
 }
 
 async function buildMuSig2Pair(modules){
+    const nativeFeeHelper = require('../helpers/nativeFeeHelper')
     // Fresh keys per run: a fixed pair would reuse one account across runs and
     // leave earlier UTXOs lying in it, which turns a funding mistake into a test
     // that passes on the wrong coin.

@@ -13,7 +13,6 @@ const cryptoHelper = require('../helpers/core/cryptoHelper')
 const transactionHelper = require('../helpers/core/transactionHelper')
 const issueHelper = require('../helpers/issueHelper')
 const gasHelper = require('../helpers/gasHelper')
-const nativeFeeHelper = require('../helpers/nativeFeeHelper')
 const { BOOTSTRAP_XCHAIN_USD, NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
 const { FIXTURE_ID_FLOOR, FIXTURE_INSERT_SQL } = require('../helpers/priceSnapshotHelper')
 
@@ -30,6 +29,7 @@ const { FIXTURE_ID_FLOOR, FIXTURE_INSERT_SQL } = require('../helpers/priceSnapsh
 // nativeFeeHelper.discoverFeeMode() (env override, then the indexer's feeschedule RPC);
 // the old env-only reader permanently skipped this suite on normal LTC/DOGE stacks.
 let FEE_DEST = null
+let nativeFeeHelper = null
 
 async function q(sql, args){
     const conn = await indexerDatabase.getConnection()
@@ -65,6 +65,7 @@ async function requireNativeFeeMode(ctx) {
     // the pair (the seed would shadow every derived round).
     if (NO_PRICE_SEED) ctx.skip()
     // Throws on LTC/DOGE when unresolvable; skips only on gas-mode stacks.
+    nativeFeeHelper = require('../helpers/nativeFeeHelper')
     const mode = await nativeFeeHelper.discoverFeeMode()
     if (!mode.enabled) ctx.skip()
     assert(mode.destination, 'native fees enabled but no FEE_DESTINATION resolvable')
