@@ -103,6 +103,7 @@ const {
     chainHalves,
     needsFederation,
     bridgeRailSuite,
+    recordCase,
     TOKEN_DRIVE,
 } = require('./bridge_rail_token.test/support');
 
@@ -360,6 +361,8 @@ function driveTests(root) {
 }
 
 describe('token AT9: the gates, and the dated acceptance record', function () {
+    afterEach(recordCase);
+
     after(function () {
         if (gitShim) fs.rmSync(gitShim.dir, { recursive: true, force: true });
     });
