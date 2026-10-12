@@ -11,7 +11,6 @@
 const assert = require('assert')
 const cryptoHelper = require('../helpers/core/cryptoHelper')
 const transactionHelper = require('../helpers/core/transactionHelper')
-const nativeFeeHelper = require('../helpers/nativeFeeHelper')
 const { BOOTSTRAP_XCHAIN_USD, NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
 const { FIXTURE_ID_FLOOR, FIXTURE_INSERT_SQL } = require('../helpers/priceSnapshotHelper')
 
@@ -30,6 +29,7 @@ const { FIXTURE_ID_FLOOR, FIXTURE_INSERT_SQL } = require('../helpers/priceSnapsh
 // on a fee chain it can't resolve, so a skip now only happens on genuinely
 // gas-mode stacks (BTC without native fees).
 let FEE_DEST = null
+let nativeFeeHelper = null
 
 async function q(sql, args){
     const conn = await indexerDatabase.getConnection()
@@ -95,6 +95,7 @@ describe('Native-coin fee payment (live stack)', function () {
         if (NO_PRICE_SEED) this.skip()
         // Throws on LTC/DOGE when unresolvable (loud failure beats a silent
         // permanent skip on the very chains this suite targets).
+        nativeFeeHelper = require('../helpers/nativeFeeHelper')
         const mode = await nativeFeeHelper.discoverFeeMode()
         if (!mode.enabled) this.skip()
         assert(mode.destination, 'native fees enabled but no FEE_DESTINATION resolvable')

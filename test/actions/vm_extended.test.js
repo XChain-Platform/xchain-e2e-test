@@ -13,7 +13,6 @@ const cryptoHelper = require('../helpers/core/cryptoHelper')
 const vmHelper = require('../helpers/vmHelper')
 const issueHelper = require('../helpers/issueHelper')
 const gasHelper = require('../helpers/gasHelper')
-const nativeFeeHelper = require('../helpers/nativeFeeHelper')
 
 /**
  * VM Extended: exercises the smart-contract engine end-to-end against the live
@@ -141,6 +140,7 @@ async function gasDebitFor(actionIndex) {
 async function feePaidFor(actionIndex, row) {
     const xchain = await gasDebitFor(actionIndex)
     if (xchain.length > 0) return true
+    const nativeFeeHelper = require('../helpers/nativeFeeHelper')
     const feeMode = await nativeFeeHelper.discoverFeeMode()
     if (feeMode && feeMode.enabled) return Number(row && row.gas_used) > 0
     return false
