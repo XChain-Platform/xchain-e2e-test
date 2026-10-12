@@ -10,10 +10,18 @@
 //
 
 const assert = require('assert')
-const nativeFeeHelper = require('../../helpers/nativeFeeHelper')
-const priceSnapshotHelper = require('../../helpers/priceSnapshotHelper')
 const { BOOTSTRAP_XCHAIN_USD } = require('../../helpers/xchainPriceConstants')
 const { state, q, chainTipTime } = require('./shared')
+
+// Resolved per call, never held at load time. chainRail drops nativeFeeHelper and
+// priceSnapshotHelper from the require cache on every rail swap, and transactionHelper
+// re-requires them lazily, so a top-level reference here goes stale after any earlier
+// group in the same mocha process swaps rails. The forced seed below then resets the
+// OLD instance's throttle while the live one, which every batch passes through, can
+// still be due: it re-seeds mid-build and wipes the re-priced pair, so one ORDER's fee
+// is valued at the seed pair and covers all of them (release matrix A5 on LTC).
+function nativeFeeHelper(){ return require('../../helpers/nativeFeeHelper') }
+function priceSnapshotHelper(){ return require('../../helpers/priceSnapshotHelper') }
 
 // Fallback native-fee fixture for A4/A5, used ONLY when the suite's standard pair
 // would size one command's worth of fee below the chain's dust threshold (which is
@@ -48,7 +56,7 @@ async function effectivePrices(){
 // throttle, so the per-transaction refresh transactionHelper performs while building
 // the batch is a no-op and cannot clearPair() this fixture out from under the case.
 async function prepareFeeFixture(perCommandXchain){
-    await nativeFeeHelper.seedGlobalPrices(true)
+    await nativeFeeHelper().seedGlobalPrices(true)
     let prices = await effectivePrices()
     assert(prices.xchain && prices.coin,
         'no finalized XCHAIN/USD + ' + COIN_CODE + '/USD snapshots to price a native fee against')
@@ -57,12 +65,12 @@ async function prepareFeeFixture(perCommandXchain){
 
     if (Math.round(perCommandXchain * satsPerXchain) < dust * 2){
         const chainTime = await chainTipTime()
-        await priceSnapshotHelper.clearPair('XCHAIN/USD')
-        await priceSnapshotHelper.clearPair(COIN_CODE + '/USD')
-        await priceSnapshotHelper.seedSnapshot({
+        await priceSnapshotHelper().clearPair('XCHAIN/USD')
+        await priceSnapshotHelper().clearPair(COIN_CODE + '/USD')
+        await priceSnapshotHelper().seedSnapshot({
             coinPair: 'XCHAIN/USD', price: BOOTSTRAP_XCHAIN_USD,
             blockTimestamp: chainTime, roundNumber: FEE_CASE_ROUND_XCHAIN })
-        await priceSnapshotHelper.seedSnapshot({
+        await priceSnapshotHelper().seedSnapshot({
             coinPair: COIN_CODE + '/USD', price: FEE_CASE_COIN_USD,
             blockTimestamp: chainTime, roundNumber: FEE_CASE_ROUND_COIN })
         prices = await effectivePrices()
@@ -91,11 +99,11 @@ async function prepareFeeFixture(perCommandXchain){
 // is what actually restores the shared fixture.
 async function restoreFeeFixture(){
     if (state.FEE_CASE_REPRICED){
-        await priceSnapshotHelper.clearPair('XCHAIN/USD')
-        await priceSnapshotHelper.clearPair(COIN_CODE + '/USD')
+        await priceSnapshotHelper().clearPair('XCHAIN/USD')
+        await priceSnapshotHelper().clearPair(COIN_CODE + '/USD')
         state.FEE_CASE_REPRICED = false
     }
-    await nativeFeeHelper.seedGlobalPrices(true)
+    await nativeFeeHelper().seedGlobalPrices(true)
 }
 
 function feeOutput(sats){
