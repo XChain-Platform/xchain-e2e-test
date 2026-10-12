@@ -127,15 +127,22 @@ function processStackPrefix (pid) {
     return entry ? entry.slice(key.length) || null : null
 }
 
-function findCompetingDrive () {
-    const psText = execFileSync('ps', ['-eo', 'pid=,ppid=,args='], { encoding: 'utf8' })
-    const drives = otherRailDrives(psText, ancestorPids(psText, process.pid))
-    const ownPrefix = process.env.ATTEST_MIRROR_STACK_PREFIX
-    if (process.env.RAIL_DRIVE_IGNORE_OTHER_STACKS !== '1' || !ownPrefix) return drives[0]
+function competingDriveForStack (drives, ownPrefix, stackPrefixForPid = processStackPrefix) {
+    if (!ownPrefix) return drives[0]
     return drives.find((drive) => {
-        const prefix = processStackPrefix(drive.pid)
+        const prefix = stackPrefixForPid(drive.pid)
         return prefix === null || prefix === ownPrefix
     })
+}
+
+function findCompetingDrive ({
+    psText = execFileSync('ps', ['-eo', 'pid=,ppid=,args='], { encoding: 'utf8' }),
+    pid = process.pid,
+    stackPrefix = process.env.ATTEST_MIRROR_STACK_PREFIX,
+    stackPrefixForPid = processStackPrefix,
+} = {}) {
+    const drives = otherRailDrives(psText, ancestorPids(psText, pid))
+    return competingDriveForStack(drives, stackPrefix, stackPrefixForPid)
 }
 
 function runChild (command, limitMinutes, graceMinutes) {
@@ -274,7 +281,7 @@ async function main (argv) {
     return passed && !childResult.timedOut ? 0 : 1
 }
 
-module.exports = { buildLegCommand, otherRailDrives }
+module.exports = { buildLegCommand, competingDriveForStack, findCompetingDrive, otherRailDrives }
 
 if (require.main === module) {
     main(process.argv.slice(2)).then((code) => {
