@@ -100,7 +100,13 @@ async function bootFamilyVenue (opts) {
         const up = await built.venue.start()
         assert.ok(up, 'FAILED DRIVE (not a skip): the family venue did not come up: ' + String(built.venue.unavailable))
         await levelIndexers(built.venue, o.levelTimeoutMs, { requireMirrorReady: !!o.requireMirrorReady })
-    } catch (e) { claim.release(); throw e }
+    } catch (e) {
+        // A failed boot returns no venue handle, so the caller's after-hook never stops it: tear it down here
+        // or its XChain_AM_* databases and child processes leak (29 XChain_AM_MVH_bf5_* leaked this way).
+        try { await built.venue.stop() } catch (stopErr) { console.log('BF boot teardown failed: ' + (stopErr && stopErr.message)) }
+        claim.release()
+        throw e
+    }
     return { venue: built.venue, evidence, btc, armHeight, legacyBlock, claim }
 }
 
