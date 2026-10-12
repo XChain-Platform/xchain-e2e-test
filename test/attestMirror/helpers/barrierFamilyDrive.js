@@ -40,10 +40,31 @@ const POLL_MS = 2000
 // No leg's mocha budget is below this: the venue boot alone (five hubs, two indexers, a
 // catch-up from the chain's genesis) has measured close to the at* legs' 45 minutes.
 const LEG_FLOOR_MS = 60 * 60 * 1000
+const BF5_DB_PREFIX = 'XChain_AM_MVH_bf5_'
 
 // The stamp every headline leg mines its drill block at: the full Bitcoin allowance.
 // BF_STAMP_AHEAD_S shortens it for a smoke drive; the acceptance record uses the default.
 const STAMP_AHEAD_S = Number(process.env.BF_STAMP_AHEAD_S || 7200)
+
+async function dropLeakedBf5Databases (venue) {
+    if (!venue || venue.label !== 'bf5') return []
+    const conn = venue['_conn']
+    assert.ok(conn && typeof conn.query === 'function', 'bootFamilyVenue: BF5 venue has no database connection for stale cleanup')
+    const live = new Set()
+    for (const hub of venue.hubs || []) if (hub.dbName) live.add(hub.dbName)
+    for (const ix of venue.indexers || []) {
+        if (ix.indexerDbName) live.add(ix.indexerDbName)
+        if (ix.mirrorDbName) live.add(ix.mirrorDbName)
+    }
+    const rows = await conn.query(
+        'SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE LEFT(SCHEMA_NAME, ?) = ?',
+        [BF5_DB_PREFIX.length, BF5_DB_PREFIX])
+    const stale = rows.map((row) => String(row.SCHEMA_NAME || ''))
+        .filter((name) => name.startsWith(BF5_DB_PREFIX) && /^[A-Za-z0-9_]+$/.test(name) && !live.has(name))
+    for (const name of stale) await conn.query('DROP DATABASE IF EXISTS `' + name + '`')
+    if (stale.length) console.log('BF5 stale database cleanup: dropped ' + stale.length + ' database(s)')
+    return stale
+}
 
 /**
  * Build and start the family venue from an EXPLICIT build root, level its indexers with
@@ -96,11 +117,20 @@ async function bootFamilyVenue (opts) {
     })
     const stop = built.venue.stop && built.venue.stop.bind(built.venue)
     if (stop) built.venue.stop = async (...args) => { try { return await stop(...args) } finally { claim.release() } }
+    const cleanupStale = async () => {
+        if (built.venue.label === 'bf5' && built.venue['_conn']) await dropLeakedBf5Databases(built.venue)
+    }
     try {
         const up = await built.venue.start()
+        await cleanupStale()
         assert.ok(up, 'FAILED DRIVE (not a skip): the family venue did not come up: ' + String(built.venue.unavailable))
         await levelIndexers(built.venue, o.levelTimeoutMs, { requireMirrorReady: !!o.requireMirrorReady })
-    } catch (e) { claim.release(); throw e }
+    } catch (e) {
+        try { await cleanupStale() } catch (cleanupErr) { console.log('BF stale database cleanup failed: ' + (cleanupErr && cleanupErr.message)) }
+        try { await built.venue.stop() } catch (stopErr) { console.log('BF boot teardown failed: ' + (stopErr && stopErr.message)) }
+        claim.release()
+        throw e
+    }
     return { venue: built.venue, evidence, btc, armHeight, legacyBlock, claim }
 }
 
