@@ -66,6 +66,27 @@ describe('dispenserHelper', () => {
             assert.strictEqual(msg, 'DISPENSER|0|||100||50|||200|getAddr|||||||memo')
         })
 
+        it('should forward giveOwnership and oracleAddress to waitForDispenser', async () => {
+            await helper.sendDispenserV0(
+                addressInfo, 'BTC', 'TOK', null, null, 'LTC', 'LTOK', '200', 'getAddr',
+                'USD', '9.99', 'oracleAddr', '', '', '', '', 1
+            )
+            const query = global.indexerDatabase.waitForDispenser.firstCall.args[0]
+            assert.strictEqual(query.giveOwnership, 1)
+            assert.strictEqual(query.oracleAddress, 'oracleAddr')
+            assert.strictEqual(query.giveAmount, null)
+            assert.strictEqual(query.giveEscrow, null)
+        })
+
+        it('should pin giveOwnership to 0 and pass an empty oracleAddress for a plain dispenser', async () => {
+            await helper.sendDispenserV0(
+                addressInfo, 'BTC', 'TOK', '100', '50', 'LTC', 'LTOK', '200', 'getAddr'
+            )
+            const query = global.indexerDatabase.waitForDispenser.firstCall.args[0]
+            assert.strictEqual(query.giveOwnership, 0)
+            assert.strictEqual(query.oracleAddress, '')
+        })
+
         it('should call waitForDispenser once', async () => {
             await helper.sendDispenserV0(
                 addressInfo, 'BTC', 'T', '1', '1', 'LTC', 'T2', '2', 'addr', '', '', '', '', '', ''

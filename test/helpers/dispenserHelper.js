@@ -58,9 +58,11 @@ module.exports = {
             source: address, txHash: txHash,
             giveCoin: giveCoin, giveTick: giveTick,
             giveAmount: giveAmountQuery, giveEscrow: giveEscrowQuery,
+            giveOwnership: (giveOwnership == 1) ? 1 : 0,
             getCoin: getCoin, getTick: getTick,
             getAmount: getAmount, getAddress: getAddress,
             fiatCode: fiatCode, fiatAmount: fiatAmount,
+            oracleAddress: oracleAddress,
             expiration: expiration, allowList: allowList,
             blockList: blockList, memo: memo,
             // expectedStatus lets a caller wait for a REJECTED create (oracle
