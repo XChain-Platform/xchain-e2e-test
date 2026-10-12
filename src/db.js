@@ -1133,14 +1133,18 @@ class Database {
     }
 
     async queryListAddresses(addressesQuery, listActionIndex){
+        let connection = null
         try {
-            const connection = await this.getConnection()
+            connection = await this.getConnection()
             const rows = await connection.query(addressesQuery, [listActionIndex])
             const addresses = this.addressIdsFromRows(rows)
             return { succeeded: true, addresses }
         } catch (err) {
             logger.error("Couldn't get a list of addresses from a list:", err);
             return { succeeded: false }
+        } finally {
+            // Return the pooled connection on every path, as every other query here does
+            if (connection) await connection.release()
         }
     }
 

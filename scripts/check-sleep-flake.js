@@ -17,7 +17,8 @@
  *
  * This suite drives a live regtest stack, so tests wait for the indexer to
  * catch up. A wait is written two ways here, `await sleep(n)` (the helper form,
- * which includes a local timer helper of any name, such as `await pause(n)`)
+ * which includes a local timer helper of any name, such as `await pause(n)`, and
+ * sleep/delay called through a receiver, such as `await rc.sleep(n)`)
  * and `await new Promise(r => setTimeout(r, n))` (the inline form), and both
  * spellings are read the same way. Two shapes of wait exist and only one of
  * them is flaky:
@@ -340,9 +341,14 @@ function timerHelperNames(code) {
 }
 
 // The awaited-helper regex for this file, built from its own helper names.
+// Read sleep/delay behind any receiver (`await rc.sleep(n)`); keep a local name bare-only,
+// because it was found by its definition here and `stream.pause()` is another function.
 function awaitHelperRe(code) {
-    const alt = timerHelperNames(code).map((n) => n.replace(/\$/g, '\\$')).join('|')
-    return new RegExp(`\\bawait\\s+(?:${alt})\\s*\\(`, 'g')
+    const esc    = (n) => n.replace(/\$/g, '\\$')
+    const bare   = timerHelperNames(code).map(esc).join('|')
+    const member = HELPER_NAMES.map(esc).join('|')
+    const recv   = '(?:[A-Za-z_$][\\w$]*\\s*\\??\\.\\s*)+'
+    return new RegExp(`\\bawait\\s+(?:${recv}(?:${member})|(?:${bare}))\\s*\\(`, 'g')
 }
 
 function scanSource(src, name) {

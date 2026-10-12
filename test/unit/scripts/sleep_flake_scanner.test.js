@@ -301,6 +301,59 @@ function registerLocalHelperTests() {
     })
 }
 
+// A shared helper module re-exports its timer, so the suite writes `await rc.sleep(n)`.
+function registerMemberFormCountTests() {
+    it('counts a standalone settle called through a receiver', function () {
+        assert.deepStrictEqual(linesOf([
+            'async function t() {',
+            '    await send()',
+            '    await rc.sleep(3000)',
+            '    assert.ok(row)',
+            '}',
+        ].join('\n')), [3])
+    })
+
+    it('counts a settle called through a chained or optional receiver', function () {
+        assert.strictEqual(countOf([
+            'async function t() { await h.timers.delay(100) }',
+            'async function u() { await opts?.sleep(100) }',
+        ].join('\n')), 2)
+    })
+}
+
+function registerMemberFormExemptTests() {
+    it('exempts the receiver form used as a poll interval', function () {
+        assert.strictEqual(countOf([
+            'async function t() {',
+            '    while (Date.now() < deadline) { if (await check()) return true; await rc.sleep(2000) }',
+            '}',
+        ].join('\n')), 0)
+    })
+
+    it('reads a local helper name bare only, never through a receiver', function () {
+        assert.deepStrictEqual(linesOf([
+            PAUSE_DEF,
+            'async function t() {',
+            '    await stream.pause()',
+            '    await pause(10)',
+            '}',
+        ].join('\n')), [4])
+    })
+
+    it('does not match a longer member name that starts with sleep', function () {
+        assert.strictEqual(countOf([
+            'async function t() { await rc.sleepUntil(x); await rc.sleeper(1) }',
+        ].join('\n')), 0)
+    })
+}
+
+function registerMemberFormTests() {
+    describe('reads sleep and delay called through a receiver', function () {
+        registerMemberFormCountTests()
+        registerMemberFormExemptTests()
+    })
+}
+
 describe('check-sleep-flake scanner', function () {
     registerFixedSettleTests()
     registerPollIntervalTests()
@@ -309,4 +362,5 @@ describe('check-sleep-flake scanner', function () {
     registerLoopClassificationTests()
     registerRatchetTests()
     registerLocalHelperTests()
+    registerMemberFormTests()
 })

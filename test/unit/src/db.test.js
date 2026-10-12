@@ -1350,3 +1350,26 @@ describe('getContractState() key semantics', function () {
         } finally { spy.restore() }
     })
 })
+
+describe('queryListAddresses()', function () {
+    it('returns the address ids and releases its connection', async function () {
+        mockConnection.query.resolves([{ address: 'a1' }, { address: 'a2' }])
+        const result = await db.queryListAddresses('SELECT 1', 5)
+        assert.deepStrictEqual(result, { succeeded: true, addresses: ['a1', 'a2'] })
+        assert.ok(mockConnection.release.calledOnce)
+    })
+
+    it('releases its connection when the query fails, without throwing', async function () {
+        mockConnection.query.rejects(new Error('query failed'))
+        const result = await db.queryListAddresses('SELECT 1', 5)
+        assert.deepStrictEqual(result, { succeeded: false })
+        assert.ok(mockConnection.release.calledOnce)
+    })
+
+    it('reports failure when no connection can be taken', async function () {
+        db.getConnection = sinon.stub().rejects(new Error('pool down'))
+        const result = await db.queryListAddresses('SELECT 1', 5)
+        assert.deepStrictEqual(result, { succeeded: false })
+        assert.ok(mockConnection.release.notCalled)
+    })
+})

@@ -108,6 +108,37 @@ function closeBrace (masked, open) {
     return masked.length
 }
 
+function closeParen (masked, open) {
+    let depth = 0
+    for (let i = open; i < masked.length; i++) {
+        if (masked[i] === '(') depth++
+        else if (masked[i] === ')') {
+            depth--
+            if (depth === 0) return i
+        }
+    }
+    return masked.length
+}
+
+// Split the masked text between from and to at top-level commas; a trailing empty argument is dropped.
+function topLevelArgs (masked, source, from, to) {
+    const args = []
+    let depth = 0
+    let start = from
+    for (let i = from; i < to; i++) {
+        const c = masked[i]
+        if (c === '(' || c === '[' || c === '{') depth++
+        else if (c === ')' || c === ']' || c === '}') depth--
+        else if (c === ',' && depth === 0) {
+            args.push({ start, end: i })
+            start = i + 1
+        }
+    }
+    args.push({ start, end: to })
+    // Judge emptiness on the source: masking blanks a string argument to whitespace.
+    return args.filter((arg, index) => index === 0 || index < args.length - 1 || source.slice(arg.start, arg.end).trim() !== '')
+}
+
 function lineAt (source, offset) {
     return source.slice(0, offset).split('\n').length
 }
@@ -136,14 +167,21 @@ function findCalls (source) {
     let match
     while ((match = MOCHA_CALL.exec(masked)) !== null) {
         const openParen = masked.indexOf('(', match.index)
-        const tail = masked.slice(openParen + 1)
-        const callback = /(?:async\s+)?(?:function(?:\s+[\w$]+)?\s*\([^)]*\)|\([^)]*\)\s*=>|[\w$]+\s*=>)\s*\{/.exec(tail)
-        if (!callback) continue
-        const bodyOpen = openParen + 1 + callback.index + callback[0].lastIndexOf('{')
-        const bodyClose = closeBrace(masked, bodyOpen)
+        const parenClose = closeParen(masked, openParen)
+        const args = topLevelArgs(masked, source, openParen + 1, parenClose)
+        const last = args[args.length - 1]
+        // Look for the callback only at the head of the call's own last argument.
+        const callback = last && /^\s*(?:async\s+)?(?:function(?:\s+[\w$]+)?\s*\([^)]*\)|\([^)]*\)\s*=>|[\w$]+\s*=>)\s*\{/
+            .exec(masked.slice(last.start, last.end))
+        // Without a block body (expression arrow, named function, no callback), the call spans its own parentheses.
+        const bodyOpen = callback ? last.start + callback[0].lastIndexOf('{') : openParen
+        const bodyClose = callback ? closeBrace(masked, bodyOpen) : parenClose
+        const kind = BASE_KIND[match[1]] || match[1]
+        // Mocha treats a test declared with a title and no callback as pending.
+        const callbackless = TESTS.has(kind) && args.length === 1
         calls.push({
-            kind: BASE_KIND[match[1]] || match[1],
-            skipped: Boolean(match[2]) || match[1].startsWith('x'),
+            kind,
+            skipped: Boolean(match[2]) || match[1].startsWith('x') || callbackless,
             offset: match.index,
             line: lineAt(source, match.index),
             title: stringAt(source, openParen + 1),

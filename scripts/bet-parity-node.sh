@@ -203,8 +203,9 @@ cmd_up() {
     #     two nodes could be running different table schemas and still pass;
     #   - `xargs cat | sha256sum` hashes contents only, so a rename, a move or a
     #     file split between the trees produced an identical digest.
-    # Unfiltered find + per-file manifest is the convention the platform's other
-    # tree-identity gates already use (xchain-indexer/bin/vendor-vm.sh:84).
+    # Same shape as tree_manifest() in xchain-indexer/bin/vendor-vm.sh (unfiltered
+    # find, C-locale sort, per-file manifest); that one hashes with sha1 and adds
+    # package.json, while this check uses sha256 over src/ only.
     # Paths are relative to /XChainIndexer so the manifest compares across containers.
     local a b na nb
     local hash_cmd='cd /XChainIndexer && find src -type f | LC_ALL=C sort | xargs sha256sum | sha256sum'

@@ -135,7 +135,7 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
 
     it('BOOTSTRAP: pulls pre-existing SRC rows into REP via the REST snapshot', async function () {
         assert.strictEqual(await count(repPool, 'price_snapshots', 'id=1'), 1, 'price_snapshots bootstrap row missing');
-        // Keyed on the NATURAL key, never on id: _applyRow strips id for
+        // Keyed on the NATURAL key, never on id: applyRow strips id for
         // capability_snapshots so local AUTO_INCREMENT assigns it (the hub's
         // ids are hub-local and a wire id can collide with a locally-assigned PK).
         // Asserting id=1 here passed only by coincidence, this being the first row
@@ -238,13 +238,13 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
 
     // Push-generation reorg fence over the WS mirror.
     // The HARD case the closed-range bound alone cannot solve: action_index RECYCLES after a
-    // rollback (MAX+1 restarts at `first`), so the new canonical chain re-publishes a DISTINCT row
+    // rollback (MAX+1 restarts from `first`), so the new canonical chain re-publishes a DISTINCT row
     // at the SAME action_index that is inside the deferred retraction's [first,last]. A range-only
     // delete wipes both the orphan AND the re-publish. The fence stamps each row with the source
     // chain's push_generation and carries the rollback's PRE-bump generation on the retraction, so
     // only rows with push_generation <= it are deleted. The re-published row (higher generation)
     // survives even at the recycled index. Each case below would FAIL on pre-fence code (the
-    // re-published row would be deleted); it passes only because _applyRetraction now fences by
+    // re-published row would be deleted); it passes only because applyRetraction fences by
     // generation. Mirrors the same row:deleted{retraction_generation} the hub broadcasts live.
     const bcastWait = async (rows, table, whereSurvive) => {
         for (const r of rows) broadcaster.broadcastRow({ table, row: r });

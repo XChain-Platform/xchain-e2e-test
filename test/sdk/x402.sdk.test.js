@@ -84,7 +84,7 @@ async function verifyConfirmedSend() {
     });
     const { url } = await store.start();
     try {
-        const client = new X402Client({ session: buyerSession(), retryDelayMs: 2000, maxRetries: 60 });
+        const client = new X402Client({ session: buyerSession(), maxAmount: { [tick]: '10' }, retryDelayMs: 2000, maxRetries: 60 });
         const res = await client.fetchUrl(url + '/data');
         expect(res.status).to.equal(200);
         const body = await res.json();
@@ -103,7 +103,7 @@ async function verifyProvisionalSend() {
     const store = new X402Storefront({ gateway, resource: { fast: true } });
     const { url } = await store.start();
     try {
-        const client = new X402Client({ session: buyerSession(), retryDelayMs: 1500, maxRetries: 60 });
+        const client = new X402Client({ session: buyerSession(), maxAmount: { [tick]: '10' }, retryDelayMs: 1500, maxRetries: 60 });
         const res = await client.fetchUrl(url + '/data');
         expect(res.status).to.equal(200);
         const body = await res.json();
@@ -171,7 +171,7 @@ async function verifyGatedFile() {
     });
     const { url } = await store.start();
     try {
-        const client = new X402Client({ session: buyerSession(), retryDelayMs: 2000, maxRetries: 60 });
+        const client = new X402Client({ session: buyerSession(), maxAmount: { [tick]: '10' }, retryDelayMs: 2000, maxRetries: 60 });
         const res = await client.fetchUrl(url + '/gated-key');
         expect(res.status).to.equal(200);
         const body = await res.json();
@@ -233,7 +233,7 @@ async function verifyPolicyLimit() {
     const { url } = await store.start();
     try {
         const session = buyerSession({ maxPerAction: { SEND: { [tick]: '10' } } });
-        const client = new X402Client({ session, retryDelayMs: 1000, maxRetries: 3 });
+        const client = new X402Client({ session, maxAmount: { [tick]: '100' }, retryDelayMs: 1000, maxRetries: 3 });
         let err = null;
         try { await client.fetchUrl(url + '/data'); } catch (e) { err = e; }
         expect(err, 'expected a policy refusal').to.not.equal(null);

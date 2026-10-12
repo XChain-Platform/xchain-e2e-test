@@ -78,6 +78,33 @@ function preflightReadinessHelper (driver) {
                 '" from ' + path.dirname(helper), { cause: error })
         }
     }
+    preflightDeclaredDependencies(helper)
+}
+
+// Resolve the dependencies the helper loads by name rather than by a literal require, the way it resolves them.
+function preflightDeclaredDependencies (helper) {
+    delete require.cache[require.resolve(helper)]
+    let declared
+    try {
+        declared = require(helper)
+    } catch (error) {
+        throw new Error('attest-mirror readiness preflight could not load helper ' + helper, { cause: error })
+    }
+    const names = declared && declared.REQUIRED_DEPENDENCIES
+    const root = declared && declared.DEPENDENCY_ROOT
+    // A helper that stops declaring its dependencies would otherwise pass this check unexamined.
+    if (!Array.isArray(names) || typeof root !== 'string' || root === '') {
+        throw new Error('attest-mirror readiness helper ' + helper +
+            ' does not export REQUIRED_DEPENDENCIES and DEPENDENCY_ROOT, so the preflight cannot check it')
+    }
+    for (const name of names) {
+        try {
+            require.resolve(name, { paths: [root] })
+        } catch (error) {
+            throw new Error('attest-mirror readiness preflight could not resolve module "' + name +
+                '" from ' + root, { cause: error })
+        }
+    }
 }
 
 function runDriver (driver, phase, job, extraArgs, options) {

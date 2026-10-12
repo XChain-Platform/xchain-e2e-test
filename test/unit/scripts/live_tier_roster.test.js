@@ -340,6 +340,16 @@ describe('live integration tier roster', () => {
             assert.strictEqual(pkg.scripts['lint:mirror-pendings'], 'node scripts/check-mirror-pendings.js')
         })
 
+        // A fast run may not select the unit files that also scan the real tree, so each gate runs as its own tier.
+        for (const [lint, script] of [['stake-teardown', 'check-stake-teardown.js'], ['wait-swallow', 'check-wait-swallow.js']]) {
+            it('runs the ' + lint + ' lint over the real tree as its own tier', () => {
+                const fullGate = fs.readFileSync(path.resolve(__dirname, '../../../bin/ci-full.sh'), 'utf8')
+                assert.match(fullGate, new RegExp('^run_tier "[^"]*" npm run lint:' + lint + '$', 'm'),
+                    'the full gate must run ' + lint + ' lint directly')
+                assert.strictEqual(pkg.scripts['lint:' + lint], 'node scripts/' + script)
+            })
+        }
+
         it('ci:live runs this runner rather than a bare glob', () => {
             assert.match(pkg.scripts['ci:live'], /run-live-tier/)
         })

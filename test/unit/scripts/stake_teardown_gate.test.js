@@ -284,3 +284,57 @@ describe('check-stake-teardown gate: SDK-form STAKE submissions', () => {
             'stakeTeardown.registerStake({ addressInfo: from, signingPubkey: p.signingPubkey, amount: p.amount })'].join('\n')).length, 0)
     })
 })
+
+describe('check-stake-teardown gate: regex literals', () => {
+    it('still catches a STAKE payload after a regex literal holding a single quote', () => {
+        const hits = scan(["const clean = s.replace(/'/g, '')", "let msg = 'STAKE|1|' + amount"].join('\n'))
+        assert.deepStrictEqual(hits.map(h => h.line), [2])
+    })
+
+    it('still catches a STAKE payload after a regex literal holding a backtick or a double quote', () => {
+        assert.deepStrictEqual(scan(['const clean = name.replace(/`/g, \'\')', "let msg = 'STAKE|1|' + amount"].join('\n'))
+            .map(h => h.line), [2])
+        assert.deepStrictEqual(scan(['const parts = s.split(/"/)', "let msg = 'STAKE|1|' + amount"].join('\n'))
+            .map(h => h.line), [2])
+    })
+
+    it('reads a double slash inside a regex literal as regex, not as a line comment', () => {
+        assert.deepStrictEqual(scan("if (/^\\/\\//.test(u)) msg = 'STAKE|1|' + amount").map(h => h.line), [1])
+    })
+
+    it('keeps a slash and quotes inside a character class within the regex', () => {
+        assert.deepStrictEqual(scan(["const t = s.replace(/[/'\"]/g, '')", "let msg = 'STAKE|1|' + amount"].join('\n'))
+            .map(h => h.line), [2])
+    })
+
+    it('reads a slash after an identifier, a number or a closing paren as division', () => {
+        assert.deepStrictEqual(scan("let x = total / 2, msg = 'STAKE|1|' + amount, y = a / b").map(h => h.line), [1])
+        assert.deepStrictEqual(scan("let x = 10 / 2, msg = 'STAKE|1|' + amount, y = 4 / 2").map(h => h.line), [1])
+        assert.deepStrictEqual(scan("let x = (a + b) / 2, msg = 'STAKE|1|' + amount, y = c / d").map(h => h.line), [1])
+    })
+
+    it('reports nothing for a shell-quote helper whose regex holds a quote', () => {
+        assert.strictEqual(scan('function shq(s) { return "\'" + String(s).replace(/\'/g, "\'\\\\\'\'") + "\'"; }').length, 0)
+    })
+
+    it('reads the transaction helper\'s own method definition as a definition, not a broadcast', () => {
+        const hits = gate.scanLines([
+            'const isTransient = (msg) => /bad-txns|[\'"]?txid[\'"]?/i.test(msg)',
+            'class Helper {',
+            '    async createAndSendTransaction(addressInfo, data, rawData = null){',
+            '        return this.send(addressInfo, data)',
+            '    }',
+            '}',
+        ], 'test/helpers/core/transactionHelper/lib/send.js')
+        assert.strictEqual(hits.length, 0)
+        assert.deepStrictEqual(scan('await helper.createAndSendTransaction(addressInfo, data)').map(h => h.line), [1])
+    })
+
+    it('treats a request wire built by the attestation codec as a non-stake payload', () => {
+        const hits = gate.scanLines([
+            'const wire = codec.requestWire(row, sigs)',
+            "await transactionHelper.createAndSendTransaction(op, wire, null, [], 'P2SH')",
+        ], 'test/sdk/relay_drill.test.js')
+        assert.strictEqual(hits.length, 0)
+    })
+})

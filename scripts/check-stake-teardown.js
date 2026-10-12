@@ -76,7 +76,7 @@ const COMMENT_LINE  = /^\s*(?:\/\/|\*)/
 const UNKNOWN       = '\u0000'
 const NON_STAKE_BUILDERS = new Set([
     'issueCmd', 'issueBindWire', 'issueMessage', 'lockWireV0', 'lockWireV3', 'burnWireV1',
-    'buildAttestationResponseAction', 'responseWire',
+    'buildAttestationResponseAction', 'responseWire', 'requestWire',
 ])
 const NON_STAKE_OPAQUE_PAYLOADS = new Map([
     ['test/actions/controller_policy.test.js', new Set(['wire'])],
@@ -164,8 +164,39 @@ function templateToken(source, start, line){
     return { end: i, line: tokenLine, value: raw }
 }
 
+// Keywords after which a slash starts a regex literal rather than a division.
+const REGEX_AFTER_KEYWORDS = new Set(['return', 'typeof', 'case', 'in', 'of', 'do', 'else', 'yield', 'await',
+    'void', 'delete', 'new', 'instanceof', 'throw'])
+
+// Decide from the previous token whether a slash divides (after an operand) or opens a regex.
+function slashStartsRegex(previous){
+    if (!previous) return true
+    if (previous.type === 'identifier') return REGEX_AFTER_KEYWORDS.has(previous.value)
+    if (previous.type !== 'punctuator') return false
+    // Digits arrive as single punctuators because this lexer has no number token.
+    return !/^(?:[)\]0-9]|\+\+|--)$/.test(previous.value)
+}
+
+// Return the end of a regex literal opening at start, or -1 when none closes on its line.
+function regexEnd(source, start){
+    let i = start + 1, inClass = false
+    while (i < source.length && source[i] !== '\n'){
+        if (source[i] === '\\'){ i += 2; continue }
+        if (source[i] === '[') inClass = true
+        else if (source[i] === ']') inClass = false
+        else if (source[i] === '/' && !inClass){
+            i++
+            while (/[a-z]/i.test(source[i] || '')) i++
+            return i
+        }
+        i++
+    }
+    return -1
+}
+
 // A deliberately small lexer is enough here and keeps this gate runnable before
-// npm install. It removes comments and makes newlines irrelevant to expressions.
+// npm install. It removes comments, skips regex literals as opaque operands, and
+// makes newlines irrelevant to expressions.
 function tokensFor(source){
     const tokens = []
     let i = 0, line = 1
@@ -187,6 +218,14 @@ function tokensFor(source){
             continue
         }
         const start = i
+        if (source[i] === '/' && slashStartsRegex(tokens[tokens.length - 1])){
+            const end = regexEnd(source, i)
+            if (end !== -1){
+                tokens.push({ type: 'regex', value: source.slice(i, end), line, endLine: line, start })
+                i = end
+                continue
+            }
+        }
         if (source[i] === "'" || source[i] === '"'){
             const parsed = quotedToken(source, i, source[i], line)
             tokens.push({ type: 'string', value: parsed.value, line, endLine: parsed.line, start })
@@ -422,7 +461,8 @@ function scanLines(lines, rel){
             add(originFor(tokens, bindings, action.start, action.end))
         if (token.value !== 'createAndSendTransaction' || tokens[i + 1]?.value !== '(') continue
         const close = matching(tokens, i + 1, '(', ')')
-        if (close < 0) continue
+        // A parameter list followed by a body is the helper's own definition, not a broadcast.
+        if (close < 0 || tokens[close + 1]?.value === '{') continue
         const args = splitTopLevel(tokens, i + 2, close, ',')
         if (args.length < 2) continue
         const payload = args[1]

@@ -271,3 +271,87 @@ describe('check-mirror-pendings: every skip form is reported', function () {
         assert.strictEqual(pending[0].claim, 'runs only when ready')
     })
 })
+
+describe('check-mirror-pendings: a call binds only the callback inside its own parentheses', function () {
+    it('reports an expression-bodied skip that no block-bodied function follows', function () {
+        const source = "describe('AT10', () => { it.skip('rejects the stale proof (needs a reorg lever)', () => assert.ok(false)) })"
+        const pending = checker.parseSource(source, 'at10.test.js').pending
+        assert.strictEqual(pending.length, 1)
+        assert.strictEqual(pending[0].claim, 'rejects the stale proof (needs a reorg lever)')
+        assert.match(pending[0].title, /^AT10 > /)
+    })
+
+    it('keeps an expression-bodied skip from swallowing the next test\'s runtime skip', function () {
+        const source = [
+            "describe('AT10', function () {",
+            "  it.skip('x (needs y)', () => assert.ok(false))",
+            "  it('runs when ready', function () {",
+            '    this.skip()',
+            '  })',
+            '})',
+        ].join('\n')
+        const pending = checker.parseSource(source, 'at10.test.js').pending
+        assert.strictEqual(pending.length, 2)
+        const body = pending.find((entry) => entry.kind === 'body')
+        assert.ok(body, 'the runtime skip in the next test must be reported')
+        assert.strictEqual(body.claim, 'runs when ready')
+    })
+
+    it('counts the cases of an expression-bodied skipped suite and hides them from cross-references', function () {
+        const leg = "describe.skip('m (needs a lever)', () => it('holds the barrier', () => {}))"
+        const parsed = checker.parseSource(leg, 'at2b-forward-margin.test.js')
+        assert.match(parsed.pending[0].title, /\[skipped suite, 1 cases\]/)
+        const result = crossrefRun('holds delivery (DRIVEN in at2b: "holds the barrier")', leg)
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /no active case titled "holds the barrier"/)
+    })
+
+    it('reports a callback-less test as pending and refuses it without a reason', function () {
+        const bare = run(fixture({ 'at11.test.js': "describe('AT11', () => { it('claim awaiting a lever') })" }))
+        assert.strictEqual(bare.status, 1)
+        assert.match(bare.stderr, /unreasoned pending: .*claim awaiting a lever/)
+        const reasoned = run(fixture({ 'at11.test.js': "describe('AT11', () => { it('claim awaiting a lever (needs 257 rounds)') })" }))
+        assert.strictEqual(reasoned.status, 0, reasoned.stderr)
+        assert.match(reasoned.stdout, /PENDING .*claim awaiting a lever/)
+    })
+
+    it('does not let a callback-less case satisfy a cross-reference anchor', function () {
+        const result = crossrefRun('holds delivery (DRIVEN in at2b: "holds the barrier")',
+            "describe('delivery past the forward margin', () => { it('holds the barrier') })")
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /no active case titled "holds the barrier"/)
+    })
+
+    it('binds a callback-less pending to its own suite and leaves the next test its own body', function () {
+        const source = [
+            "describe('Outer', () => { it.skip('x') })",
+            "it('z', function () { this.skip() })",
+        ].join('\n')
+        const pending = checker.parseSource(source, 'at12.test.js').pending
+        assert.deepStrictEqual(pending.map((entry) => entry.title), ['Outer > x', 'z'])
+    })
+
+    it('reports a callback-less skip that is the last mocha call in the file', function () {
+        const pending = checker.parseSource("describe('S', function () { it.skip('x') })", 'at12.test.js').pending
+        assert.deepStrictEqual(pending.map((entry) => entry.title), ['S > x'])
+    })
+
+    it('reports a skip that names its callback, under the right suite', function () {
+        const source = [
+            'function namedFn () {}',
+            "describe('S', function () { it.skip('x', namedFn) })",
+        ].join('\n')
+        const pending = checker.parseSource(source, 'at12.test.js').pending
+        assert.deepStrictEqual(pending.map((entry) => [entry.title, entry.kind]), [['S > x', 'declared']])
+    })
+
+    it('counts every case form a skipped suite hides', function () {
+        const pending = checker.parseSource("describe.skip('S', () => { it('a'); it('b', fn); it('c', () => {}) })", 'at12.test.js').pending
+        assert.ok(pending.some((entry) => /\[skipped suite, 3 cases\]/.test(entry.title)), JSON.stringify(pending))
+    })
+
+    it('reports nothing for named hooks and named test callbacks that are not skipped', function () {
+        const source = "describe('AT12', function () { before(setupFn); it('runs', runIt) })"
+        assert.deepStrictEqual(checker.parseSource(source, 'at12.test.js').pending, [])
+    })
+})

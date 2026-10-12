@@ -43,9 +43,10 @@
  *      pinned. The gated five also agree under the EQUIV wrap below the flag day.
  *
  * bin/recovery.js checkpointCanonical re-verifies every archived checkpoint's quorum,
- * so it sits in the gated group here. The archive family (indexer ANCHOR v1,
- * bin/recovery.js wrapperCanonical, the hub's archiveCanonical) is pinned in the
- * indexer's recovery_wrapper_canonical_parity suite.
+ * so it sits in the gated group here. The v1 archive family (the hub's archiveCanonical,
+ * indexer ANCHOR v1, bin/recovery.js wrapperCanonical) is pinned three-way in the hub's
+ * equiv_checkpoint_canonical suite; the indexer's recovery_wrapper_canonical_parity
+ * suite pins the indexer pair on its own, without a sibling checkout.
  *
  * Spec: SPV light-client spec s6; Phase 2 handover.
  ********************************************************************/
@@ -110,17 +111,22 @@ function checkpointRowPart() {
 
 // One logical checkpoint, expressed in BOTH the hub/SDK row shape and the indexer
 // wire-parse `d` shape, so a single fixture drives all three builders.
+// The two root versions differ from each other and from the production value 1, so a
+// builder that swaps them, reads one twice or hardcodes 1 emits different bytes.
 function fixtures(net, snapshotBlock, withRoots) {
     const STATE_ROOT    = 'd4'.repeat(32);
     const BLOCK_MERKLE  = 'e5'.repeat(32);
+    const STATE_ROOT_VERSION   = 2;
+    const BLOCK_MERKLE_VERSION = 3;
+    const ROOT_SUFFIX = '|' + STATE_ROOT + '|' + STATE_ROOT_VERSION + '|' + BLOCK_MERKLE + '|' + BLOCK_MERKLE_VERSION;
     const cp = {
         chain: 'BTC', network: net, block_index: 500, block_hash: 'c0'.repeat(32),
         ledger_hash: 'a1'.repeat(32), actions_hash: 'b2'.repeat(32), contract_hash: 'c3'.repeat(32),
         checkpoint_seq: 7, snapshot_block: snapshotBlock,
         state_root:           withRoots ? STATE_ROOT : null,
-        state_root_version:   withRoots ? 1 : null,
+        state_root_version:   withRoots ? STATE_ROOT_VERSION : null,
         block_merkle_root:    withRoots ? BLOCK_MERKLE : null,
-        block_merkle_version: withRoots ? 1 : null
+        block_merkle_version: withRoots ? BLOCK_MERKLE_VERSION : null
     };
     const d = {
         // A v0 SECTION is root-bearing by construction: the publisher skips a null-root
@@ -132,11 +138,11 @@ function fixtures(net, snapshotBlock, withRoots) {
         LEDGER_HASH: 'a1'.repeat(32), ACTIONS_HASH: 'b2'.repeat(32), CONTRACT_HASH: 'c3'.repeat(32),
         CHECKPOINT_SEQ: 7, SNAPSHOT_BLOCK: snapshotBlock,
         STATE_ROOT: withRoots ? STATE_ROOT : undefined,
-        STATE_ROOT_VERSION: withRoots ? 1 : undefined,
+        STATE_ROOT_VERSION: withRoots ? STATE_ROOT_VERSION : undefined,
         BLOCK_MERKLE_ROOT: withRoots ? BLOCK_MERKLE : undefined,
-        BLOCK_MERKLE_VERSION: withRoots ? 1 : undefined
+        BLOCK_MERKLE_VERSION: withRoots ? BLOCK_MERKLE_VERSION : undefined
     };
-    return { cp, d, STATE_ROOT, BLOCK_MERKLE };
+    return { cp, d, STATE_ROOT, BLOCK_MERKLE, ROOT_SUFFIX };
 }
 
 describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () {
@@ -177,13 +183,13 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
         // the string a section's stored validator signatures were produced over, and the
         // one the indexer rebuilds from the wire before checking quorum: three services,
         // three inline builders, one byte string.
-        const { cp, d, STATE_ROOT, BLOCK_MERKLE } = fixtures('regtest', 100, true);
+        const { cp, d, ROOT_SUFFIX } = fixtures('regtest', 100, true);
         const hubC = StateCheckpointEngine.canonicalCheckpoint(cp);
         const sdkC = sdkCheckpoint.canonicalCheckpoint(cp);
         const idxC = anchorSectionCanonical(d);
         assert.strictEqual(hubC, sdkC, 'hub vs SDK checkpoint canonical drift');
         assert.strictEqual(hubC, idxC, 'hub vs indexer ANCHOR v0 section canonical drift');
-        assert.ok(hubC.includes('|' + STATE_ROOT + '|1|' + BLOCK_MERKLE + '|1'),
+        assert.ok(hubC.includes(ROOT_SUFFIX),
             'post-flag-day canonical must commit the root suffix; got ' + hubC);
     });
 
@@ -319,7 +325,7 @@ describe('XCHECKPOINT canonical: all seven checkpoint-family builders', function
         // signature: a v0 section fails closed, and a mirrored row never hands the escrow
         // check roots no quorum signed. Gating either indexer copy turns that into adopting
         // unsigned roots, which is what this case refuses.
-        const { cp, d, STATE_ROOT, BLOCK_MERKLE } = fixtures('mainnet', 1000, true);
+        const { cp, d, STATE_ROOT, BLOCK_MERKLE, ROOT_SUFFIX } = fixtures('mainnet', 1000, true);
         assert.strictEqual(idxCkpt.activeAt(CKPT_KEY, 'mainnet', null, 1000, null), false,
             'premise: mainnet@1000 must sit below CHECKPOINT_COMMITMENT or this case pins nothing');
         const gated = gatedCanonicals(cp);
@@ -328,7 +334,7 @@ describe('XCHECKPOINT canonical: all seven checkpoint-family builders', function
             assert.strictEqual(s, gated.hub, name + ' drifted from the hub below the flag day');
             assert.ok(!s.includes(STATE_ROOT) && !s.includes(BLOCK_MERKLE), name + ' carries a root below the flag day');
         }
-        const suffixed = gated.hub + '|' + STATE_ROOT + '|1|' + BLOCK_MERKLE + '|1';
+        const suffixed = gated.hub + ROOT_SUFFIX;
         for (const [name, s] of Object.entries(unconditionalCanonicals(cp, d)))
             assert.strictEqual(s, suffixed, name + ' must append the root suffix unconditionally below the flag day');
     });

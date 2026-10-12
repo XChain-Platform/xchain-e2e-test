@@ -34,7 +34,7 @@ function fixture () {
         "if (phase === 'run') { event('run-start'); setTimeout(() => { event('run-end'); process.exit(failAt === phase || leg.includes('fail') ? 7 : 0) }, 100) }",
         "if (phase === 'down') { event('down'); if (fs.existsSync(state)) fs.unlinkSync(state) }",
     ].join('\n'))
-    fs.writeFileSync(helper, "'use strict'\nrequire('path')\n")
+    fs.writeFileSync(helper, "'use strict'\nrequire('path')\nmodule.exports = { DEPENDENCY_ROOT: __dirname, REQUIRED_DEPENDENCIES: [] }\n")
     const legs = [
         path.join('test', 'attestMirror', 'a.test.js'),
         path.join('test', 'attestMirror', 'b.test.js'),
@@ -170,6 +170,63 @@ function registerPreflightTests () {
         assert.match(error.message, /module-that-is-deliberately-absent/)
         assert.match(error.message, new RegExp(f.root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
         assert.doesNotMatch(error.capturedStdout, /\[attest-mirror\] allocate/)
+    })
+
+    // Stage the real readiness helper beside the driver, in a tree with no node_modules of its own.
+    function stagedRealHelper () {
+        const f = fixture()
+        const scripts = path.join(f.root, 'scripts')
+        fs.mkdirSync(scripts)
+        fs.copyFileSync(path.join(__dirname, '..', '..', '..', 'scripts', 'wait-attest-mirror-stack.js'),
+            path.join(scripts, 'wait-attest-mirror-stack.js'))
+        fs.copyFileSync(f.driver, path.join(scripts, 'driver.js'))
+        return Object.assign(f, { driver: path.join(scripts, 'driver.js') })
+    }
+
+    it('refuses the real readiness helper when its required dependency is missing from the staged tree', async function () {
+        const f = stagedRealHelper()
+        let resolvable = true
+        try { require.resolve('mariadb', { paths: [f.root] }) } catch (_) { resolvable = false }
+        assert.strictEqual(resolvable, false, 'this host resolves mariadb above the staged tree, so the case cannot fail')
+        const events = []
+        let error = null
+        try {
+            await captureStdout(() => runner.runAll({
+                root: f.root, driver: f.driver, legs: [f.legs[0]], concurrency: '1', runId: 'real-helper-missing-dep',
+                spawn: fakeSpawn(() => false, events),
+            }))
+        } catch (caught) {
+            error = caught
+        }
+        assert.ok(error, 'the preflight let a tree without mariadb through')
+        assert.match(error.message, /could not resolve module "mariadb"/)
+        assert.match(error.message, new RegExp(f.root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+        assert.doesNotMatch(error.capturedStdout, /\[attest-mirror\] allocate/)
+        assert.deepStrictEqual(events, [])
+    })
+
+    it('passes the real readiness helper when the staged tree provides its required dependency', async function () {
+        const f = stagedRealHelper()
+        const moduleDir = path.join(f.root, 'node_modules', 'mariadb')
+        fs.mkdirSync(moduleDir, { recursive: true })
+        fs.writeFileSync(path.join(moduleDir, 'package.json'), '{"name":"mariadb","main":"index.js"}')
+        fs.writeFileSync(path.join(moduleDir, 'index.js'), 'module.exports = {}\n')
+        const events = []
+        const captured = await captureStdout(() => runner.runAll({
+            root: f.root, driver: f.driver, legs: [f.legs[0]], concurrency: '1', runId: 'real-helper-dep-present',
+            spawn: fakeSpawn(() => false, events),
+        }))
+        assert.strictEqual(captured.value[0].code, 0)
+        assert.ok(events.length > 0)
+    })
+
+    it('refuses a readiness helper that does not declare its required dependencies', async function () {
+        const f = fixture()
+        fs.writeFileSync(f.helper, "'use strict'\nrequire('path')\n")
+        await assert.rejects(runner.runAll({
+            root: f.root, driver: f.driver, legs: [f.legs[0]], concurrency: '1', runId: 'undeclared-deps',
+            spawn: fakeSpawn(() => false, []),
+        }), /does not export REQUIRED_DEPENDENCIES and DEPENDENCY_ROOT/)
     })
 
     it('refuses when the readiness helper is absent', async function () {

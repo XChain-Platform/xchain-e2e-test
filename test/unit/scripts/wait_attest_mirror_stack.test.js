@@ -219,6 +219,60 @@ describe('attest-mirror stack readiness: the miner health body', function () {
     })
 })
 
+describe('attest-mirror stack readiness: a probe that never answers', function () {
+    // A regression hangs until this short timeout rather than mocha's default ceiling.
+    this.timeout(3000)
+    const never = () => new Promise(() => {})
+
+    async function rejectsWithin (c, pattern) {
+        const started = Date.now()
+        await assert.rejects(ready.waitForStack(c), (error) => {
+            assert.match(error.message, pattern)
+            return true
+        })
+        assert.ok(Date.now() - started < 1000, 'the wait outlived its deadline: ' + (Date.now() - started) + ' ms')
+    }
+
+    it('fails inside the deadline and names an indexer whose /status never answers', async function () {
+        await rejectsWithin(config({ timeoutMs: 50, fetchImpl: never }), /last failure: BTC indexer \/status timed out after \d+ ms/)
+    })
+
+    it('fails inside the deadline and names a miner whose health call never answers', async function () {
+        const fetchImpl = (url) => url.includes('miner') ? never() : Promise.resolve(healthy())
+        await rejectsWithin(config({ timeoutMs: 50, fetchImpl }), /last failure: miner http:\/\/miner-a\/: timed out after \d+ ms/)
+    })
+
+    it('fails inside the deadline when a miner body never finishes reading', async function () {
+        const fetchImpl = async (url) => url.includes('miner') ? { ok: true, json: never } : healthy()
+        await rejectsWithin(config({ timeoutMs: 50, fetchImpl }), /miner http:\/\/miner-a\/: timed out/)
+    })
+
+    it('fails inside the deadline when the schema fallback query and close never answer', async function () {
+        const c = config({
+            timeoutMs: 50,
+            fetchImpl: async () => ({ ok: true, json: async () => ({}) }),
+            connect: async () => ({ query: never, end: never }),
+        })
+        await rejectsWithin(c, /BTC indexer schema check timed out after \d+ ms/)
+    })
+
+    it('hands every fetch an abort signal so a real fetch releases its socket', async function () {
+        const inits = []
+        await ready.stackProblem(config({ fetchImpl: async (url, init) => { inits.push(init); return healthy() } }))
+        assert.strictEqual(inits.length, 3)
+        for (const init of inits) assert.ok(init && init.signal instanceof AbortSignal)
+    })
+
+    it('caps each probe at the per-probe limit and never below one millisecond', function () {
+        assert.strictEqual(ready.probeTimeout(undefined), ready.PROBE_TIMEOUT_MS)
+        assert.strictEqual(ready.probeTimeout(NaN), ready.PROBE_TIMEOUT_MS)
+        assert.strictEqual(ready.probeTimeout(0), 1)
+        assert.strictEqual(ready.probeTimeout(-20), 1)
+        assert.strictEqual(ready.probeTimeout(10 * ready.PROBE_TIMEOUT_MS), ready.PROBE_TIMEOUT_MS)
+        assert.strictEqual(ready.probeTimeout(1234.7), 1234)
+    })
+})
+
 const THREE_COIN_ENV = Object.freeze({
     DB_HOST_PORT: '62000', DB_PASSWORD: 'secret-canary', INDEXER_HOST_PORT: '62005', MINER_HOST_PORT: '62006',
     LTC_INDEXER_HOST_PORT: '62014', LTC_MINER_HOST_PORT: '62015', DOGE_INDEXER_HOST_PORT: '62020', DOGE_MINER_HOST_PORT: '62021',

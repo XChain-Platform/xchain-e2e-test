@@ -33,6 +33,29 @@ function sleep (ms) {
     return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+// Bound every probe so an endpoint that accepts a connection and never answers cannot outlast the deadline.
+const PROBE_TIMEOUT_MS = 5000
+const TIMED_OUT = Symbol('timed out')
+
+// Recognise the rejection an expired AbortSignal.timeout gives a real fetch.
+function timedOut (error) {
+    return !!error && error.name === 'TimeoutError'
+}
+
+// Clamp a probe's limit to [1, cap] so a spent budget still leaves a bound.
+function probeTimeout (budgetMs, capMs) {
+    const cap = capMs || PROBE_TIMEOUT_MS
+    if (!Number.isFinite(budgetMs)) return cap
+    return Math.max(1, Math.min(cap, Math.floor(budgetMs)))
+}
+
+// Settle with the work's result, or with TIMED_OUT once ms pass; the timer never outlives the race.
+function withTimeout (work, ms) {
+    let timer = null
+    const expiry = new Promise((resolve) => { timer = setTimeout(resolve, ms, TIMED_OUT) })
+    return Promise.race([Promise.resolve(work), expiry]).finally(() => clearTimeout(timer))
+}
+
 async function responseOk (url, init, fetchImpl) {
     try {
         const response = await fetchImpl(url, init)
@@ -67,16 +90,23 @@ function minerBodyProblem (body) {
 }
 
 // Probe one miner's health method and name what is wrong, or return '' when it is usable.
-async function minerProblem (url, fetchImpl) {
+async function minerProblem (url, fetchImpl, limitMs) {
+    const limit = limitMs || PROBE_TIMEOUT_MS
+    const problem = await withTimeout(minerProbe(url, fetchImpl, limit), limit)
+    return problem === TIMED_OUT ? 'timed out after ' + limit + ' ms' : problem
+}
+
+async function minerProbe (url, fetchImpl, limit) {
     let response
     try {
         response = await fetchImpl(url, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ jsonrpc: '2.0', method: 'health', id: 1 }),
+            signal: AbortSignal.timeout(limit),
         })
-    } catch (_) {
-        return 'unreachable'
+    } catch (error) {
+        return timedOut(error) ? 'timed out after ' + limit + ' ms' : 'unreachable'
     }
     if (!response || !response.ok) return 'HTTP ' + (response ? response.status : 'no response')
     let body
@@ -88,7 +118,15 @@ async function minerProblem (url, fetchImpl) {
     return minerBodyProblem(body)
 }
 
-async function indexerSchemaReady (config, dbName) {
+// Close without waiting on a server that never answers; destroy the socket if a graceful end stalls.
+function closeConnection (connection, limit) {
+    withTimeout(Promise.resolve().then(() => connection.end()), limit).then((result) => {
+        if (result === TIMED_OUT && typeof connection.destroy === 'function') connection.destroy()
+    }, () => {})
+}
+
+async function indexerSchemaReady (config, dbName, limitMs) {
+    const limit = limitMs || PROBE_TIMEOUT_MS
     let connection = null
     try {
         connection = await config.connect({
@@ -96,6 +134,8 @@ async function indexerSchemaReady (config, dbName) {
             port: config.dbPort,
             user: config.dbUser,
             password: config.dbPassword,
+            connectTimeout: limit,
+            socketTimeout: limit,
         })
         const placeholders = config.requiredIndexerTables.map(() => '?').join(', ')
         const rows = await connection.query(
@@ -106,16 +146,23 @@ async function indexerSchemaReady (config, dbName) {
     } catch (_) {
         return false
     } finally {
-        if (connection) await connection.end().catch(() => {})
+        if (connection) closeConnection(connection, limit)
     }
 }
 
-async function indexerProblem (config, indexer) {
+async function indexerProblem (config, indexer, limitMs) {
+    const limit = limitMs || PROBE_TIMEOUT_MS
+    const stage = { name: ' /status' }
+    const problem = await withTimeout(indexerProbe(config, indexer, limit, stage), limit)
+    return problem === TIMED_OUT ? stage.name + ' timed out after ' + limit + ' ms' : problem
+}
+
+async function indexerProbe (config, indexer, limit, stage) {
     let response
     try {
-        response = await config.fetchImpl(indexer.statusUrl)
-    } catch (_) {
-        return ' /status'
+        response = await config.fetchImpl(indexer.statusUrl, { signal: AbortSignal.timeout(limit) })
+    } catch (error) {
+        return timedOut(error) ? ' /status timed out after ' + limit + ' ms' : ' /status'
     }
     if (!response || !response.ok) return ' /status'
 
@@ -126,17 +173,21 @@ async function indexerProblem (config, indexer) {
     if (body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'schemaReady')) {
         return body.schemaReady === true ? '' : ' schema'
     }
-    return await indexerSchemaReady(config, indexer.dbName) ? '' : ' schema'
+    stage.name = ' schema check'
+    return await indexerSchemaReady(config, indexer.dbName, limit) ? '' : ' schema'
 }
 
 // Name the first check that is not ready yet, or return '' when the whole stack is.
-async function stackProblem (config) {
+async function stackProblem (config, deadline) {
+    const cap = config.probeTimeoutMs || PROBE_TIMEOUT_MS
+    // Each probe gets the per-probe cap or whatever is left of the deadline, whichever is shorter.
+    const limit = () => probeTimeout(deadline === undefined ? NaN : deadline - Date.now(), cap)
     for (const indexer of config.indexers) {
-        const problem = await indexerProblem(config, indexer)
+        const problem = await indexerProblem(config, indexer, limit())
         if (problem) return indexer.coin + ' indexer' + problem
     }
     for (const url of config.minerHealthUrls) {
-        const problem = await minerProblem(url, config.fetchImpl)
+        const problem = await minerProblem(url, config.fetchImpl, limit())
         if (problem) return 'miner ' + url + ': ' + problem
     }
     return ''
@@ -150,9 +201,9 @@ async function waitForStack (config) {
     const deadline = Date.now() + config.timeoutMs
     let problem = ''
     do {
-        problem = await stackProblem(config)
+        problem = await stackProblem(config, deadline)
         if (!problem) return
-        await config.sleep(config.intervalMs)
+        await config.sleep(Math.min(config.intervalMs, Math.max(0, deadline - Date.now())))
     } while (Date.now() <= deadline)
     throw new Error('attest-mirror stack did not expose the indexer schema and healthy miners inside ' +
         config.timeoutMs + ' ms; last failure: ' + problem)
@@ -241,6 +292,8 @@ module.exports = {
     DEPENDENCY_ROOT,
     REQUIRED_DEPENDENCIES,
     REQUIRED_INDEXER_TABLES,
+    PROBE_TIMEOUT_MS,
+    probeTimeout,
     loadDependencies,
     responseOk,
     minerBodyProblem,
