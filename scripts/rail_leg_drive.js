@@ -17,6 +17,7 @@ const REPO_ROOT = path.resolve(__dirname, '..')
 const MOCHA = './node_modules/.bin/mocha'
 const DEFAULT_LIMIT_MINUTES = 45
 const DEFAULT_TEARDOWN_GRACE_MINUTES = 20
+const STACK_PREFIX_KEY = 'ATTEST_MIRROR_STACK_PREFIX='
 const ENV_KEYS_SET = [
     'COIN',
     'NETWORK',
@@ -115,9 +116,46 @@ function printDryRun (command) {
     console.log('env keys set: ' + command.envKeys.join(', '))
 }
 
-function findCompetingDrive () {
-    const psText = execFileSync('ps', ['-eo', 'pid=,ppid=,args='], { encoding: 'utf8' })
-    return otherRailDrives(psText, ancestorPids(psText, process.pid))[0]
+function stackPrefixFromEnvironment (text) {
+    const nulEntry = text.split('\0').find((item) => item.startsWith(STACK_PREFIX_KEY))
+    if (nulEntry) return nulEntry.slice(STACK_PREFIX_KEY.length) || null
+    const match = text.match(/(?:^|\s)ATTEST_MIRROR_STACK_PREFIX=([^\s\0]+)/)
+    return match ? match[1] : null
+}
+
+function processStackPrefix (pid, io = {}) {
+    const readFileSync = io.readFileSync || fs.readFileSync
+    const readProcess = io.execFileSync || execFileSync
+    try {
+        return stackPrefixFromEnvironment(readFileSync('/proc/' + pid + '/environ', 'utf8'))
+    } catch (error) {
+        try {
+            const text = readProcess('ps', ['eww', '-p', String(pid), '-o', 'command='], {
+                encoding: 'utf8',
+            })
+            return stackPrefixFromEnvironment(text)
+        } catch (psError) {
+            return null
+        }
+    }
+}
+
+function competingDriveForStack (drives, ownPrefix, stackPrefixForPid = processStackPrefix) {
+    if (!ownPrefix) return drives[0]
+    return drives.find((drive) => {
+        const prefix = stackPrefixForPid(drive.pid)
+        return prefix === ownPrefix
+    })
+}
+
+function findCompetingDrive ({
+    psText = execFileSync('ps', ['-eo', 'pid=,ppid=,args='], { encoding: 'utf8' }),
+    pid = process.pid,
+    stackPrefix = process.env.ATTEST_MIRROR_STACK_PREFIX,
+    stackPrefixForPid = processStackPrefix,
+} = {}) {
+    const drives = otherRailDrives(psText, ancestorPids(psText, pid))
+    return competingDriveForStack(drives, stackPrefix, stackPrefixForPid)
 }
 
 function runChild (command, limitMinutes, graceMinutes) {
@@ -256,7 +294,43 @@ async function main (argv) {
     return passed && !childResult.timedOut ? 0 : 1
 }
 
-module.exports = { buildLegCommand, otherRailDrives }
+module.exports = {
+    buildLegCommand,
+    competingDriveForStack,
+    findCompetingDrive,
+    otherRailDrives,
+    processStackPrefix,
+}
+
+if (typeof globalThis.describe === 'function' && typeof globalThis.it === 'function') {
+    const assert = require('assert')
+
+    globalThis.describe('bridge rail drive stack scope', function () {
+        globalThis.it('does not see a drive with another stack prefix as competing', function () {
+            const drives = [{ pid: 101 }, { pid: 202 }]
+            const prefixes = new Map([[101, 'stack-one'], [202, 'stack-two']])
+            const prefixForPid = (pid) => prefixes.get(pid)
+
+            assert.strictEqual(competingDriveForStack(drives, 'stack-one', prefixForPid), drives[0])
+            assert.strictEqual(competingDriveForStack([drives[1]], 'stack-one', prefixForPid), undefined)
+        })
+
+        globalThis.it('reads the stack prefix through ps when proc is unavailable', function () {
+            const prefix = processStackPrefix(202, {
+                readFileSync: () => { throw new Error('no proc') },
+                execFileSync: () => 'node rail ATTEST_MIRROR_STACK_PREFIX=stack-two OTHER=value',
+            })
+
+            assert.strictEqual(prefix, 'stack-two')
+        })
+
+        globalThis.it('does not let an unidentified drive block a prefixed stack', function () {
+            const drives = [{ pid: 303 }]
+
+            assert.strictEqual(competingDriveForStack(drives, 'stack-one', () => null), undefined)
+        })
+    })
+}
 
 if (require.main === module) {
     main(process.argv.slice(2)).then((code) => {
