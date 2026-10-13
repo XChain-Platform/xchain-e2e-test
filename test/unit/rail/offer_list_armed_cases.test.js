@@ -9,6 +9,7 @@
 const assert = require('assert');
 const {
     OFFER_LIST_ARMED_CASES,
+    armedOrderActions,
     checkArmedOutcome,
     expectMode,
     observedOutcome,
@@ -198,5 +199,55 @@ describe('offer list armed rail cases', function(){
         await assert.rejects(settlePairOutcome({ ...ok, sleep: null }), /sleep/);
         await assert.rejects(settlePairOutcome(undefined), /attempts/);
         assert.strictEqual(reads, 0);
+    });
+
+    it('builds the maker and counter-order actions from a plan', function(){
+        const seats = { listActionIndex: 7, memberAddress: 'bcrt1qmember', outsiderAddress: 'bcrt1qoutsider' };
+        const allow = planArmedCase(OFFER_LIST_ARMED_CASES[1], seats);
+        const block = planArmedCase(OFFER_LIST_ARMED_CASES[2], seats);
+        const order = {
+            makerChain: 'BTC', takerChain: 'DOGE', makerTick: 'MK', takerTick: 'TK',
+            amount: 10, makerGetAddress: 'dogemaker', expiration: 2000000000
+        };
+        const pair = armedOrderActions(allow, order);
+        assert.deepStrictEqual(pair.maker, {
+            action: 'ORDER',
+            params: {
+                giveCoin: 'BTC', giveTick: 'MK', giveAmount: 10, getCoin: 'DOGE', getTick: 'TK',
+                getAmount: 10, getAddress: 'dogemaker', expiration: 2000000000, allowList: '7', blockList: ''
+            }
+        });
+        assert.deepStrictEqual(pair.taker, {
+            action: 'ORDER',
+            params: {
+                giveCoin: 'DOGE', giveTick: 'TK', giveAmount: 10, getCoin: 'BTC', getTick: 'MK',
+                getAmount: 10, getAddress: 'bcrt1qoutsider', expiration: 2000000000, allowList: '', blockList: ''
+            }
+        });
+        const blocked = armedOrderActions(block, order);
+        assert.deepStrictEqual([blocked.maker.params.allowList, blocked.maker.params.blockList], ['', '7']);
+        assert.strictEqual(blocked.taker.params.getAddress, 'bcrt1qmember');
+        assert.strictEqual(blocked.taker.params.blockList, '');
+    });
+
+    it('rejects invalid order and plan inputs for the order actions', function(){
+        const seats = { listActionIndex: 7, memberAddress: 'bcrt1qmember', outsiderAddress: 'bcrt1qoutsider' };
+        const plan = planArmedCase(OFFER_LIST_ARMED_CASES[0], seats);
+        const order = {
+            makerChain: 'BTC', takerChain: 'DOGE', makerTick: 'MK', takerTick: 'TK',
+            amount: 10, makerGetAddress: 'dogemaker', expiration: 2000000000
+        };
+        const bad = [
+            { makerChain: '' }, { makerChain: 5 }, { takerChain: '' }, { takerChain: 'BTC' },
+            { makerTick: '' }, { takerTick: undefined }, { makerGetAddress: '' },
+            { amount: 0 }, { amount: 1.5 }, { amount: '10' }, { amount: Number.MAX_SAFE_INTEGER + 1 },
+            { expiration: 0 }, { expiration: 1.5 }, { expiration: -1 }
+        ];
+        for(const change of bad)
+            assert.throws(() => armedOrderActions(plan, { ...order, ...change }), /must/);
+        for(const change of [{ allowList: 7 }, { blockList: null }, { takerGetAddress: '' }])
+            assert.throws(() => armedOrderActions({ ...plan, ...change }, order), /must/);
+        assert.throws(() => armedOrderActions(undefined, order), /must/);
+        assert.throws(() => armedOrderActions(plan, undefined), /must/);
     });
 });

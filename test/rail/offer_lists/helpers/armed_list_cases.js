@@ -84,6 +84,71 @@ function planArmedCase(testCase, plan){
     };
 }
 
+function requireText(name, value){
+    if(typeof value !== 'string' || value === '')
+        throw new Error(name + ' must be a non-empty string');
+}
+
+function requirePositive(name, value){
+    if(!Number.isSafeInteger(value) || value <= 0)
+        throw new Error(name + ' must be a positive safe integer');
+}
+
+function requireOrderInputs(plan, order){
+    const o = order || {};
+    const p = plan || {};
+    requireText('makerChain', o.makerChain);
+    requireText('takerChain', o.takerChain);
+    if(o.makerChain === o.takerChain) throw new Error('makerChain and takerChain must differ');
+    requireText('makerTick', o.makerTick);
+    requireText('takerTick', o.takerTick);
+    requireText('makerGetAddress', o.makerGetAddress);
+    requirePositive('amount', o.amount);
+    requirePositive('expiration', o.expiration);
+    if(typeof p.allowList !== 'string') throw new Error('allowList must be a string');
+    if(typeof p.blockList !== 'string') throw new Error('blockList must be a string');
+    requireText('takerGetAddress', p.takerGetAddress);
+}
+
+// Builds the maker order carrying the list and the list-free counter-order. The
+// counter-order GET_ADDRESS is the maker-chain payout address the hub checks
+// against the maker's list members.
+function armedOrderActions(plan, order){
+    requireOrderInputs(plan, order);
+    const o = order;
+    const maker = {
+        action: 'ORDER',
+        params: {
+            giveCoin: o.makerChain,
+            giveTick: o.makerTick,
+            giveAmount: o.amount,
+            getCoin: o.takerChain,
+            getTick: o.takerTick,
+            getAmount: o.amount,
+            getAddress: o.makerGetAddress,
+            expiration: o.expiration,
+            allowList: plan.allowList,
+            blockList: plan.blockList
+        }
+    };
+    const taker = {
+        action: 'ORDER',
+        params: {
+            giveCoin: o.takerChain,
+            giveTick: o.takerTick,
+            giveAmount: o.amount,
+            getCoin: o.makerChain,
+            getTick: o.makerTick,
+            getAmount: o.amount,
+            getAddress: plan.takerGetAddress,
+            expiration: o.expiration,
+            allowList: '',
+            blockList: ''
+        }
+    };
+    return { maker, taker };
+}
+
 function requireChain(name, value){
     if(typeof value !== 'string' || value === '')
         throw new Error(name + ' must be a non-empty string');
@@ -150,6 +215,7 @@ function checkArmedOutcome(testCase, mode, outcome){
 module.exports = {
     ARMING_VARIABLES,
     OFFER_LIST_ARMED_CASES,
+    armedOrderActions,
     checkArmedOutcome,
     expectMode,
     observedOutcome,
