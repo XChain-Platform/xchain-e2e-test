@@ -87,6 +87,10 @@ const RAIL_DRIVES = {
         root: 'test/integration/bridge_rail_token.test.js',
         glob: 'test/integration/bridge_rail_token.test/*.test.js',
         legs: {
+            retract_at8: {
+                grep: [...TOKEN_ROOT, 'token AT8: the finalized row is retracted'].join('|'),
+                minPassed: 3,
+            },
             retract_at1_at2: {
                 grep: [...TOKEN_ROOT, TOKEN_AT1, 'token AT2:', 'token AT8:',
                     'token AT8 \\(ride-back\\):'].join('|'),
