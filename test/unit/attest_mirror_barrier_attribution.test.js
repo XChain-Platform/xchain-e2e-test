@@ -55,4 +55,16 @@ describe('attest mirror barrier attribution', function () {
         assert.ok(source.includes("require('./helpers/barrierAttribution')"))
         assert.strictEqual(/^const PARKED_CLASSES\s*=/m.test(source), false)
     })
+
+    it('wires at2b_forward_margin to the shared helper without a local parked-class constant', function () {
+        const source = fs.readFileSync(path.join(
+            __dirname,
+            '..',
+            'attestMirror',
+            'at2b_forward_margin.test.js'
+        ), 'utf8')
+        assert.ok(source.includes("require('./helpers/barrierAttribution')"))
+        assert.strictEqual(/^const PARKED_CLASSES\s*=/m.test(source), false)
+        assert.ok(source.includes('isAttributedPark('))
+    })
 })
