@@ -12,6 +12,7 @@
 
 const path = require('path')
 const fs = require('fs')
+const os = require('os')
 const { spawnSync } = require('child_process')
 const { readRailRoster, auditRailRoster } = require('./rail-roster')
 const { judgeRailRun, formatVerdict } = require('./rail-run-verdict')
@@ -24,6 +25,7 @@ const MOCHA_ARGS = [
     '--require', './test/initial_check.test.js',
     '--reporter', 'json'
 ]
+const REPORT_PLACEHOLDER = '<report-file>'
 
 function printAuditProblems(problems) {
     for (const problem of problems)
@@ -40,11 +42,11 @@ function listRoster(suites) {
 }
 
 function printDryRun(suites) {
-    console.log(['npx', ...mochaArgs(suites)].join(' '))
+    console.log(['npx', ...mochaArgs(suites, REPORT_PLACEHOLDER)].join(' '))
 }
 
-function mochaArgs(suites) {
-    return [...MOCHA_ARGS, ...suites.filter(entry => entry.run).map(entry => entry.file)]
+function mochaArgs(suites, reportFile) {
+    return [...MOCHA_ARGS, '--reporter-option', 'output=' + reportFile, ...suites.filter(entry => entry.run).map(entry => entry.file)]
 }
 
 function printSkipped(suites) {
@@ -72,18 +74,25 @@ function parseReport(output) {
 }
 
 function runRoster(suites) {
-    const result = spawnSync('npx', mochaArgs(suites), {
-        cwd: REPO_ROOT,
-        encoding: 'utf8'
-    })
-    let report
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'rail-roster-'))
+    const reportFile = path.join(directory, 'report.json')
     try {
-        report = parseReport(result.stdout)
-    } catch (error) {
-        console.error('rail roster: VENUE could not produce parseable mocha json: ' + error.message)
-        return 95
+        spawnSync('npx', mochaArgs(suites, reportFile), {
+            cwd: REPO_ROOT,
+            encoding: 'utf8',
+            maxBuffer: 1024 * 1024 * 1024
+        })
+        let report
+        try {
+            report = parseReport(fs.readFileSync(reportFile, 'utf8'))
+        } catch (error) {
+            console.error('rail roster: VENUE could not produce parseable mocha json: ' + error.message)
+            return 95
+        }
+        return printVerdict(suites, report)
+    } finally {
+        fs.rmSync(directory, { recursive: true, force: true })
     }
-    return printVerdict(suites, report)
 }
 
 function dispatch(argv, suites) {
