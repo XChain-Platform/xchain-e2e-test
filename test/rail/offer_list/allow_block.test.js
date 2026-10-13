@@ -86,17 +86,20 @@ describe('offer lists: allow and block on the regtest rail', function(){
         const counter = await swapHelper.sendSwapV0(blocked, COIN_CODE, tokenB, 5, COIN_CODE, tokenA, 10,
             blocked.address, expiration, null, null, 'Counter from the block list')
 
+        // Both SWAP rows are already indexed at status valid (sendSwapV0 waits for
+        // them), so an empty poll below means the indexer answered and holds no match.
+        // A poll that never got an answer throws WAIT_NO_ANSWER and fails this test.
+        // give-up-ok: deliberate negative poll, a null here is the refusal being proved
         const match = await indexerDatabase.waitForSwapMatch({
             giveActionIndex: Number(offer.swap.action_index),
-            getActionIndex: Number(counter.swap.action_index),
-            status: 'valid'
-        }, REFUSAL_WAIT_MS).catch(() => null)
-        assert(!match, 'the block-listed counter-offer must not match')
+            getActionIndex: Number(counter.swap.action_index)
+        }, REFUSAL_WAIT_MS)
+        assert.strictEqual(match, null, 'the block-listed counter-offer must not match')
 
-        const stillOpen = await indexerDatabase.waitForSwap({
-            source: maker.address, giveTick: tokenA, swapStatus: 'complete'
-        }, 1000).catch(() => null)
-        assert(!stillOpen || Number(stillOpen.action_index) !== Number(offer.swap.action_index),
-            'the offer that blocks the taker must not complete')
+        // give-up-ok: deliberate negative poll, a null here is the offer staying open
+        const completed = await indexerDatabase.waitForSwap({
+            txHash: offer.txHash, swapStatus: 'complete'
+        }, 1000)
+        assert.strictEqual(completed, null, 'the offer that blocks the taker must not complete')
     })
 })
