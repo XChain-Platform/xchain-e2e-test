@@ -18,6 +18,7 @@ const {
     pairMatchQuery,
     planArmedCase,
     requireArmingVariables,
+    runArmedCase,
     settlePairOutcome
 } = require('../../rail/offer_lists/helpers/armed_list_cases');
 
@@ -262,5 +263,69 @@ describe('offer list armed rail cases', function(){
         assert.throws(() => armedListAction(''), /memberAddress must be a non-empty string/);
         assert.throws(() => armedListAction(7), /memberAddress must be a non-empty string/);
         assert.throws(() => armedListAction(), /memberAddress must be a non-empty string/);
+    });
+
+    describe('runArmedCase', function(){
+        const order = {
+            makerChain: 'BTC', takerChain: 'DOGE', makerTick: 'MK', takerTick: 'TK',
+            amount: 10, makerGetAddress: 'dogemaker', expiration: 2000000000
+        };
+
+        function fakeIo(rows){
+            const t = { seen: [], queries: [] };
+            let next = 10;
+            t.io = {
+                submit: async (seat, act) => {
+                    t.seen.push(seat + ':' + act.action);
+                    next += 1;
+                    return next;
+                },
+                query: async (sql, params) => {
+                    t.queries.push(params);
+                    return rows;
+                },
+                sleep: async () => {},
+                memberAddress: 'bcrt1qmember',
+                outsiderAddress: 'bcrt1qoutsider',
+                order,
+                attempts: 2,
+                intervalMs: 0
+            };
+            return t;
+        }
+
+        it('drives one armed case through injected submit and query', async function(){
+            const t = fakeIo([{ status: 'finalized' }]);
+            const outcome = await runArmedCase(OFFER_LIST_ARMED_CASES[0], 'armed', t.io);
+            assert.strictEqual(outcome, 'matched');
+            assert.deepStrictEqual(t.seen, ['maker:LIST', 'maker:ORDER', 'taker:ORDER']);
+            assert.deepStrictEqual(t.queries, [['BTC', 12, 'DOGE', 13, 'DOGE', 13, 'BTC', 12]]);
+        });
+
+        it('returns unmatched after every attempt reads no row', async function(){
+            const t = fakeIo([]);
+            const outcome = await runArmedCase(OFFER_LIST_ARMED_CASES[2], 'armed', t.io);
+            assert.strictEqual(outcome, 'unmatched');
+            assert.strictEqual(t.queries.length, 2);
+        });
+
+        it('rejects an outcome that differs from the mode', async function(){
+            const t = fakeIo([]);
+            await assert.rejects(runArmedCase(OFFER_LIST_ARMED_CASES[1], 'inert', t.io), /expected matched/);
+        });
+
+        it('rejects a bad mode or io before any submit', async function(){
+            const t = fakeIo([]);
+            await assert.rejects(runArmedCase(OFFER_LIST_ARMED_CASES[0], 'bogus', t.io), /mode/);
+            t.io.query = null;
+            await assert.rejects(runArmedCase(OFFER_LIST_ARMED_CASES[0], 'armed', t.io), /query/);
+            assert.strictEqual(t.seen.length, 0);
+        });
+
+        it('rejects a submit result that is not a positive integer', async function(){
+            const t = fakeIo([]);
+            t.io.submit = async () => '7';
+            await assert.rejects(runArmedCase(OFFER_LIST_ARMED_CASES[0], 'armed', t.io), /LIST/);
+        });
     });
 });

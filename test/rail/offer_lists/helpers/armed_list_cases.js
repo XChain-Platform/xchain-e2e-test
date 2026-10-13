@@ -222,6 +222,41 @@ function checkArmedOutcome(testCase, mode, outcome){
         + expected.outcome + reason + ' but observed ' + outcome);
 }
 
+function requireDriverIo(mode, io){
+    if(mode !== 'armed' && mode !== 'inert') throw new Error('mode must be armed or inert');
+    const source = io || {};
+    for(const name of ['submit', 'query', 'sleep']){
+        if(typeof source[name] !== 'function') throw new Error(name + ' must be a function');
+    }
+}
+
+async function submitIndexed(io, seat, label, action){
+    const index = await io.submit(seat, action);
+    if(!Number.isSafeInteger(index) || index <= 0)
+        throw new Error(label + ' action index must be a positive safe integer');
+    return index;
+}
+
+// Drives one case through injected submit and query so the rail test only hands it
+// real broadcast and database calls. Resolves to the observed outcome.
+async function runArmedCase(testCase, mode, io){
+    requireDriverIo(mode, io);
+    const { memberAddress, outsiderAddress, order, attempts, intervalMs } = io;
+    const listActionIndex = await submitIndexed(io, 'maker', 'LIST', armedListAction(memberAddress));
+    const plan = planArmedCase(testCase, { listActionIndex, memberAddress, outsiderAddress });
+    const { maker, taker } = armedOrderActions(plan, order);
+    const makerIndex = await submitIndexed(io, 'maker', 'maker ORDER', maker);
+    const takerIndex = await submitIndexed(io, 'taker', 'taker ORDER', taker);
+    const { sql, params } = pairMatchQuery({
+        makerChain: order.makerChain, makerIndex, takerChain: order.takerChain, takerIndex
+    });
+    const outcome = await settlePairOutcome({
+        read: () => io.query(sql, params), sleep: io.sleep, attempts, intervalMs
+    });
+    checkArmedOutcome(testCase, mode, outcome);
+    return outcome;
+}
+
 module.exports = {
     ADDRESS_LIST_TYPE,
     ARMING_VARIABLES,
@@ -234,5 +269,6 @@ module.exports = {
     pairMatchQuery,
     planArmedCase,
     requireArmingVariables,
+    runArmedCase,
     settlePairOutcome
 };
