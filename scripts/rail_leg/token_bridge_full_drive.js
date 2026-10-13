@@ -108,6 +108,12 @@ function readJournal (runDir, name, drives = RAIL_DRIVES) {
     }
 }
 
+// A drive passes only when its process exited 0 and its fresh journal triages as a pass.
+function withExitCode (result, exitCode) {
+    if (exitCode === 0) return result
+    return { ...result, pass: false, reason: 'drive exited ' + exitCode + (result.reason ? ': ' + result.reason : '') }
+}
+
 // Drives both rails in order even when the first fails, so one run yields both journals.
 function runFullDrive (options, io = {}) {
     const runLegDrive = io.runLegDrive || spawnLegDrive
@@ -115,10 +121,14 @@ function runFullDrive (options, io = {}) {
     const exitCodes = {}
     for (const name of DRIVE_ORDER) {
         fs.mkdirSync(driveDir(options.runDir, name), { recursive: true })
+        // A journal left by an earlier run must never be read as this drive's result.
+        for (const stale of ['case-journal.jsonl', 'mocha-report.json']) {
+            fs.rmSync(path.join(driveDir(options.runDir, name), stale), { force: true })
+        }
         exitCodes[name] = runLegDrive(legDriveArgs(name, options))
     }
-    const token = readJournal(options.runDir, 'token', io.drives)
-    const base = readJournal(options.runDir, 'base', io.drives)
+    const token = withExitCode(readJournal(options.runDir, 'token', io.drives), exitCodes.token)
+    const base = withExitCode(readJournal(options.runDir, 'base', io.drives), exitCodes.base)
     const report = renderDriveReport({ date: options.date, heads, token, base })
     const reportPath = path.join(options.runDir, REPORT_NAME)
     fs.writeFileSync(reportPath, report)

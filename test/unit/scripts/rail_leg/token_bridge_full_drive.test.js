@@ -110,6 +110,35 @@ describe('token bridge full drive runner', function () {
         })
     })
 
+    it('fails a drive that exits nonzero even with a passing journal', function () {
+        withTempDir((dir) => {
+            const good = fakeLegDrive({ token: journal(2), base: journal(1) })
+            const runLegDrive = (args) => (good(args) === 0 && args[1] === 'base' ? 3 : 0)
+            const outcome = runFullDrive(
+                { runDir: dir, date: '2026-01-02', platformRoot: '/p', indexerRoot: '/i', limitMinutes: null },
+                { runLegDrive, exec: fakeExec, drives: DRIVES })
+            assert.strictEqual(outcome.pass, false)
+            assert.strictEqual(outcome.token.pass, true)
+            assert.strictEqual(outcome.base.pass, false)
+            assert.match(fs.readFileSync(outcome.reportPath, 'utf8'), /base drive: FAIL/)
+        })
+    })
+
+    it('ignores stale passing journals from an earlier run', function () {
+        withTempDir((dir) => {
+            for (const name of ['token', 'base']) {
+                fs.mkdirSync(path.join(dir, name), { recursive: true })
+                fs.writeFileSync(path.join(dir, name, 'case-journal.jsonl'), journal(2))
+            }
+            const outcome = runFullDrive(
+                { runDir: dir, date: '2026-01-02', platformRoot: '/p', indexerRoot: '/i', limitMinutes: null },
+                { runLegDrive: () => 1, exec: fakeExec, drives: DRIVES })
+            assert.strictEqual(outcome.pass, false)
+            assert.ok(outcome.token.reason.includes('no journal'))
+            assert.strictEqual(outcome.base.pass, false)
+        })
+    })
+
     it('reads a missing journal as a failed drive', function () {
         withTempDir((dir) => {
             const result = readJournal(dir, 'token', DRIVES)
