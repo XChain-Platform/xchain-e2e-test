@@ -9,7 +9,10 @@
 const assert = require('assert');
 const {
     OFFER_LIST_ARMED_CASES,
+    checkArmedOutcome,
     expectMode,
+    observedOutcome,
+    pairMatchQuery,
     planArmedCase,
     requireArmingVariables
 } = require('../../rail/offer_lists/helpers/armed_list_cases');
@@ -118,5 +121,46 @@ describe('offer list armed rail cases', function(){
         for(const bad of ['', undefined])
             assert.throws(() => planArmedCase(c, { ...plan, outsiderAddress: bad }), /outsiderAddress/);
         assert.throws(() => planArmedCase(c, { ...plan, outsiderAddress: plan.memberAddress }), /differ/);
+    });
+
+    it('reads the pair match outcome from cross_chain_matches rows', function(){
+        const pair = { makerChain: 'BTC', makerIndex: 11, takerChain: 'DOGE', takerIndex: 7 };
+        const q = pairMatchQuery(pair);
+        assert.deepStrictEqual(q.params, ['BTC', 11, 'DOGE', 7, 'DOGE', 7, 'BTC', 11]);
+        assert(/cross_chain_matches/.test(q.sql));
+        assert(/match_id, status/.test(q.sql));
+        for(const bad of ['', undefined, 5])
+            assert.throws(() => pairMatchQuery({ ...pair, makerChain: bad }), /makerChain/);
+        for(const bad of ['', null])
+            assert.throws(() => pairMatchQuery({ ...pair, takerChain: bad }), /takerChain/);
+        for(const bad of [0, -1, 1.5, '7', Number.MAX_SAFE_INTEGER + 1])
+            assert.throws(() => pairMatchQuery({ ...pair, makerIndex: bad }), /makerIndex/);
+        for(const bad of [0, NaN, undefined])
+            assert.throws(() => pairMatchQuery({ ...pair, takerIndex: bad }), /takerIndex/);
+        assert.throws(() => pairMatchQuery(undefined), /makerChain/);
+
+        assert.strictEqual(observedOutcome([]), 'unmatched');
+        assert.strictEqual(observedOutcome([{ status: 'retracted' }]), 'unmatched');
+        assert.strictEqual(observedOutcome([{ status: 'finalized' }]), 'matched');
+        assert.strictEqual(observedOutcome([{ status: 'retracted' }, { status: 'finalized' }]), 'matched');
+        assert.throws(() => observedOutcome(null), /array/);
+        assert.throws(() => observedOutcome({}), /array/);
+        assert.throws(() => observedOutcome([{ status: 'pending' }]), /pending/);
+        assert.throws(() => observedOutcome([{ status: 'finalized' }, {}]), /status/);
+
+        const [first, second] = OFFER_LIST_ARMED_CASES;
+        checkArmedOutcome(first, 'armed', 'matched');
+        checkArmedOutcome(second, 'inert', 'matched');
+        checkArmedOutcome(second, 'armed', 'unmatched');
+        assert.throws(
+            () => checkArmedOutcome(second, 'armed', 'matched'),
+            (err) => err instanceof Error
+                && err.message.includes(second.name)
+                && err.message.includes('armed')
+                && err.message.includes('unmatched (taker not on allow list)')
+                && err.message.includes('observed matched')
+        );
+        assert.throws(() => checkArmedOutcome(first, 'armed', 'unmatched'), /expected matched but/);
+        assert.throws(() => checkArmedOutcome(first, 'bogus', 'matched'), /mode/);
     });
 });
