@@ -207,6 +207,20 @@ describe('bridge rail leg map', function () {
         }
     });
 
+    it('selects only the root T0 cases and the AT8 retraction case in the token retract_at8 leg', function () {
+        const leg = RAIL_DRIVES.token.legs.retract_at8;
+        assert.strictEqual(leg.minPassed, 3);
+        const fullTitles = reports.token.full.passes.map((test) => test.fullTitle);
+        const selected = selectedTitles(fullTitles, leg.grep);
+        const t0 = fullTitles.filter((title) => title.includes('token T0:'));
+        assert.strictEqual(t0.length, 2);
+        assert.strictEqual(selected.length, 3);
+        assert.ok(t0.every((title) => selected.includes(title)));
+        const rest = selected.filter((title) => !t0.includes(title));
+        assert.strictEqual(rest.length, 1);
+        assert.ok(rest[0].includes('token AT8: the finalized row is retracted'));
+    });
+
     it('selects, in every split list_share leg, the upstream cases each selected case reads', function () {
         const dependencies = [
             ['list_share AT2:', ['list_share AT1:']],
