@@ -27,19 +27,22 @@ function captureDriveHeads(roots, readHead = gitHead){
     return heads;
 }
 
-// Judge live heads against the pinned ones. A tree whose head could not be read at drive start
-// is not pinned and so is not judged; a pinned tree that now reads nothing counts as moved.
+// Judge live heads against the pinned ones. A tree whose head was never captured at drive start
+// is a failure (the drive cannot be judged without it); a pinned tree that now reads nothing, or
+// reads a different commit, counts as moved.
 function judgeDriveHeads(pinned, live){
     const moved = [];
+    const missing = [];
     for(const name of HEAD_NAMES){
         const was = pinned && pinned[name];
-        if(!was) continue;
+        if(!was){ missing.push(name); continue; }
         const now = (live && live[name]) || null;
         if(now !== was) moved.push({ name, pinned: was, live: now });
     }
-    const problems = moved.map(m => 'the ' + m.name + ' head moved during the drive: pinned at ' +
-        m.pinned + ', live now ' + (m.live || 'unreadable'));
-    return { ok: moved.length === 0, moved, problems };
+    const problems = missing.map(n => 'the ' + n + ' head was never captured at drive start')
+        .concat(moved.map(m => 'the ' + m.name + ' head moved during the drive: pinned at ' +
+            m.pinned + ', live now ' + (m.live || 'unreadable')));
+    return { ok: moved.length === 0 && missing.length === 0, moved, missing, problems };
 }
 
 module.exports = { HEAD_NAMES, driveRoots, gitHead, captureDriveHeads, judgeDriveHeads };

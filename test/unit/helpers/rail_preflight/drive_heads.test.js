@@ -35,7 +35,7 @@ describe('rail_preflight drive_heads', function(){
     it('passes when no head moved', function(){
         const pinned = { platform: A, e2e: B, indexer: C };
         const res = judgeDriveHeads(pinned, Object.assign({}, pinned));
-        assert.deepStrictEqual(res, { ok: true, moved: [], problems: [] });
+        assert.deepStrictEqual(res, { ok: true, moved: [], missing: [], problems: [] });
     });
 
     it('fails naming both commits when a live head moved', function(){
@@ -53,9 +53,19 @@ describe('rail_preflight drive_heads', function(){
         assert.ok(res.problems[0].includes('unreadable'));
     });
 
-    it('does not judge a tree that was never pinned', function(){
+    it('fails when a tree was never pinned', function(){
         const res = judgeDriveHeads({ platform: null, e2e: B, indexer: C }, { platform: D, e2e: B, indexer: C });
-        assert.strictEqual(res.ok, true);
+        assert.strictEqual(res.ok, false);
+        assert.deepStrictEqual(res.missing, ['platform']);
+        assert.ok(/platform head was never captured/.test(res.problems.join('\n')));
+    });
+
+    it('fails when nothing was pinned at all', function(){
+        for(const pinned of [null, undefined, {}]){
+            const res = judgeDriveHeads(pinned, { platform: A, e2e: B, indexer: C });
+            assert.strictEqual(res.ok, false);
+            assert.deepStrictEqual(res.missing, ['platform', 'e2e', 'indexer']);
+        }
     });
 
     it('reports every moved tree', function(){

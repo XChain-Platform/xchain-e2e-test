@@ -379,6 +379,8 @@ describe('token AT9: the gates, and the dated acceptance record', function () {
             'the gate child does not resolve Node 22 first on PATH: ' + child.tail);
         const pinned = state.evidence.driveHeads;
         assert.ok(pinned, 'token AT9 found no heads pinned at drive start');
+        const uncaptured = judgeDriveHeads(pinned, pinned).missing;
+        assert.deepStrictEqual(uncaptured, [], 'token AT9 has no head pinned at drive start for: ' + uncaptured.join(', '));
         at9.record = { date: new Date().toISOString().slice(0, 10), node: process.version,
             platformRoot: PLATFORM_ROOT, platformHead: pinned.platform, e2eHead: pinned.e2e,
             indexerHead: pinned.indexer };
