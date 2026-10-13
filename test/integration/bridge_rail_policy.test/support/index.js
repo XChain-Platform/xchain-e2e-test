@@ -23,6 +23,7 @@ const path = require('path');
 
 const bridgeRailVenue = require('../../../helpers/bridgeRailVenue');
 const { policyBridgeRailVenue } = require('./policy_venue');
+const { resolveRailVenueBasePort } = require('../../../helpers/attestMirrorVenue');
 // Bind the shared drive factory to the policy venue subclass only while the factory loads.
 function loadPolicyDriveFactory() {
     const inherited = bridgeRailVenue.BridgeRailVenue;
@@ -807,7 +808,8 @@ before(async function () {
 // it unchanged; the policy readings are bound over them.
 const POLICY_DRIVE = {
     label: 'bridgerailpolicy',
-    basePort: 47000,
+    // AB_VENUE_BASE_PORT (the stack's own window) wins over the fixed 47000 base.
+    basePort: resolveRailVenueBasePort(47000, process.env),
     outerTitle: 'XPOLICY acceptance drive on the BTC/DOGE regtest rail (policy AT1 to AT10)',
     journalSuite: 'bridgeRailPolicy',
     logTag: 'POLICY RAIL',
