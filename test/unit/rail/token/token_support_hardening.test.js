@@ -2,7 +2,7 @@
 
 const assert = require('assert')
 
-const tokenSupport = require('../../integration/bridge_rail_token.test/support/token')
+const tokenSupport = require('../../../integration/bridge_rail_token.test/support/token')
 
 function support(overrides){
     const calls = []
