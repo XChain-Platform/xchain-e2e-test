@@ -16,6 +16,7 @@
 
 const assert = require('assert');
 const fs = require('fs');
+const path = require('path');
 const { execFileSync } = require('child_process');
 const axios = require('axios');
 
