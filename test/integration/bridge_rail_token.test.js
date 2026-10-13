@@ -93,6 +93,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const { journalCase } = require('../helpers/bridgeRailVenue');
 const loadRailGateContract = require('./lib/rail_gate_contract');
+const { captureDriveHeads, judgeDriveHeads } = require('../helpers/rail_preflight/drive_heads');
 const { runReplayPin } = require('../helpers/rail_preflight/token_replay_pin_run');
 const {
     assert,
@@ -376,8 +377,13 @@ describe('token AT9: the gates, and the dated acceptance record', function () {
         const child = run('node', ['-p', 'process.versions.node'], E2E_ROOT, gateEnv());
         assert.ok(child.status === 0 && /^22\./.test(child.out.trim()),
             'the gate child does not resolve Node 22 first on PATH: ' + child.tail);
+        const pinned = state.evidence.driveHeads;
+        assert.ok(pinned, 'token AT9 found no heads pinned at drive start');
+        const uncaptured = judgeDriveHeads(pinned, pinned).missing;
+        assert.deepStrictEqual(uncaptured, [], 'token AT9 has no head pinned at drive start for: ' + uncaptured.join(', '));
         at9.record = { date: new Date().toISOString().slice(0, 10), node: process.version,
-            platformRoot: PLATFORM_ROOT, e2eHead: headOf(E2E_ROOT), indexerHead: headOf(INDEXER_ROOT) };
+            platformRoot: PLATFORM_ROOT, platformHead: pinned.platform, e2eHead: pinned.e2e,
+            indexerHead: pinned.indexer };
     });
 
     it('the drive ran AT1 to AT8 in this file\'s order and every drivable case passed', function () {
@@ -479,6 +485,11 @@ describe('token AT9: the gates, and the dated acceptance record', function () {
 
     it('prints the dated acceptance record', function () {
         assert.ok(at9.record, 'AT9 took no record header');
+        const heads = judgeDriveHeads(state.evidence.driveHeads,
+            captureDriveHeads(state.evidence.driveHeadRoots));
+        at9.record.headsMoved = heads.moved;
+        assert.ok(heads.ok, 'a live head moved since drive start, so the record does not describe the tree that ran:\n' +
+            heads.problems.join('\n'));
         const record = Object.assign({ rail: 'BTC/DOGE regtest', drive: at9.drive,
             ordinaryCi: at9.ordinaryCi, activationConstantsParity: at9.parity, replayPin: at9.replayPin }, at9.record);
         console.log('\n=== token bridge acceptance record ' + record.date + ' ===\n' +
