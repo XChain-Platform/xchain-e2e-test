@@ -81,13 +81,12 @@ const {
     widenArithmetic,
 } = require('./helpers/mirrorDrillWaits')
 const { delayedDeliveryWindow } = require('./helpers/deliveryWindow')
+const { BARRIER_REASON, isAttributedPark } = require('./helpers/barrierAttribution')
 const vmHelper = require('../helpers/vmHelper')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
 
 const FIXED_BODY = '{"score":23,"meta":"at2b-margin"}'
 
-const BARRIER_REASON = 'attest_response_sync_barrier'
-const PARKED_CLASSES = ['barrier_defer', 'wedged']
 const MIRROR_TABLE   = 'attestation_responses'
 
 const DEADLINE_BLOCKS = 60
@@ -304,7 +303,7 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
             ', so it cannot exercise the response barrier: ' + JSON.stringify(crossing.tip))
         const held = await until(async () => {
             const a = await statusOf(DELAYED)
-            return { ok: a.reason === BARRIER_REASON && PARKED_CLASSES.includes(a.klass), a: a }
+            return { ok: isAttributedPark(a), a: a }
         }, 6 * 60 * 1000)
         assert.ok(held.ok,
             'indexer ' + DELAYED + ' never reported ' + BARRIER_REASON + ' while its delivery was delayed. ' +
