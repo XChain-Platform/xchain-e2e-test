@@ -14,7 +14,8 @@ const {
     observedOutcome,
     pairMatchQuery,
     planArmedCase,
-    requireArmingVariables
+    requireArmingVariables,
+    settlePairOutcome
 } = require('../../rail/offer_lists/helpers/armed_list_cases');
 
 describe('offer list armed rail cases', function(){
@@ -162,5 +163,40 @@ describe('offer list armed rail cases', function(){
         );
         assert.throws(() => checkArmedOutcome(first, 'armed', 'unmatched'), /expected matched but/);
         assert.throws(() => checkArmedOutcome(first, 'bogus', 'matched'), /mode/);
+    });
+
+    it('settles the pair outcome by bounded polling', async function(){
+        let reads = 0;
+        let sleeps = 0;
+        const sleep = async () => { sleeps++; };
+        const rows = [[], [{ status: 'finalized' }]];
+        const early = await settlePairOutcome({ read: async () => rows[reads++], sleep, attempts: 5, intervalMs: 0 });
+        assert.deepStrictEqual([early, reads, sleeps], ['matched', 2, 1]);
+
+        reads = 0;
+        sleeps = 0;
+        const read = async () => { reads++; return [{ status: 'retracted' }]; };
+        const late = await settlePairOutcome({ read, sleep, attempts: 3, intervalMs: 5 });
+        assert.deepStrictEqual([late, reads, sleeps], ['unmatched', 3, 2]);
+
+        const bad = async () => [{ status: 'pending' }];
+        await assert.rejects(settlePairOutcome({ read: bad, sleep, attempts: 2, intervalMs: 0 }), /pending/);
+        const failing = async () => { throw new Error('read failed'); };
+        await assert.rejects(settlePairOutcome({ read: failing, sleep, attempts: 2, intervalMs: 0 }), /read failed/);
+    });
+
+    it('rejects invalid settle arguments before any read', async function(){
+        let reads = 0;
+        const read = async () => { reads++; return []; };
+        const sleep = async () => {};
+        const ok = { read, sleep, attempts: 1, intervalMs: 0 };
+        for(const attempts of [0, -1, 1.5, '2', undefined])
+            await assert.rejects(settlePairOutcome({ ...ok, attempts }), /attempts/);
+        for(const intervalMs of [-1, 0.5, '1', undefined, Infinity])
+            await assert.rejects(settlePairOutcome({ ...ok, intervalMs }), /intervalMs/);
+        await assert.rejects(settlePairOutcome({ ...ok, read: null }), /read/);
+        await assert.rejects(settlePairOutcome({ ...ok, sleep: null }), /sleep/);
+        await assert.rejects(settlePairOutcome(undefined), /attempts/);
+        assert.strictEqual(reads, 0);
     });
 });

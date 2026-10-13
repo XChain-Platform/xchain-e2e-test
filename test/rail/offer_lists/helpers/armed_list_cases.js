@@ -121,6 +121,22 @@ function observedOutcome(rows){
     return rows.some((row) => row.status === 'finalized') ? 'matched' : 'unmatched';
 }
 
+// Reads the pair rows up to attempts times. An unmatched pair cannot be told apart
+// from one the hub has not matched yet, so only the last read decides unmatched.
+async function settlePairOutcome({ read, sleep, attempts, intervalMs } = {}){
+    if(!Number.isSafeInteger(attempts) || attempts <= 0)
+        throw new Error('attempts must be a positive integer');
+    if(!Number.isSafeInteger(intervalMs) || intervalMs < 0)
+        throw new Error('intervalMs must be a non-negative integer');
+    if(typeof read !== 'function') throw new Error('read must be a function');
+    if(typeof sleep !== 'function') throw new Error('sleep must be a function');
+    for(let attempt = 1; attempt <= attempts; attempt++){
+        if(observedOutcome(await read()) === 'matched') return 'matched';
+        if(attempt < attempts) await sleep(intervalMs);
+    }
+    return 'unmatched';
+}
+
 function checkArmedOutcome(testCase, mode, outcome){
     if(mode !== 'armed' && mode !== 'inert')
         throw new Error('mode must be armed or inert');
@@ -139,5 +155,6 @@ module.exports = {
     observedOutcome,
     pairMatchQuery,
     planArmedCase,
-    requireArmingVariables
+    requireArmingVariables,
+    settlePairOutcome
 };
