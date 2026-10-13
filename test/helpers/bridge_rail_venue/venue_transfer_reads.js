@@ -3,6 +3,13 @@
 const assert = require('assert');
 const { SEED_ROUND_BASE, COIN_USD_SEED } = require('./constants');
 
+// How often a long wait says it is still waiting.
+const PROGRESS_INTERVAL_MS = 60000;
+
+function progressLogger(o) {
+    return typeof o.log === 'function' ? o.log : (line) => console.log(line);
+}
+
 function buildVenueTransferReads(deps) {
 const { mariadb, xchainPrice, verdictOf } = deps;
 
@@ -12,6 +19,10 @@ class VenueMethods {
         const deadline = Date.now() + Number(o.timeoutMs ||
             (String(chain).toUpperCase() === 'BTC' ? 70 : 25) * 60 * 1000);
         const id = String(transferId);
+        const log = progressLogger(o);
+        const every = Number(o.progressMs || PROGRESS_INTERVAL_MS);
+        const startedAt = Date.now();
+        let nextProgress = startedAt + every;
         while (Date.now() < deadline) {
             let rows = [];
             try {
@@ -27,9 +38,39 @@ class VenueMethods {
                     this['_chainIndexerUrl'](chain));
                 return rows[0];
             }
-            await new Promise((r) => setTimeout(r, 3000));
+            if (Date.now() >= nextProgress) {
+                nextProgress = Date.now() + every;
+                log(await this['_bridgeAppliedProgress'](chain, id, startedAt, deadline));
+            }
+            await new Promise((r) => setTimeout(r, o.pollMs === undefined ? 3000 : Number(o.pollMs)));
         }
         return null;
+    }
+
+    /**
+     * One progress line for waitForBridgeApplied: the destination tip's block_time and the
+     * AWAITED transfer's own effective_time (looked up by transfer_id on the destination's
+     * mirror, never the newest row), since the leg applies at the first block whose
+     * block_time reaches that stamp. Never throws: a failed read prints as `unread`.
+     */
+    async ['_bridgeAppliedProgress'](chain, id, startedAt, deadline) {
+        const now = Date.now();
+        let tip = 'unread';
+        let eff = 'unread';
+        try {
+            const rows = await this.queryIndexerDb(chain,
+                'SELECT block_index, block_time FROM blocks ORDER BY block_index DESC LIMIT 1');
+            if (rows.length) tip = 'block ' + rows[0].block_index + ' block_time ' + rows[0].block_time;
+        } catch (e) { /* reported as unread */ }
+        try {
+            const rows = await this.queryMirrorDb(chain,
+                'SELECT effective_time FROM bridge_transfers WHERE transfer_id = ? LIMIT 1', [id]);
+            eff = rows.length ? String(rows[0].effective_time) : 'not mirrored';
+        } catch (e) { /* reported as unread */ }
+        return 'waitForBridgeApplied ' + chain + ' ' + id + ': elapsed ' +
+            Math.round((now - startedAt) / 1000) + 's, left ' +
+            Math.max(0, Math.round((deadline - now) / 1000)) + 's, dest tip ' + tip +
+            ', transfer effective_time ' + eff;
     }
 
     /**
@@ -55,6 +96,10 @@ class VenueMethods {
         const deadline = Date.now() + Number(o.timeoutMs || 240000);
         assert.ok(this.hubs.length, 'bridgeRailVenue: no hub database to poll');
         let last = null;
+        const log = progressLogger(o);
+        const every = Number(o.progressMs || PROGRESS_INTERVAL_MS);
+        const startedAt = Date.now();
+        let nextProgress = startedAt + every;
         while (Date.now() < deadline) {
             const seen = [];
             let found = null;
@@ -72,7 +117,15 @@ class VenueMethods {
                 last = { hub: hub.index, rows: rows.length };
             }
             if (found) { found.finalizedOn = seen; return found; }
-            await new Promise((r) => setTimeout(r, 2000));
+            // Elapsed and budget only. No row is quoted here: nothing has matched yet, so any
+            // row's effective_time would belong to some other transfer.
+            if (Date.now() >= nextProgress) {
+                const now = Date.now();
+                nextProgress = now + every;
+                log('waitForFinalizedTransfer: elapsed ' + Math.round((now - startedAt) / 1000) +
+                    's, left ' + Math.max(0, Math.round((deadline - now) / 1000)) + 's');
+            }
+            await new Promise((r) => setTimeout(r, o.pollMs === undefined ? 2000 : Number(o.pollMs)));
         }
         this['_lastTransferPoll'] = last;
         return null;

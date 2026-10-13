@@ -40,7 +40,11 @@ function makeAnchorParseContext({ coin, network }){
         decoderDb: {},
         indexerDb: makeIndexerDb(rows),
         util: {},
-        mapper: { createMappings: async () => {} }
+        mapper: { createMappings: async () => {} },
+        // Anchor keeps the action itself as `actions`, and the fold's replay guard asks it
+        // whether ARCHIVE_REPLAY_WRAPPER_WATERMARK is on; the indexer ships that change
+        // unarmed on every network, so the stub answers as the indexer does.
+        protocolChanges: { isEnabled: async () => false }
     };
     return { action, rows };
 }
