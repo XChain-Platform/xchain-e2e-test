@@ -161,6 +161,34 @@ describe('bridge rail overlap detection over the process tree', function () {
     })
 })
 
+// These cases lived inside scripts/rail_leg_drive.js, which registered them in every
+// mocha run that loaded the script, including the policy rail drive's dry-run roster.
+describe('bridge rail drive stack scope', function () {
+    it('does not see a drive with another stack prefix as competing', function () {
+        const drives = [{ pid: 101 }, { pid: 202 }]
+        const prefixes = new Map([[101, 'stack-one'], [202, 'stack-two']])
+        const prefixForPid = (pid) => prefixes.get(pid)
+
+        assert.strictEqual(runner.competingDriveForStack(drives, 'stack-one', prefixForPid), drives[0])
+        assert.strictEqual(runner.competingDriveForStack([drives[1]], 'stack-one', prefixForPid), undefined)
+    })
+
+    it('reads the stack prefix through ps when proc is unavailable', function () {
+        const prefix = runner.processStackPrefix(202, {
+            readFileSync: () => { throw new Error('no proc') },
+            execFileSync: () => 'node rail ATTEST_MIRROR_STACK_PREFIX=stack-two OTHER=value',
+        })
+
+        assert.strictEqual(prefix, 'stack-two')
+    })
+
+    it('does not let an unidentified drive block a prefixed stack', function () {
+        const drives = [{ pid: 303 }]
+
+        assert.strictEqual(runner.competingDriveForStack(drives, 'stack-one', () => null), undefined)
+    })
+})
+
 describe('bridge rail leg drive CLI', function () {
     it('refuses a competing drive with exit two and its pid', function () {
         const result = runCli([

@@ -577,6 +577,19 @@ describe('XBRIDGE transfer: hub-signed record to indexer settle pass (base AT1, 
                 }))
             });
 
+            // Past the hub's BRIDGE_PROOF_READY_SNAPSHOT flag day (regtest: genesis) a BTC leg is
+            // held until a BTC checkpoint at or above its block exists, and every follower
+            // demands the stamp equal its own first covering checkpoint. One identical row at
+            // SNAPSHOT on every hub keeps the stamp at SNAPSHOT, the block the round used before.
+            for(const hub of mvh.hubs){
+                await hub.db.doQuery(
+                    'INSERT INTO state_checkpoints (chain, network, block_index, block_hash, ledger_hash, ' +
+                    'actions_hash, contract_hash, checkpoint_seq, snapshot_block, validator_signatures) ' +
+                    'VALUES (?,?,?,?,?,?,?,?,?,?)',
+                    ['BTC', NETWORK, SNAPSHOT, 'cc'.repeat(32), 'dd'.repeat(32), 'ee'.repeat(32),
+                        'ff'.repeat(32), SNAPSHOT / 6, SNAPSHOT, '[]']);
+            }
+
             // Point every hub's BRIDGE engine at the pending source. The harness repoints
             // the DEX engine's map only, and the bridge engine resolved its own (empty) map
             // at construction, so it is repointed here the same way.
