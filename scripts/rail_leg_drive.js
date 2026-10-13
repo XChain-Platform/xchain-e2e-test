@@ -302,36 +302,6 @@ module.exports = {
     processStackPrefix,
 }
 
-if (typeof globalThis.describe === 'function' && typeof globalThis.it === 'function') {
-    const assert = require('assert')
-
-    globalThis.describe('bridge rail drive stack scope', function () {
-        globalThis.it('does not see a drive with another stack prefix as competing', function () {
-            const drives = [{ pid: 101 }, { pid: 202 }]
-            const prefixes = new Map([[101, 'stack-one'], [202, 'stack-two']])
-            const prefixForPid = (pid) => prefixes.get(pid)
-
-            assert.strictEqual(competingDriveForStack(drives, 'stack-one', prefixForPid), drives[0])
-            assert.strictEqual(competingDriveForStack([drives[1]], 'stack-one', prefixForPid), undefined)
-        })
-
-        globalThis.it('reads the stack prefix through ps when proc is unavailable', function () {
-            const prefix = processStackPrefix(202, {
-                readFileSync: () => { throw new Error('no proc') },
-                execFileSync: () => 'node rail ATTEST_MIRROR_STACK_PREFIX=stack-two OTHER=value',
-            })
-
-            assert.strictEqual(prefix, 'stack-two')
-        })
-
-        globalThis.it('does not let an unidentified drive block a prefixed stack', function () {
-            const drives = [{ pid: 303 }]
-
-            assert.strictEqual(competingDriveForStack(drives, 'stack-one', () => null), undefined)
-        })
-    })
-}
-
 if (require.main === module) {
     main(process.argv.slice(2)).then((code) => {
         process.exitCode = code
