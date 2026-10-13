@@ -20,7 +20,7 @@ const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
 
-const SUITE_DIR = path.resolve(__dirname, '..', '..', 'integration', 'bridge_rail_token.test');
+const SUITE_DIR = path.resolve(__dirname, '..', '..', '..', 'integration', 'bridge_rail_token.test');
 const MIN_CASES = 5;
 const GUARD = /assert\.ok\(\s*state\.evidence\.at1_dogeChild[^;]*must have run/;
 
