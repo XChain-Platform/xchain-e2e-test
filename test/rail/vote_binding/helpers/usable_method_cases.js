@@ -42,4 +42,11 @@ function expectMode(value){
     throw new Error('XC_VOTE_CALLBACK_BINDING_EXPECT must be armed or inert');
 }
 
-module.exports = { CALLBACK_TARGET_SOURCE, USABLE_METHOD_CASES, expectMode };
+function readCaseStatus(indexed){
+    if(!indexed) throw new Error('no indexed result');
+    if(indexed.statusKnown !== true)
+        throw new Error('no status for action(s) ' + JSON.stringify(indexed.statusUnknownActions));
+    return indexed.status;
+}
+
+module.exports = { CALLBACK_TARGET_SOURCE, USABLE_METHOD_CASES, expectMode, readCaseStatus };
