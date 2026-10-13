@@ -71,11 +71,20 @@ class VenueMethods {
 
     /**
      * Every hub's tail, for a refusal that needs to name which hub said what.
+     *
+     * A hub logs a tip-age line and a "no LTC indexer" line on every tick, so on a long wait
+     * they fill the last N lines and push out the line that names the gate a finalize is
+     * stuck behind. Those repeating lines are dropped BEFORE the slice, and a bridge hold or
+     * a checkpoint stall line is never dropped, even if it also carries a tip-age phrase.
      */
     hubTails(lines) {
         const n = Number(lines || 40);
+        const keep = /bridge[^\n]*\bhold|\bhold[^\n]*bridge|checkpoint[^\n]*\bstall|\bstall[^\n]*checkpoint/i;
+        const noise = /tip[ _-]?age|\btip\b[^\n]*\b(older|stale|too old)\b|no LTC\b/i;
         return this.hubs.map((h) => '--- hub ' + h.index + ' ---\n' +
-            String(this.btcVenue.logTail('hub' + h.index) || '').split('\n').slice(-n).join('\n')).join('\n');
+            String(this.btcVenue.logTail('hub' + h.index) || '').split('\n')
+                .filter((l) => keep.test(l) || !noise.test(l))
+                .slice(-n).join('\n')).join('\n');
     }
 
     indexerTails(lines) {
