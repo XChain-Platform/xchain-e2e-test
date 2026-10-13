@@ -23,6 +23,28 @@ const mariadb = require('mariadb')
 const topology = require('./hubMirrorTopology')
 const { SEED_SENTINEL_ROUNDS } = require('./xchainPriceConstants')
 
+// clearPair opens its connection with a bounded wait and retries a failed connect.
+const CLEAR_PAIR_CONNECT_TIMEOUT_MS = 5000
+const CLEAR_PAIR_CONNECT_RETRIES = 3
+const CLEAR_PAIR_RETRY_DELAY_MS = 250
+
+// A busy rail host can stall the handshake or refuse early connects, so a seed
+// step retries the connect a few times before it fails. Only the connect is retried.
+async function connectWithRetry(params){
+    const opts = Object.assign({ connectTimeout: CLEAR_PAIR_CONNECT_TIMEOUT_MS }, params)
+    let lastErr
+    for (let attempt = 0; attempt <= CLEAR_PAIR_CONNECT_RETRIES; attempt++){
+        try {
+            return await mariadb.createConnection(opts)
+        } catch (err){
+            lastErr = err
+            if (attempt < CLEAR_PAIR_CONNECT_RETRIES)
+                await new Promise(r => setTimeout(r, CLEAR_PAIR_RETRY_DELAY_MS))
+        }
+    }
+    throw lastErr
+}
+
 // Which database this fixture WRITES to: always the one settlement reads, never
 // the hub upstream of it, which is the opposite of what oraclePriceHelper does.
 //
@@ -97,6 +119,9 @@ const FIXTURE_DELETE_SQL = 'DELETE FROM price_snapshots WHERE round_number = ? A
 
 module.exports = {
     seedsThroughMirror,
+
+    CLEAR_PAIR_CONNECT_TIMEOUT_MS,
+    CLEAR_PAIR_CONNECT_RETRIES,
 
     FIXTURE_ID_FLOOR,
     FIXTURE_INSERT_SQL,
@@ -191,7 +216,7 @@ module.exports = {
     // other delete in this file already reports its count; this one now does too.
     async clearPair(coinPair){
         const params = resolveParams()
-        const conn = await mariadb.createConnection(params)
+        const conn = await connectWithRetry(params)
         try {
             const res = await conn.query("DELETE FROM price_snapshots WHERE coin_pair = ?", [coinPair])
             return Number(res && res.affectedRows ? res.affectedRows : 0)
