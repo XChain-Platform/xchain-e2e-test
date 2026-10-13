@@ -10,6 +10,7 @@ const assert = require('assert');
 const {
     OFFER_LIST_ARMED_CASES,
     expectMode,
+    planArmedCase,
     requireArmingVariables
 } = require('../../rail/offer_lists/helpers/armed_list_cases');
 
@@ -94,5 +95,28 @@ describe('offer list armed rail cases', function(){
             /EXACT_INTEGER_WIRE_FIELDS_REGTEST_TIME/
         );
         assert.throws(() => requireArmingVariables({}), /REGTEST/);
+    });
+
+    it('plans the list fields and counter-order address for every case', function(){
+        const plan = { listActionIndex: 7, memberAddress: 'bcrt1qmember', outsiderAddress: 'bcrt1qoutsider' };
+        const expected = [
+            { allowList: '7', blockList: '', takerGetAddress: 'bcrt1qmember' },
+            { allowList: '7', blockList: '', takerGetAddress: 'bcrt1qoutsider' },
+            { allowList: '', blockList: '7', takerGetAddress: 'bcrt1qmember' },
+            { allowList: '', blockList: '7', takerGetAddress: 'bcrt1qoutsider' }
+        ];
+        assert.strictEqual(OFFER_LIST_ARMED_CASES.length, expected.length);
+        OFFER_LIST_ARMED_CASES.forEach((testCase, i) => {
+            assert.deepStrictEqual(planArmedCase(testCase, plan), expected[i]);
+        });
+
+        const c = OFFER_LIST_ARMED_CASES[0];
+        for(const bad of [0, -1, 1.5, '7', NaN, undefined])
+            assert.throws(() => planArmedCase(c, { ...plan, listActionIndex: bad }), /listActionIndex/);
+        for(const bad of ['', undefined])
+            assert.throws(() => planArmedCase(c, { ...plan, memberAddress: bad }), /memberAddress/);
+        for(const bad of ['', undefined])
+            assert.throws(() => planArmedCase(c, { ...plan, outsiderAddress: bad }), /outsiderAddress/);
+        assert.throws(() => planArmedCase(c, { ...plan, outsiderAddress: plan.memberAddress }), /differ/);
     });
 });

@@ -61,9 +61,33 @@ function requireArmingVariables(env){
     }
 }
 
+// Plans the sendOrderV0 ALLOW_LIST and BLOCK_LIST positions and the counter-order
+// GET_ADDRESS for one case. xchain-hub attachedListIds treats only a nonzero value
+// as attached, so the unused list position is an empty string.
+function planArmedCase(testCase, plan){
+    const { listActionIndex, memberAddress, outsiderAddress } = plan || {};
+    if(!Number.isSafeInteger(listActionIndex) || listActionIndex <= 0)
+        throw new Error('listActionIndex must be a positive integer');
+    if(typeof memberAddress !== 'string' || memberAddress === '')
+        throw new Error('memberAddress must be a non-empty string');
+    if(typeof outsiderAddress !== 'string' || outsiderAddress === '')
+        throw new Error('outsiderAddress must be a non-empty string');
+    if(memberAddress === outsiderAddress)
+        throw new Error('memberAddress and outsiderAddress must differ');
+    if(!testCase || (testCase.list !== 'allow_list' && testCase.list !== 'block_list'))
+        throw new Error('case list must be allow_list or block_list');
+    const index = String(listActionIndex);
+    return {
+        allowList: testCase.list === 'allow_list' ? index : '',
+        blockList: testCase.list === 'block_list' ? index : '',
+        takerGetAddress: testCase.member === true ? memberAddress : outsiderAddress
+    };
+}
+
 module.exports = {
     ARMING_VARIABLES,
     OFFER_LIST_ARMED_CASES,
     expectMode,
+    planArmedCase,
     requireArmingVariables
 };
