@@ -189,7 +189,7 @@ function createRailDrive(cfg) {
         state.evidence.repoRoot = process.env.BRIDGE_RAIL_REPO_ROOT || null;
         // The heads are read once, here at drive start, and pinned: the AT9 record reports these
         // and AT9 fails if a live head has moved since.
-        const e2eRoot = path.resolve(__dirname, '..', '..', '..');
+        const e2eRoot = path.resolve(__dirname, '..', '..', '..', '..');
         const platformRoot = process.env.BRIDGE_RAIL_REPO_ROOT || path.resolve(e2eRoot, '..');
         state.evidence.driveHeadRoots = driveRoots(e2eRoot, platformRoot);
         state.evidence.driveHeads = captureDriveHeads(state.evidence.driveHeadRoots);
