@@ -54,4 +54,13 @@ describe('checkFullDriveReady', function () {
             reason: 'hub+other-drive',
         })
     })
+    it('ignores a drive on another isolated stack when this drive names its own', function () {
+        assert.deepStrictEqual(check({ psText: competingDrive, stackPrefix: 'xcb8', stackPrefixForPid: () => 'xce3' }),
+            { ready: true, reason: null })
+    })
+
+    it('still waits for a drive on the same isolated stack', function () {
+        assert.deepStrictEqual(check({ psText: competingDrive, stackPrefix: 'xcb8', stackPrefixForPid: () => 'xcb8' }),
+            { ready: false, reason: 'other-drive' })
+    })
 })
