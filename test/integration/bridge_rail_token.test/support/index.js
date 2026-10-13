@@ -33,6 +33,7 @@ const {
     launchParentIsAttached,
 } = require('../../../helpers/rail_preflight/rail_drive_processes');
 const { withDogeFeeSchedule } = require('../../../helpers/rail_preflight/token_doge_fee');
+const { driveRoots, captureDriveHeads } = require('../../../helpers/rail_preflight/drive_heads');
 const { caseJournalEntry } = require('../../../helpers/rail_preflight/case_journal_entry');
 const { evidenceJson } = require('../../../helpers/rail_preflight/evidence_json');
 const {
@@ -186,6 +187,12 @@ function createRailDrive(cfg) {
         // support says why: the venue spawns out of BRIDGE_RAIL_REPO_ROOT while the test
         // process loads indexer modules of its own).
         state.evidence.repoRoot = process.env.BRIDGE_RAIL_REPO_ROOT || null;
+        // The heads are read once, here at drive start, and pinned: the AT9 record reports these
+        // and AT9 fails if a live head has moved since.
+        const e2eRoot = path.resolve(__dirname, '..', '..', '..');
+        const platformRoot = process.env.BRIDGE_RAIL_REPO_ROOT || path.resolve(e2eRoot, '..');
+        state.evidence.driveHeadRoots = driveRoots(e2eRoot, platformRoot);
+        state.evidence.driveHeads = captureDriveHeads(state.evidence.driveHeadRoots);
         state.evidence.indexerModulesLoaded = Object.keys(require.cache)
             .filter((p) => /xchain-indexer[\\/]src[\\/]/.test(String(p))).sort();
         const dogeIndexer = await resolveIndexerPort({
