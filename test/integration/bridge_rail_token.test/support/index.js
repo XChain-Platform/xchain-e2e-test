@@ -44,6 +44,7 @@ const {
     journalCase,
     withMiningPaused,
 } = require('../../../helpers/bridgeRailVenue');
+const { resolveRailVenueBasePort } = require('../../../helpers/attestMirrorVenue');
 const token = require('./token');
 const { ensureBridgeRailQuorum, releaseBridgeRailQuorum } = require('./quorum');
 const {
@@ -263,7 +264,8 @@ function createRailDrive(cfg) {
         if (cfg.dropStaleReplay) await dropStaleReplayBeforeVenue(cfg.label);
         state.venue = new BridgeRailVenue({
             label: cfg.label,
-            basePort: cfg.basePort,
+            // AB_VENUE_BASE_PORT (the stack's own window) wins over the drive's fixed base.
+            basePort: resolveRailVenueBasePort(cfg.basePort, process.env),
             identities: mesh.map((a) => ({ pubkeyHex: a.pubkeyHex, privkeyHex: a.seedHex })),
             dogeRail: state.dogeRail,
             // The rail's pinned depth. AT5 raises it through the ORIGIN ROW (MIN_DEPTH), never
