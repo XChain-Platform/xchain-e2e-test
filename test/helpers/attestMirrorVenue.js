@@ -4110,7 +4110,9 @@ class AttestMirrorVenue {
     }
 
     async ['_kill'](proc) {
-        if (!proc || proc.exitCode !== null) return;
+        // A child killed by a signal has exitCode null and signalCode set; it is
+        // already dead and will never emit 'exit' again, so waiting would hang.
+        if (!proc || proc.exitCode !== null || proc.signalCode) return;
         // A frozen process cannot handle SIGTERM; wake it first or the kill waits
         // out its whole budget and then SIGKILLs.
         try { proc.kill('SIGCONT'); } catch (internal) { /* not frozen */ }
