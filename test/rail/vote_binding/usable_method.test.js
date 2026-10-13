@@ -18,7 +18,8 @@ const {
 const {
     CALLBACK_TARGET_SOURCE,
     USABLE_METHOD_CASES,
-    expectMode
+    expectMode,
+    readCaseStatus
 } = require('./helpers/usable_method_cases');
 const { seedGlobalPrices } = require('../../helpers/nativeFeeHelper');
 
@@ -130,7 +131,7 @@ describe('VOTE callback binding usable method', function(){
                 change: issuer.address
             }, submitOpts({ wif: issuer.wif, requireValid: false }));
 
-            assert.strictEqual(String(res.indexed.status), testCase[MODE]);
+            assert.strictEqual(String(readCaseStatus(res.indexed)), testCase[MODE]);
         });
     }
 });

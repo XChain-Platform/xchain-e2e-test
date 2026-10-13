@@ -10,7 +10,8 @@ const assert = require('assert');
 const {
     CALLBACK_TARGET_SOURCE,
     USABLE_METHOD_CASES,
-    expectMode
+    expectMode,
+    readCaseStatus
 } = require('../../rail/vote_binding/helpers/usable_method_cases');
 
 describe('VOTE callback binding usable method rail cases', function(){
@@ -54,5 +55,21 @@ describe('VOTE callback binding usable method rail cases', function(){
             () => expectMode('sometimes'),
             /XC_VOTE_CALLBACK_BINDING_EXPECT must be armed or inert/
         );
+    });
+
+    it('refuses an assumed status', function(){
+        assert.strictEqual(readCaseStatus({
+            status: 'invalid: CALLBACK_METHOD (unavailable)',
+            statusKnown: true,
+            statusSource: 'indexer',
+            statusUnknownActions: []
+        }), 'invalid: CALLBACK_METHOD (unavailable)');
+        assert.throws(() => readCaseStatus({
+            status: 'valid',
+            statusKnown: false,
+            statusSource: 'assumed',
+            statusUnknownActions: [2]
+        }), /no status for action\(s\) \[2\]/);
+        assert.throws(() => readCaseStatus(undefined), /no indexed result/);
     });
 });
