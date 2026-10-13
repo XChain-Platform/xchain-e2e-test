@@ -202,6 +202,16 @@ async function settlePairOutcome({ read, sleep, attempts, intervalMs } = {}){
     return 'unmatched';
 }
 
+// The protocol LIST type for an address list.
+const ADDRESS_LIST_TYPE = 2;
+
+// Builds the LIST action that creates the address list the maker's ALLOW_LIST or
+// BLOCK_LIST names, in the shape the sdk tests broadcast.
+function armedListAction(memberAddress){
+    requireText('memberAddress', memberAddress);
+    return { action: 'LIST', params: { type: ADDRESS_LIST_TYPE, item: memberAddress } };
+}
+
 function checkArmedOutcome(testCase, mode, outcome){
     if(mode !== 'armed' && mode !== 'inert')
         throw new Error('mode must be armed or inert');
@@ -213,8 +223,10 @@ function checkArmedOutcome(testCase, mode, outcome){
 }
 
 module.exports = {
+    ADDRESS_LIST_TYPE,
     ARMING_VARIABLES,
     OFFER_LIST_ARMED_CASES,
+    armedListAction,
     armedOrderActions,
     checkArmedOutcome,
     expectMode,
