@@ -298,6 +298,10 @@ function graceEnv(graces) {
 const DEFAULT_ATTESTATION_POLL_MS          = 2000;
 const DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS = 30000;
 
+// DB_QUERY_TIMEOUT for the spawned hubs, in milliseconds. The hub defaults to 30 s, which
+// cuts schema bootstrap DDL on a busy rail; the venue gives its hubs 300 s.
+const DEFAULT_HUB_DB_QUERY_TIMEOUT_MS = 300000;
+
 // Mirror barrier graces, at zero: the barrier then holds only for content the
 // stream has not yet delivered, which is the thing under test, rather than for a
 // fixed wait. Set to 0 rather than left unset because the frozen 120 would make
@@ -962,7 +966,9 @@ function buildHubEnv(spec) {
         ATTESTATION_POLL_MS: String(s.attestationPollMs === undefined
             ? DEFAULT_ATTESTATION_POLL_MS : s.attestationPollMs),
         ATTESTATION_ROUND_TIMEOUT_MS: String(s.attestationRoundTimeoutMs === undefined
-            ? DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS : s.attestationRoundTimeoutMs)
+            ? DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS : s.attestationRoundTimeoutMs),
+        // Schema bootstrap DDL on a busy rail can outlast the hub's 30 s default.
+        DB_QUERY_TIMEOUT: String(DEFAULT_HUB_DB_QUERY_TIMEOUT_MS)
     };
     if (s.btcIndexerApiKey) env.BTC_INDEXER_API_KEY = String(s.btcIndexerApiKey);
     if (s.feedApiKey) env.HUB_FEED_API_KEY = String(s.feedApiKey);

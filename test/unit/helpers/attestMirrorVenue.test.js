@@ -333,6 +333,11 @@ describe('attestMirrorVenue: hub environment', function () {
         assert.strictEqual(buildHubEnv(hubSpec()).HUB_FEED_API_KEY, undefined)
     })
 
+    it('gives the hub a 300 s DB_QUERY_TIMEOUT, and extraEnv can still override it', () => {
+        assert.strictEqual(buildHubEnv(hubSpec()).DB_QUERY_TIMEOUT, '300000')
+        assert.strictEqual(buildHubEnv(hubSpec({ extraEnv: { DB_QUERY_TIMEOUT: '1000' } })).DB_QUERY_TIMEOUT, '1000')
+    })
+
     it('carries the regtest-only timing seams as plain integer spellings', () => {
         // The hub THROWS on regtest for anything that is not a non-negative
         // integer spelling, so a number formatted as '5e0' or '05' fails at boot.
