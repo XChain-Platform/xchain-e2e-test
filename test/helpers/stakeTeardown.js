@@ -67,6 +67,10 @@ const DEFAULT_CAPABILITY = 'oracle_publish'
 // teardown does not depend on a constant named for the attestation path.
 const RELEASE_SETTLE_BLOCKS = 14
 
+// Strict mode mines this many further settle rounds, re-reading after each,
+// while the only keys still seated are NOT YET SETTLED ones.
+const STRICT_REREAD_ROUNDS = 3
+
 // Whole-sweep budget. A release that cannot finish inside it stops and reports
 // what it did not get to, rather than hanging a suite's teardown forever.
 //
@@ -383,6 +387,30 @@ async function releaseStakes(opts){
     return result
 }
 
+// Sort the keys the run added into the three situations the report names.
+// Shared by the report and by the strict-mode verdict so the two cannot
+// disagree about which keys are a loss.
+function classifyAdded(state){
+    const rel = state.release || { released: [], failed: [], skipped: [] }
+    const sentFor = new Set((rel.released || [])
+        .map(e => String(e.signingPubkey).toLowerCase()))
+    const notSentFor = new Map()
+    for(const f of (rel.failed || []))
+        notSentFor.set(String(f.entry.signingPubkey).toLowerCase(), f.error)
+    for(const s of (rel.skipped || []))
+        notSentFor.set(String(s.entry.signingPubkey).toLowerCase(), s.reason)
+
+    const notSent = [], notSettled = [], leaked = []
+    const added = (state.diff && state.diff.added) || []
+    for(const p of added){
+        const key = String(p).toLowerCase()
+        if(notSentFor.has(key))   notSent.push({ pubkey: p, why: notSentFor.get(key) })
+        else if(sentFor.has(key)) notSettled.push(p)
+        else                      leaked.push(p)
+    }
+    return { notSent: notSent, notSettled: notSettled, leaked: leaked }
+}
+
 // One human-readable block covering the whole policy outcome. Written to be
 // diagnosable from a CI log alone: what the run staked, what it gave back, and
 // which pubkey is still sitting in the shared venue's quorum arithmetic.
@@ -432,22 +460,8 @@ function formatReport(state){
             // Every line carries the block the read was taken at, because a claim
             // about membership without a height is not checkable.
             const at = ' (read at block ' + state.current.blockIndex + ')'
-            const rel = state.release || { released: [], failed: [], skipped: [] }
-            const sentFor = new Set((rel.released || [])
-                .map(e => String(e.signingPubkey).toLowerCase()))
-            const notSentFor = new Map()
-            for(const f of (rel.failed || []))
-                notSentFor.set(String(f.entry.signingPubkey).toLowerCase(), f.error)
-            for(const s of (rel.skipped || []))
-                notSentFor.set(String(s.entry.signingPubkey).toLowerCase(), s.reason)
-
-            const notSent = [], notSettled = [], leaked = []
-            for(const p of state.diff.added){
-                const key = String(p).toLowerCase()
-                if(notSentFor.has(key))   notSent.push({ pubkey: p, why: notSentFor.get(key) })
-                else if(sentFor.has(key)) notSettled.push(p)
-                else                      leaked.push(p)
-            }
+            const cls = classifyAdded(state)
+            const notSent = cls.notSent, notSettled = cls.notSettled, leaked = cls.leaked
 
             if(notSent.length){
                 lines.push('[stake teardown] UNSTAKE NOT SENT for ' + notSent.length + ' key(s)' + at +
@@ -510,12 +524,39 @@ async function runTeardown(opts){
         state.diff    = diffAgainstBaseline(state.baseline, state.current)
     }
 
+    // Strict mode: a key whose UNSTAKE was accepted is only waiting for its
+    // deactivation block to be buried. Mine to that burial and re-read before
+    // judging; only LEAKED or NOT SENT keys are a failure, never NOT YET SETTLED.
+    if(pol.strict && o.indexer && o.mine && state.diff && state.diff.grew){
+        for(let round = 0; round < STRICT_REREAD_ROUNDS; round++){
+            const cls = classifyAdded(state)
+            if(!cls.notSettled.length || cls.leaked.length || cls.notSent.length) break
+            try {
+                await o.mine(pol.settleBlocks || RELEASE_SETTLE_BLOCKS)
+                if(o.requireSync) await o.requireSync()
+            } catch (err){
+                state.rereadError = (err && err.message) ? err.message : String(err)
+                break
+            }
+            const again = await readCapabilitySet({ indexer: o.indexer, capability: pol.capability })
+            if(!again || again.error) break
+            state.current = again
+            state.diff    = diffAgainstBaseline(state.baseline, again)
+            state.rereads = (state.rereads || 0) + 1
+            if(!state.diff || !state.diff.grew) break
+        }
+    }
+
     log(formatReport(state))
 
-    if(pol.strict && state.diff && state.diff.grew)
-        throw new Error('stake teardown: this run left ' + state.diff.added.length + ' key(s) in the ' +
-                        pol.capability + ' set (' + state.diff.beforeCount + ' -> ' + state.diff.afterCount +
-                        '); see xchain-documentation/components/e2e-test/staking-venue-policy.md')
+    if(pol.strict && state.diff && state.diff.grew){
+        const cls  = classifyAdded(state)
+        const lost = cls.leaked.length + cls.notSent.length
+        if(lost > 0)
+            throw new Error('stake teardown: this run left ' + lost + ' key(s) in the ' +
+                            pol.capability + ' set (' + state.diff.beforeCount + ' -> ' + state.diff.afterCount +
+                            '); see xchain-documentation/components/e2e-test/staking-venue-policy.md')
+    }
 
     return state
 }
@@ -524,6 +565,7 @@ module.exports = {
     DEFAULT_CAPABILITY,
     RELEASE_SETTLE_BLOCKS,
     DEFAULT_BUDGET_MS,
+    STRICT_REREAD_ROUNDS,
     policy,
     registerStake,
     noteUnstake,
