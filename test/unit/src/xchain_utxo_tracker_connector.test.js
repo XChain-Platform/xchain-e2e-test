@@ -181,6 +181,24 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
             assert.strictEqual(status.ready, false);
         });
 
+        it('returns the last answered status when a later probe gives no answer', async function () {
+            const probe = sinon.stub(tracker, 'getQuiescentStatus');
+            probe.onCall(0).resolves({ ready: false, mempool_size: 2, tracker_height: 5 });
+            probe.resolves(null);
+            sinon.stub(tracker, 'sleep').resolves();
+
+            const status = await tracker.quiesce({ timeoutMs: 30, pollMs: 1 });
+            assert.strictEqual(status.ready, false);
+            assert.strictEqual(status.mempool_size, 2);
+            assert.ok(status.noResponses > 0, 'expected the unanswered probes to be tallied');
+        });
+
+        it('tallies zero no-responses when every probe answers', async function () {
+            sinon.stub(tracker, 'getQuiescentStatus').resolves({ ready: true });
+            const status = await tracker.quiesce({ timeoutMs: 1000, pollMs: 1 });
+            assert.strictEqual(status.noResponses, 0);
+        });
+
         it('leaves a null no-response status null', async function () {
             sinon.stub(tracker, 'getQuiescentStatus').resolves(null);
             sinon.stub(tracker, 'sleep').resolves();

@@ -114,11 +114,15 @@ class UtxoTracker {
         const deadline = Date.now() + timeoutMs
         let last = null
         let mineErrors = 0
+        let noResponses = 0
         let lastMineError = null
         while (Date.now() < deadline){
             const status = await this.getQuiescentStatus()
-            last = status
-            if (status && status.ready) return this.withMineErrors(status, mineErrors, lastMineError)
+            // Keep the last probe that actually answered: a later timed-out probe
+            // must not erase the evidence of where the stack stood, only be tallied.
+            if (status) last = status
+            else noResponses++
+            if (status && status.ready) return this.withMineErrors(status, mineErrors, lastMineError, noResponses)
             // Not ready yet: if a regtestMiner was passed, mine a block to
             // unblock mempool/batch progression.
             if (regtestMiner && status && status.mempool_size > 0){
@@ -136,17 +140,20 @@ class UtxoTracker {
             }
             await this.sleep(pollMs)
         }
-        // Last status seen, which may carry ready=false. Callers that are a barrier
-        // rather than a retry loop must inspect .ready; the root afterEach does.
-        return this.withMineErrors(last, mineErrors, lastMineError)
+        // Last answered status, which may carry ready=false, with the count of
+        // probes that got no answer. Null only if no probe ever answered. Callers
+        // that are a barrier rather than a retry loop must inspect .ready; the
+        // root afterEach does.
+        return this.withMineErrors(last, mineErrors, lastMineError, noResponses)
     }
 
-    // Attach the nudge-failure tally to whatever quiesce returns, without
-    // rewriting a null status into an object (callers distinguish no-response
-    // from a status body).
-    withMineErrors(status, mineErrors, lastMineError){
+    // Attach the nudge-failure and no-response tallies to whatever quiesce
+    // returns, without rewriting a null status into an object (callers
+    // distinguish no-response from a status body).
+    withMineErrors(status, mineErrors, lastMineError, noResponses = 0){
         if (!status || typeof status !== 'object') return status
         status.mineErrors = mineErrors
+        status.noResponses = noResponses
         if (lastMineError) status.lastMineError = lastMineError
         return status
     }

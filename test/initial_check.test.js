@@ -469,10 +469,13 @@ exports.mochaHooks = {
             const summary = status
                 ? `mempool=${status.mempool_size} tracker=${status.tracker_height} node=${status.node_height} lag=${status.lag}`
                 : 'no-response'
+            const silent = (status && status.noResponses)
+                ? ` noResponses=${status.noResponses}`
+                : ''
             const mines = (status && status.mineErrors)
                 ? ` nudgeMineFailures=${status.mineErrors} lastMineError=${status.lastMineError}`
                 : ''
-            throw new Error(`afterEach barrier: stack did not reach quiescence within 15s (${summary})${mines}`)
+            throw new Error(`afterEach barrier: stack did not reach quiescence within 15s (${summary})${silent}${mines}`)
         }
     },
 
