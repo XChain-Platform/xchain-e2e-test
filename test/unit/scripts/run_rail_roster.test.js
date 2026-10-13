@@ -49,11 +49,19 @@ function runReport(report) {
     }
 }
 
-function runWithFakeNpx(output) {
+function runWithFakeNpx(output, stdoutNoise = '') {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'rail-roster-npx-'))
     const executable = path.join(directory, 'npx')
     const argsFile = path.join(directory, 'args.txt')
-    fs.writeFileSync(executable, '#!/bin/sh\nprintf "%s\\n" "$@" > "$FAKE_ARGS"\nprintf "%s" "$FAKE_REPORT"\n')
+    fs.writeFileSync(executable, [
+        '#!/bin/sh',
+        'printf "%s\\n" "$@" > "$FAKE_ARGS"',
+        'for arg in "$@"; do case "$arg" in output=*) out="${arg#output=}";; esac; done',
+        'printf "%s" "$FAKE_NOISE"',
+        '[ -n "$FAKE_REPORT" ] && printf "%s" "$FAKE_REPORT" > "$out"',
+        'exit 0',
+        ''
+    ].join('\n'))
     fs.chmodSync(executable, 0o755)
     try {
         const result = spawnSync(process.execPath, [SCRIPT], {
@@ -63,7 +71,8 @@ function runWithFakeNpx(output) {
                 ...process.env,
                 PATH: directory + path.delimiter + process.env.PATH,
                 FAKE_ARGS: argsFile,
-                FAKE_REPORT: output
+                FAKE_REPORT: output,
+                FAKE_NOISE: stdoutNoise
             }
         })
         const args = fs.existsSync(argsFile) ? fs.readFileSync(argsFile, 'utf8').trim().split('\n') : []
@@ -92,6 +101,7 @@ describe('rail roster runner', () => {
         const expected = [
             'npx', 'mocha', '--timeout', '0', '--exit', '--require',
             './test/initial_check.test.js', '--reporter', 'json',
+            '--reporter-option', 'output=<report-file>',
             ...suites.map(entry => entry.file)
         ]
         assert.deepStrictEqual(result.stdout.trim().split(' '), expected)
@@ -125,21 +135,38 @@ describe('rail roster verdicts', () => {
         assert.match(result.stdout, /rail roster: RED/)
     })
 
-    it('runs the exact serial mocha argv and judges captured stdout', () => {
+    it('runs the exact serial mocha argv and judges the reporter output file', () => {
         const suites = readRailRoster().suites.filter(entry => entry.run).map(entry => entry.file)
         const { result, args } = runWithFakeNpx(JSON.stringify(reportFor(suites)))
 
         assert.strictEqual(result.status, 0, result.stderr)
         assert.match(result.stdout, /rail roster: GREEN/)
-        assert.deepStrictEqual(args, [
+        const reporterOption = args.indexOf('--reporter-option')
+        assert.match(args[reporterOption + 1], /^output=.+report\.json$/)
+        assert.deepStrictEqual(args.filter((arg, index) => index < reporterOption || index > reporterOption + 1), [
             'mocha', '--timeout', '0', '--exit', '--require',
             './test/initial_check.test.js', '--reporter', 'json', ...suites
         ])
         assert.ok(!args.includes('--parallel'))
     })
 
-    it('classifies non-json mocha stdout as a venue failure', () => {
+    it('ignores test log lines on stdout when the report file is valid', () => {
+        const suites = readRailRoster().suites.filter(entry => entry.run).map(entry => entry.file)
+        const { result } = runWithFakeNpx(JSON.stringify(reportFor(suites)), 'log line {not json\n[tx] mined 0xabc\n')
+
+        assert.strictEqual(result.status, 0, result.stderr)
+        assert.match(result.stdout, /rail roster: GREEN/)
+    })
+
+    it('classifies a non-json report file as a venue failure', () => {
         const { result } = runWithFakeNpx('not json')
+
+        assert.strictEqual(result.status, 95, result.stderr)
+        assert.match(result.stderr, /VENUE.*parseable mocha json/)
+    })
+
+    it('classifies a missing report file as a venue failure', () => {
+        const { result } = runWithFakeNpx('', 'only log lines on stdout\n')
 
         assert.strictEqual(result.status, 95, result.stderr)
         assert.match(result.stderr, /VENUE.*parseable mocha json/)
