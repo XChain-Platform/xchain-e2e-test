@@ -590,6 +590,41 @@ function resolveVenueBasePort(explicit, env) {
 }
 
 /**
+ * The base a bridge rail drive probes from: the runner's per-stack `AB_VENUE_BASE_PORT`
+ * when it is set, else the drive's own fixed base. A fixed base per drive collides when
+ * two stacks run side by side, so the environment wins; a set but unusable value throws
+ * through `resolveVenueBasePort` rather than falling back to the shared window.
+ *
+ * @param {number} driveDefault  the drive's own base (45000 token, 47000 policy)
+ * @param {object} [env]         environment to read, normally `process.env`
+ * @returns {number}
+ */
+function resolveRailVenueBasePort(driveDefault, env) {
+    const source = env || {};
+    const raw = source[VENUE_BASE_PORT_ENV];
+    if (raw === undefined || raw === null || String(raw).trim() === '') return driveDefault;
+    return resolveVenueBasePort(undefined, source);
+}
+
+/**
+ * Venue bring-up requires an indexer `/status` answer to carry `indexerBlock`. Presence
+ * is the test, never truthiness, because block 0 is a real answer. A 503 from a stalled
+ * indexer still passes when it reports the counter.
+ *
+ * @param {*} body  parsed `/status` body
+ * @returns {{ok: boolean, reason?: string}}
+ */
+function checkStatusHasIndexerBlock(body) {
+    if (body === null || typeof body !== 'object') {
+        return { ok: false, reason: 'the /status answer was not a JSON object' };
+    }
+    if (body.indexerBlock === undefined || body.indexerBlock === null) {
+        return { ok: false, reason: 'the /status answer lacks indexerBlock' };
+    }
+    return { ok: true };
+}
+
+/**
  * Refuse a knob combination that makes an acceptance test flaky rather than failing.
  *
  * THE TWO SEAMS INTERACT, and nothing else in the venue notices. `forwardS` and
@@ -3058,15 +3093,24 @@ class AttestMirrorVenue {
         // ANY answer counts, 503 included. A stalled indexer that reports its stall is
         // listening, and a barrier drill's whole subject is a node parked on a stall: a wait
         // for HTTP 200 here would hang exactly the legs this is meant to let run.
+        //
+        // AN ANSWER WITHOUT `indexerBlock` IS NOT A BOOTED INDEXER. It is some other
+        // listener or a half-built status, and every later read would be meaningless, so
+        // bring-up keeps waiting and then fails naming the missing field.
+        let lacking = null;
         const answering = await waitForChildBoot(ix.proc, async () => {
             try {
                 const res = await axios.get(ix.apiUrl + '/status', { timeout: 5_000, validateStatus: () => true });
+                const shape = checkStatusHasIndexerBlock(res.data);
+                if (!shape.ok) { lacking = 'HTTP ' + res.status + ': ' + shape.reason; return { ok: false }; }
+                lacking = null;
                 return { ok: true, httpStatus: res.status };
             } catch (internal) { return { ok: false }; }
         }, { intervalMs: 1000 });
         if (!answering.ok) {
             throw new Error('attestMirrorVenue[' + this.label + ']: indexer ' + i + ' never answered /status on ' +
                 ix.apiUrl + ' within ' + answering.waitedMs + 'ms' +
+                (lacking ? ' (' + lacking + ')' : '') +
                 (answering.dead ? ' (the process exited)' : '') +
                 '.\n' + this['_tail']('indexer' + i));
         }
@@ -4325,6 +4369,8 @@ module.exports = {
     planPorts,
     portCount,
     resolveVenueBasePort,
+    resolveRailVenueBasePort,
+    checkStatusHasIndexerBlock,
     DEFAULT_VENUE_BASE_PORT,
     VENUE_BASE_PORT_ENV,
     RUNNER_SLOT_ENV,
