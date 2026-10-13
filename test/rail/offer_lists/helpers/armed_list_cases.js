@@ -84,10 +84,60 @@ function planArmedCase(testCase, plan){
     };
 }
 
+function requireChain(name, value){
+    if(typeof value !== 'string' || value === '')
+        throw new Error(name + ' must be a non-empty string');
+}
+
+function requireIndex(name, value){
+    if(!Number.isSafeInteger(value) || value <= 0)
+        throw new Error(name + ' must be a positive integer');
+}
+
+// Selects the pair in either seat. The hub only gates a pair through a boolean,
+// so a cross_chain_matches row is the one observable the rail can read.
+function pairMatchQuery(pair){
+    const { makerChain, makerIndex, takerChain, takerIndex } = pair || {};
+    requireChain('makerChain', makerChain);
+    requireIndex('makerIndex', makerIndex);
+    requireChain('takerChain', takerChain);
+    requireIndex('takerIndex', takerIndex);
+    const sql = 'SELECT match_id, status FROM cross_chain_matches WHERE '
+        + '(a_chain = ? AND a_action_index = ? AND b_chain = ? AND b_action_index = ?) OR '
+        + '(a_chain = ? AND a_action_index = ? AND b_chain = ? AND b_action_index = ?)';
+    return {
+        sql,
+        params: [makerChain, makerIndex, takerChain, takerIndex, takerChain, takerIndex, makerChain, makerIndex]
+    };
+}
+
+function observedOutcome(rows){
+    if(!Array.isArray(rows)) throw new Error('rows must be an array');
+    for(const row of rows){
+        const status = row && row.status;
+        if(status !== 'finalized' && status !== 'retracted')
+            throw new Error('unexpected match status: ' + status);
+    }
+    return rows.some((row) => row.status === 'finalized') ? 'matched' : 'unmatched';
+}
+
+function checkArmedOutcome(testCase, mode, outcome){
+    if(mode !== 'armed' && mode !== 'inert')
+        throw new Error('mode must be armed or inert');
+    const expected = testCase[mode];
+    if(outcome === expected.outcome) return;
+    const reason = expected.reason ? ' (' + expected.reason + ')' : '';
+    throw new Error('case "' + testCase.name + '" in ' + mode + ' mode expected '
+        + expected.outcome + reason + ' but observed ' + outcome);
+}
+
 module.exports = {
     ARMING_VARIABLES,
     OFFER_LIST_ARMED_CASES,
+    checkArmedOutcome,
     expectMode,
+    observedOutcome,
+    pairMatchQuery,
     planArmedCase,
     requireArmingVariables
 };
