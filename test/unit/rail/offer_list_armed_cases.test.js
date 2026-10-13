@@ -8,7 +8,9 @@
 
 const assert = require('assert');
 const {
+    ADDRESS_LIST_TYPE,
     OFFER_LIST_ARMED_CASES,
+    armedListAction,
     armedOrderActions,
     checkArmedOutcome,
     expectMode,
@@ -249,5 +251,16 @@ describe('offer list armed rail cases', function(){
             assert.throws(() => armedOrderActions({ ...plan, ...change }, order), /must/);
         assert.throws(() => armedOrderActions(undefined, order), /must/);
         assert.throws(() => armedOrderActions(plan, undefined), /must/);
+    });
+
+    it('builds the address list action for the member', function(){
+        assert.strictEqual(ADDRESS_LIST_TYPE, 2);
+        assert.deepStrictEqual(armedListAction('bcrt1qmember'), {
+            action: 'LIST',
+            params: { type: 2, item: 'bcrt1qmember' }
+        });
+        assert.throws(() => armedListAction(''), /memberAddress must be a non-empty string/);
+        assert.throws(() => armedListAction(7), /memberAddress must be a non-empty string/);
+        assert.throws(() => armedListAction(), /memberAddress must be a non-empty string/);
     });
 });
