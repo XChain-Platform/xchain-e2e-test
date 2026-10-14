@@ -20,7 +20,7 @@ const Module = require('module')
 
 const NATIVE = require.resolve('../../helpers/nativeFeeHelper')
 const PRICES = require.resolve('../../helpers/priceSnapshotHelper')
-const FIXTURE = require.resolve('../../actions/batch_issuance_limits/fee_fixture')
+const FIXTURE = require.resolve('../../actions/batch_issuance_limits/lib/fee_fixture')
 
 function fakeModule(id, exports){
     const m = new Module(id, module)
@@ -65,7 +65,7 @@ describe('batch issuance fee fixture follows a rail swap', function () {
         require.cache[PRICES] = fakeModule(PRICES, recorder('oldPrices', calls))
         delete require.cache[FIXTURE]
         const fixture = require(FIXTURE)
-        const { state } = require('../../actions/batch_issuance_limits/shared')
+        const { state } = require('../../actions/batch_issuance_limits/lib/shared')
 
         // What chainRail's cache drop plus transactionHelper's lazy re-require leave behind.
         require.cache[NATIVE] = fakeModule(NATIVE, recorder('live', calls))
