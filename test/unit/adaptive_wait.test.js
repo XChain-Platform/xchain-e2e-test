@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Every waitForX in src/db.js routes through _waitFor, so these pin the
+// Every waitForX in src/db/ routes through _waitFor, so these pin the
 // one place that decides how long a suite waits for a row.
 //
 // The defect being fixed: a fixed deadline assumes a quiet machine. Under
@@ -148,7 +148,7 @@ function registerSucceedAndLagTests() {
 
 function registerThresholdTests() {
     it('honours an explicit E2E_WAIT_LAG_BLOCKS=0 and refuses junk', () => {
-        // The tunable the way the constructor computes it (src/db.js), checked
+        // The tunable the way the constructor computes it (src/db/core.js), checked
         // here without standing up a Database: `parseInt('0') || 2` was 2, so an
         // operator setting 0 got the old threshold back without knowing.
         const compute = (raw) => {

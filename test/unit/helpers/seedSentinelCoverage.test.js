@@ -69,15 +69,18 @@ function resolveRoundToken(src, token){
     return fromTable
 }
 
-// Every round number a file hands to price_snapshots. Two syntactic shapes: the
-// helper's `roundNumber:` property, and the local `seedPrice(pair, price, block,
+// Every round number a file hands to price_snapshots. Three syntactic shapes: the
+// helper's `roundNumber:` property, the local `seedPrice(pair, price, block,
 // round)` wrappers in nativeFeeLive / nativeFeeDispenser that write the INSERT
-// themselves rather than going through priceSnapshotHelper.
+// themselves rather than going through priceSnapshotHelper, and a pair wrapper
+// such as `seedFeePrices(xchainRound, coinRound)` that hands both rounds on to
+// seedPrice, whose literal arguments are the rounds actually written.
 function seededRounds(file){
     const src    = fs.readFileSync(file, 'utf8')
     const tokens = []
     for (const m of src.matchAll(/roundNumber\s*:\s*([A-Za-z0-9_$]+)/g))            tokens.push(m[1])
     for (const m of src.matchAll(/seedPrice\(\s*[^()]*?,\s*([A-Za-z0-9_$]+)\s*\)/g)) tokens.push(m[1])
+    for (const m of src.matchAll(/seed[A-Za-z]*Prices\(\s*(\d+)\s*,\s*(\d+)\s*\)/g))  tokens.push(m[1], m[2])
 
     const rounds = new Set()
     for (const token of tokens)

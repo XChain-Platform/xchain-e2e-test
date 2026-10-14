@@ -57,6 +57,112 @@ function findLeader(mvh) {
     });
 }
 
+async function assertEquivocationRejected(mvh, seed) {
+    const COIN = 'BTC', NET = 'regtest', MODULE = 'node';
+    const follower = mvh.hubs[1];
+    const seq = 8000;   // fresh, above any applied seq
+    const view = 0;
+    const configA = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: '111' } } } };
+    const configB = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: '222' } } } };
+    const digestA = follower.consensus.digest(configA);
+    const digestB = follower.consensus.digest(configB);
+    // A PRE_PREPARE is only accepted from the validator the rotation
+    // designates as leader for (seq, view) and only with a registered sender
+    // (the isKnownSender + leader-identity guards in Consensus.handlePrePrepare).
+    // An equivocating leader is still the LEGITIMATE leader; it just emits two
+    // conflicting configs for one seq. Address the envelope from that leader so
+    // the follower processes it (a hardcoded non-leader/unregistered sender is
+    // correctly dropped before any proposal is created).
+    const N = follower.consensus.validatorSet.length;
+    const leader = follower.consensus.validatorSet[(seq + view) % N];
+    // The envelope carries the leader's SIGNING KEY, not just its address,
+    // because admission is keyed on the proven key: PeerManager stamps
+    // sig_pubkey on every real envelope and verifies the signature against it
+    // before a handler runs, so an envelope without one is unattributable and
+    // is dropped. Injecting straight into the handler skips the transport that
+    // would have stamped it, so the fixture has to supply it.
+    const env = (digest, config) => ({
+        sender: leader.addr,         // the (byzantine, but legitimate) leader
+        sig_pubkey: leader.pubkey,
+        data: { seq, view, configDigest: digest, config, btcBlockHeight: seed.blockIndex }
+    });
+
+    // First proposal locks the follower onto config A.
+    await follower.consensus.handlePrePrepare(env(digestA, configA));
+    assert.ok(follower.consensus.pendingProposals.has(seq), 'first PRE_PREPARE should create a proposal');
+
+    // Equivocation: a second, conflicting PRE_PREPARE for the SAME seq (config B,
+    // with its own valid digest). The follower must stay locked to the first
+    // config. Dedup-by-seq is the safety mechanism, so it cannot adopt both.
+    await follower.consensus.handlePrePrepare(env(digestB, configB));
+
+    const prop = follower.consensus.pendingProposals.get(seq);
+    assert.strictEqual(prop.digest, digestA,
+        'follower switched to the equivocating second config (double-adoption)');
+    assert.notStrictEqual(prop.digest, digestB);
+}
+
+async function assertForgedPrePrepareRejected(mvh, seed) {
+    const COIN = 'BTC', NET = 'regtest', MODULE = 'node';
+    const forgedValue = '666666';
+    const target = mvh.hubs[mvh.hubs.length - 1];   // any honest hub
+    const seq = 9000;                               // well above any applied seq
+
+    const before = await target.db.getConfig(COIN, NET, MODULE);
+    assert.notStrictEqual(before.GAS_PRICE, forgedValue, 'precondition: forged value not already set');
+
+    // Feed the forged proposal straight into the consensus handler.
+    await target.consensus.handlePrePrepare(
+        forgedPrePrepare(seq, { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: forgedValue } } } }, seed.blockIndex, target.consensus.validatorSet[0])
+    );
+
+    assert.ok(!target.consensus.pendingProposals.has(seq),
+        'forged PRE_PREPARE created a pending proposal (digest check failed)');
+
+    await assertNeverApplied([target],
+        { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: forgedValue },
+        { windowMs: 500 });
+    const after = await target.db.getConfig(COIN, NET, MODULE);
+    assert.notStrictEqual(after.GAS_PRICE, forgedValue,
+        'forged config was applied (safety violated)');
+}
+
+async function assertSilentFollowerLiveness(mvh) {
+    const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '777777';
+    const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
+
+    const leader = findLeader(mvh);
+    assert.ok(leader, 'no leader identified');
+
+    // Crash one NON-leader follower.
+    const victim = mvh.hubs.find((h) => h !== leader);
+    const restore = silenceValidator(victim);
+    const honest = mvh.hubs.filter((h) => h !== victim);
+    try {
+        await leader.addParametersFromJson(config);   // needs 3 of 4 → honest majority suffices
+        // The honest hubs' own config rows are the post-condition; waiting on
+        // them (rather than a fixed window) also means the silenced-hub check
+        // below runs strictly AFTER the change has propagated, which is the
+        // only moment at which "it stayed inert" says anything.
+        await waitForConfigEverywhere(
+            honest,
+            { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+            { timeoutMs: APPLY_WAIT_MS });
+
+        for (const h of honest) {
+            const cfg = await h.db.getConfig(COIN, NET, MODULE);
+            assert.strictEqual(cfg.GAS_PRICE, VALUE,
+                'an honest hub failed to apply despite quorum being reachable');
+        }
+        // The silenced hub legitimately never applied (it processed nothing).
+        const victimCfg = await victim.db.getConfig(COIN, NET, MODULE);
+        assert.notStrictEqual(victimCfg.GAS_PRICE, VALUE,
+            'the silenced validator somehow applied; it should have been inert');
+    } finally {
+        restore();
+    }
+}
+
 describe('MultiValidatorHub: byzantine fault tolerance (L5)', function () {
     this.timeout(180_000);
 
@@ -82,108 +188,14 @@ describe('MultiValidatorHub: byzantine fault tolerance (L5)', function () {
     });
 
     it('LIVENESS: a silent follower does not stall the federation (f=1)', async function () {
-        const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '777777';
-        const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
-
-        const leader = findLeader(mvh);
-        assert.ok(leader, 'no leader identified');
-
-        // Crash one NON-leader follower.
-        const victim = mvh.hubs.find((h) => h !== leader);
-        const restore = silenceValidator(victim);
-        const honest = mvh.hubs.filter((h) => h !== victim);
-        try {
-            await leader.addParametersFromJson(config);   // needs 3 of 4 → honest majority suffices
-            // The honest hubs' own config rows are the post-condition; waiting on
-            // them (rather than a fixed window) also means the silenced-hub check
-            // below runs strictly AFTER the change has propagated, which is the
-            // only moment at which "it stayed inert" says anything.
-            await waitForConfigEverywhere(
-                honest,
-                { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
-                { timeoutMs: APPLY_WAIT_MS });
-
-            for (const h of honest) {
-                const cfg = await h.db.getConfig(COIN, NET, MODULE);
-                assert.strictEqual(cfg.GAS_PRICE, VALUE,
-                    'an honest hub failed to apply despite quorum being reachable');
-            }
-            // The silenced hub legitimately never applied (it processed nothing).
-            const victimCfg = await victim.db.getConfig(COIN, NET, MODULE);
-            assert.notStrictEqual(victimCfg.GAS_PRICE, VALUE,
-                'the silenced validator somehow applied; it should have been inert');
-        } finally {
-            restore();
-        }
+        return assertSilentFollowerLiveness(mvh);
     });
 
     it('SAFETY: a forged-digest PRE_PREPARE is rejected with no state change', async function () {
-        const COIN = 'BTC', NET = 'regtest', MODULE = 'node';
-        const forgedValue = '666666';
-        const target = mvh.hubs[mvh.hubs.length - 1];   // any honest hub
-        const seq = 9000;                               // well above any applied seq
-
-        const before = await target.db.getConfig(COIN, NET, MODULE);
-        assert.notStrictEqual(before.GAS_PRICE, forgedValue, 'precondition: forged value not already set');
-
-        // Feed the forged proposal straight into the consensus handler.
-        await target.consensus.handlePrePrepare(
-            forgedPrePrepare(seq, { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: forgedValue } } } }, seed.blockIndex, target.consensus.validatorSet[0])
-        );
-
-        assert.ok(!target.consensus.pendingProposals.has(seq),
-            'forged PRE_PREPARE created a pending proposal (digest check failed)');
-
-        await assertNeverApplied([target],
-            { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: forgedValue },
-            { windowMs: 500 });
-        const after = await target.db.getConfig(COIN, NET, MODULE);
-        assert.notStrictEqual(after.GAS_PRICE, forgedValue,
-            'forged config was applied (safety violated)');
+        return assertForgedPrePrepareRejected(mvh, seed);
     });
 
     it('SAFETY: an equivocating leader cannot make a follower adopt two configs for one seq', async function () {
-        const COIN = 'BTC', NET = 'regtest', MODULE = 'node';
-        const follower = mvh.hubs[1];
-        const seq = 8000;   // fresh, above any applied seq
-        const view = 0;
-        const configA = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: '111' } } } };
-        const configB = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: '222' } } } };
-        const digestA = follower.consensus.digest(configA);
-        const digestB = follower.consensus.digest(configB);
-        // A PRE_PREPARE is only accepted from the validator the rotation
-        // designates as leader for (seq, view) and only with a registered sender
-        // (the isKnownSender + leader-identity guards in Consensus.handlePrePrepare).
-        // An equivocating leader is still the LEGITIMATE leader; it just emits two
-        // conflicting configs for one seq. Address the envelope from that leader so
-        // the follower processes it (a hardcoded non-leader/unregistered sender is
-        // correctly dropped before any proposal is created).
-        const N = follower.consensus.validatorSet.length;
-        const leader = follower.consensus.validatorSet[(seq + view) % N];
-        // The envelope carries the leader's SIGNING KEY, not just its address,
-        // because admission is keyed on the proven key: PeerManager stamps
-        // sig_pubkey on every real envelope and verifies the signature against it
-        // before a handler runs, so an envelope without one is unattributable and
-        // is dropped. Injecting straight into the handler skips the transport that
-        // would have stamped it, so the fixture has to supply it.
-        const env = (digest, config) => ({
-            sender: leader.addr,         // the (byzantine, but legitimate) leader
-            sig_pubkey: leader.pubkey,
-            data: { seq, view, configDigest: digest, config, btcBlockHeight: seed.blockIndex }
-        });
-
-        // First proposal locks the follower onto config A.
-        await follower.consensus.handlePrePrepare(env(digestA, configA));
-        assert.ok(follower.consensus.pendingProposals.has(seq), 'first PRE_PREPARE should create a proposal');
-
-        // Equivocation: a second, conflicting PRE_PREPARE for the SAME seq (config B,
-        // with its own valid digest). The follower must stay locked to the first
-        // config. Dedup-by-seq is the safety mechanism, so it cannot adopt both.
-        await follower.consensus.handlePrePrepare(env(digestB, configB));
-
-        const prop = follower.consensus.pendingProposals.get(seq);
-        assert.strictEqual(prop.digest, digestA,
-            'follower switched to the equivocating second config (double-adoption)');
-        assert.notStrictEqual(prop.digest, digestB);
+        return assertEquivocationRejected(mvh, seed);
     });
 });
