@@ -177,6 +177,9 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
             }
         }
     });
+});
+
+describe('SPV Phase 2: CHECKPOINT_COMMITMENT canonical parity across services', function () {
 
     it('post-flag-day: hub == SDK == indexer ANCHOR v0 section canonical (root suffix present)', function () {
         // regtest flag-day is 0, so snapshot_block 100 is active; roots present. This is
@@ -208,6 +211,24 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
         assert.ok(!hubC.includes(STATE_ROOT) && !hubC.includes(BLOCK_MERKLE),
             'pre-flag-day canonical must NOT contain any root');
     });
+
+    it('post-flag-day but null roots (legacy row): hub/SDK keep the rootless canonical', function () {
+        // A pre-Phase-1 / legacy row carries null roots even though its snapshot_block is
+        // post-flag-day. The presence-aware gate keeps it on the rootless canonical so its
+        // original (rootless) signatures still verify.
+        const withRoots    = fixtures('regtest', 100, true);
+        const withoutRoots = fixtures('regtest', 100, false);   // same fields, null roots
+        const hubNull = StateCheckpointEngine.canonicalCheckpoint(withoutRoots.cp);
+        const sdkNull = sdkCheckpoint.canonicalCheckpoint(withoutRoots.cp);
+        assert.strictEqual(hubNull, sdkNull, 'hub vs SDK null-root canonical drift');
+        assert.ok(!hubNull.includes(withRoots.STATE_ROOT) && !hubNull.includes(withRoots.BLOCK_MERKLE),
+            'null-root canonical must not append a root suffix');
+        assert.notStrictEqual(hubNull, StateCheckpointEngine.canonicalCheckpoint(withRoots.cp),
+            'a null-root and a rooted checkpoint must not share a canonical');
+    });
+});
+
+describe('SPV Phase 2: byte-identical twin modules across services', function () {
 
     it('explorer merkle.js is a byte-identical twin of the indexer merkle.js (Phase 3 proof server)', function () {
         // The Phase 3 proof server builds SMT/block proofs with an explorer-local copy
@@ -250,21 +271,6 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
             assert.strictEqual(fs.readFileSync(path.join(ROOT, rel), 'utf8'), idx,
                 rel + ' drifted from the indexer registry part that declares ' + CKPT_KEY);
         }
-    });
-
-    it('post-flag-day but null roots (legacy row): hub/SDK keep the rootless canonical', function () {
-        // A pre-Phase-1 / legacy row carries null roots even though its snapshot_block is
-        // post-flag-day. The presence-aware gate keeps it on the rootless canonical so its
-        // original (rootless) signatures still verify.
-        const withRoots    = fixtures('regtest', 100, true);
-        const withoutRoots = fixtures('regtest', 100, false);   // same fields, null roots
-        const hubNull = StateCheckpointEngine.canonicalCheckpoint(withoutRoots.cp);
-        const sdkNull = sdkCheckpoint.canonicalCheckpoint(withoutRoots.cp);
-        assert.strictEqual(hubNull, sdkNull, 'hub vs SDK null-root canonical drift');
-        assert.ok(!hubNull.includes(withRoots.STATE_ROOT) && !hubNull.includes(withRoots.BLOCK_MERKLE),
-            'null-root canonical must not append a root suffix');
-        assert.notStrictEqual(hubNull, StateCheckpointEngine.canonicalCheckpoint(withRoots.cp),
-            'a null-root and a rooted checkpoint must not share a canonical');
     });
 });
 

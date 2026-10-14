@@ -74,47 +74,77 @@ async function freePair(label) {
     return assert.fail('no tick free on DOGE and as a BTC copy for ' + label);
 }
 
+async function lockHomeListedTokenAcross(M, R) {
+    R.issuer = await fundChain('DOGE', 'LISTSHARE.AT5.ISSUER', 8);
+    R.holder = await fundChain('BTC', 'LISTSHARE.AT5.HOLDER', 4);
+    R.other = await newAddress('BTC', 'LISTSHARE.AT5.OTHER');
+    R.tick = await freePair('LISTSHARE.AT5');
+    const issue = await chainAction('DOGE', R.issuer, () => issueHelper.sendIssueV0Raw(
+        R.issuer, R.tick, 1000, 1000, 0, 'list share AT5', 100), 'issues');
+    assert.strictEqual(issue.status, 'valid', 'ISSUE 0 on DOGE graded ' + issue.status);
+    const bind = await chainAction('DOGE', R.issuer,
+        issueListsWire(R.tick, null, M.rootIndex, 'list share AT5'), 'issues');
+    assert.strictEqual(bind.status, 'valid', 'ISSUE 5 binding the home list graded ' + bind.status);
+    const optIn = await chainAction('DOGE', R.issuer,
+        optInWire(R.tick, 'BTC', '', '', 'list share AT5 opt-in'), 'issues');
+    assert.strictEqual(optIn.status, 'valid', 'ISSUE 7 BRIDGE_CHAINS=BTC graded ' + optIn.status);
+    R.lock = await chainAction('DOGE', R.issuer,
+        lockWireV3(R.tick, 'BTC', R.holder.address, LOCK, 'list share AT5'), 'xbridges');
+    assert.strictEqual(R.lock.status, 'valid', 'the XBRIDGE v3 lock graded ' + R.lock.status);
+    await chainRail.withRail(state.dogeRail, () => regtestMinerConnector.generateBlocks(
+        Number(state.venue.confirmations.DOGE || 1) + 2));
+    R.row = await state.venue.waitForFinalizedTransfer((row) => String(row.src_chain) === 'DOGE' &&
+        String(row.dest_chain) === 'BTC' && String(row.dest_address) === R.holder.address &&
+        String(row.tick) === R.tick, { timeoutMs: 30 * 60 * 1000 });
+    assert.ok(R.row, 'the lock never finalized on any venue hub');
+    const timer = setInterval(refreshBtcMirror, 30000);
+    try {
+        refreshBtcMirror();
+        // The signed BTC relay floor alone is 4 nominal blocks (2400 s), before median-time-past
+        // lag, so a 35-minute cap gave up before the transfer could settle (LS-ACC AT5);
+        // take the helper's 70-minute BTC budget.
+        R.applied = await state.venue.waitForBridgeApplied('BTC', R.row.transfer_id,
+            { timeoutMs: 70 * 60 * 1000 });
+    } finally { clearInterval(timer); }
+    assert.ok(R.applied, 'BTC never applied the lock ' + R.row.transfer_id);
+    const held = await state.venue.addressBalance('BTC', R.holder.address, 'DOGE.' + R.tick);
+    assert.strictEqual(Number(held), LOCK, 'the BTC holder holds ' + held + ' DOGE.' + R.tick);
+}
+
+async function checkHomeEditReachesCopy(M, R) {
+    const snapshotsBefore = await hubPolicyCount(R.tick);
+    const settlementsBefore = await btcPolicySettlements();
+    R.added = await sharedBtcLtcAddress('LISTSHARE.AT5.ADDED');
+    const edits = await oneDogeBlock(M.owner, [
+        listEditWire(1, M.rootIndex, [R.added.address], 'list share AT5 add'),
+    ]);
+    assert.strictEqual(edits[0].status, 'valid', 'home edit graded ' + edits[0].status);
+    M.seq3 = await waitForFinalizedSeq(3);
+    await waitForMirrorSeq('BTC', 3);
+    const blocked = await chainAction('BTC', R.holder,
+        sendWire('DOGE.' + R.tick, 1, R.added.BTC.address, 'list share AT5 newly listed'), 'sends');
+    const allowed = await chainAction('BTC', R.holder,
+        sendWire('DOGE.' + R.tick, 1, R.other.address, 'list share AT5 unlisted'), 'sends');
+    assert.strictEqual(blocked.status, 'invalid: DESTINATION (not authorized)',
+        'a SEND of the copy to the newly listed address graded ' + blocked.status);
+    assert.strictEqual(allowed.status, 'valid', 'a SEND of the copy to an unlisted address graded ' + allowed.status);
+    const snapshotsAfter = await hubPolicyCount(R.tick);
+    const settlementsAfter = await btcPolicySettlements();
+    assert.strictEqual(snapshotsAfter, snapshotsBefore,
+        'the home edit added hub policy_snapshots rows for ' + R.tick);
+    assert.strictEqual(settlementsAfter, settlementsBefore,
+        'the home edit added BTC policy settlements');
+    state.evidence.at5 = { tick: R.tick, ref: R.reading.block_list_ref, snapshots: snapshotsAfter,
+        settlements: settlementsAfter, blocked: blocked.status, allowed: allowed.status };
+}
+
 bridgeRailSuite('list_share AT5: a bridged token carries its shared list by reference', function () {
     it('list_share AT5: a DOGE token blocking the home list opts into BTC and is locked across', async function () {
         this.timeout(0);
         if (needsFederation(this, 'list_share AT5 lock')) return;
         const M = state.listShare.home;
         assert.ok(state.evidence.at4, 'AT4 must have run');
-        const R = state.listShare.referenced = {};
-        R.issuer = await fundChain('DOGE', 'LISTSHARE.AT5.ISSUER', 8);
-        R.holder = await fundChain('BTC', 'LISTSHARE.AT5.HOLDER', 4);
-        R.other = await newAddress('BTC', 'LISTSHARE.AT5.OTHER');
-        R.tick = await freePair('LISTSHARE.AT5');
-        const issue = await chainAction('DOGE', R.issuer, () => issueHelper.sendIssueV0Raw(
-            R.issuer, R.tick, 1000, 1000, 0, 'list share AT5', 100), 'issues');
-        assert.strictEqual(issue.status, 'valid', 'ISSUE 0 on DOGE graded ' + issue.status);
-        const bind = await chainAction('DOGE', R.issuer,
-            issueListsWire(R.tick, null, M.rootIndex, 'list share AT5'), 'issues');
-        assert.strictEqual(bind.status, 'valid', 'ISSUE 5 binding the home list graded ' + bind.status);
-        const optIn = await chainAction('DOGE', R.issuer,
-            optInWire(R.tick, 'BTC', '', '', 'list share AT5 opt-in'), 'issues');
-        assert.strictEqual(optIn.status, 'valid', 'ISSUE 7 BRIDGE_CHAINS=BTC graded ' + optIn.status);
-        R.lock = await chainAction('DOGE', R.issuer,
-            lockWireV3(R.tick, 'BTC', R.holder.address, LOCK, 'list share AT5'), 'xbridges');
-        assert.strictEqual(R.lock.status, 'valid', 'the XBRIDGE v3 lock graded ' + R.lock.status);
-        await chainRail.withRail(state.dogeRail, () => regtestMinerConnector.generateBlocks(
-            Number(state.venue.confirmations.DOGE || 1) + 2));
-        R.row = await state.venue.waitForFinalizedTransfer((row) => String(row.src_chain) === 'DOGE' &&
-            String(row.dest_chain) === 'BTC' && String(row.dest_address) === R.holder.address &&
-            String(row.tick) === R.tick, { timeoutMs: 30 * 60 * 1000 });
-        assert.ok(R.row, 'the lock never finalized on any venue hub');
-        const timer = setInterval(refreshBtcMirror, 30000);
-        try {
-            refreshBtcMirror();
-            // The signed BTC relay floor alone is 4 nominal blocks (2400 s), before median-time-past
-            // lag, so a 35-minute cap gave up before the transfer could settle (LS-ACC AT5);
-            // take the helper's 70-minute BTC budget.
-            R.applied = await state.venue.waitForBridgeApplied('BTC', R.row.transfer_id,
-                { timeoutMs: 70 * 60 * 1000 });
-        } finally { clearInterval(timer); }
-        assert.ok(R.applied, 'BTC never applied the lock ' + R.row.transfer_id);
-        const held = await state.venue.addressBalance('BTC', R.holder.address, 'DOGE.' + R.tick);
-        assert.strictEqual(Number(held), LOCK, 'the BTC holder holds ' + held + ' DOGE.' + R.tick);
+        await lockHomeListedTokenAcross(M, state.listShare.referenced = {});
     });
 
     it('list_share AT5: the BTC copy names the home list by reference and binds the BTC mirror', async function () {
@@ -139,32 +169,6 @@ bridgeRailSuite('list_share AT5: a bridged token carries its shared list by refe
     it('list_share AT5: a home edit reaches the copy with no new policy snapshot or policy settlement', async function () {
         this.timeout(0);
         if (needsFederation(this, 'list_share AT5 edit')) return;
-        const M = state.listShare.home;
-        const R = state.listShare.referenced;
-        assert.ok(R && R.reading, 'the reference half must have run');
-        const snapshotsBefore = await hubPolicyCount(R.tick);
-        const settlementsBefore = await btcPolicySettlements();
-        R.added = await sharedBtcLtcAddress('LISTSHARE.AT5.ADDED');
-        const edits = await oneDogeBlock(M.owner, [
-            listEditWire(1, M.rootIndex, [R.added.address], 'list share AT5 add'),
-        ]);
-        assert.strictEqual(edits[0].status, 'valid', 'home edit graded ' + edits[0].status);
-        M.seq3 = await waitForFinalizedSeq(3);
-        await waitForMirrorSeq('BTC', 3);
-        const blocked = await chainAction('BTC', R.holder,
-            sendWire('DOGE.' + R.tick, 1, R.added.BTC.address, 'list share AT5 newly listed'), 'sends');
-        const allowed = await chainAction('BTC', R.holder,
-            sendWire('DOGE.' + R.tick, 1, R.other.address, 'list share AT5 unlisted'), 'sends');
-        assert.strictEqual(blocked.status, 'invalid: DESTINATION (not authorized)',
-            'a SEND of the copy to the newly listed address graded ' + blocked.status);
-        assert.strictEqual(allowed.status, 'valid', 'a SEND of the copy to an unlisted address graded ' + allowed.status);
-        const snapshotsAfter = await hubPolicyCount(R.tick);
-        const settlementsAfter = await btcPolicySettlements();
-        assert.strictEqual(snapshotsAfter, snapshotsBefore,
-            'the home edit added hub policy_snapshots rows for ' + R.tick);
-        assert.strictEqual(settlementsAfter, settlementsBefore,
-            'the home edit added BTC policy settlements');
-        state.evidence.at5 = { tick: R.tick, ref: R.reading.block_list_ref, snapshots: snapshotsAfter,
-            settlements: settlementsAfter, blocked: blocked.status, allowed: allowed.status };
+        await checkHomeEditReachesCopy(M, R);
     });
 });

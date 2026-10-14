@@ -36,28 +36,33 @@ const ADDRESS_LIST = 2
 const MATCH_WAIT_MS = 30000
 const REFUSAL_WAIT_MS = 15000
 
+async function seedParties() {
+    const unset = ARMING_ENV.filter(name => !process.env[name])
+    assert.deepStrictEqual(unset, [],
+        'offer-list leg needs ' + unset.join(', ') + ' set in this shell and in the indexer '
+        + 'containers; an unarmed venue ignores the lists and would read as a false pass')
+
+    const maker = await cryptoHelper.getNewFundedAddress('OFFERLIST.MAKER', COIN, NETWORK, null, 'legacy', 0, 1)
+    const allowed = await cryptoHelper.getNewFundedAddress('OFFERLIST.ALLOWED', COIN, NETWORK, null, 'legacy', 0, 1)
+    const blocked = await cryptoHelper.getNewFundedAddress('OFFERLIST.BLOCKED', COIN, NETWORK, null, 'legacy', 0, 1)
+    const suffix = maker.address.substring(maker.address.length - 8)
+    const tokenA = 'OLSA' + suffix
+    const tokenB = 'OLSB' + suffix
+
+    await issueHelper.sendIssueV0(maker, tokenA, 100, 50, 0, 'Offer list token A', 50)
+    await issueHelper.sendIssueV0(maker, tokenB, 100, 50, 0, 'Offer list token B', 50)
+    await sendHelper.sendSendV0(maker, tokenB, 20, allowed.address, 'Fund allowed taker')
+    await sendHelper.sendSendV0(maker, tokenB, 20, blocked.address, 'Fund blocked taker')
+    for(const party of [maker, allowed, blocked]) await gasHelper.ensureGasBalance(party, 100)
+    const expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+    return { maker, allowed, blocked, tokenA, tokenB, expiration }
+}
+
 describe('offer lists: allow and block on the regtest rail', function(){
     let maker, allowed, blocked, tokenA, tokenB, expiration
 
     before(async function(){
-        const unset = ARMING_ENV.filter(name => !process.env[name])
-        assert.deepStrictEqual(unset, [],
-            'offer-list leg needs ' + unset.join(', ') + ' set in this shell and in the indexer '
-            + 'containers; an unarmed venue ignores the lists and would read as a false pass')
-
-        maker = await cryptoHelper.getNewFundedAddress('OFFERLIST.MAKER', COIN, NETWORK, null, 'legacy', 0, 1)
-        allowed = await cryptoHelper.getNewFundedAddress('OFFERLIST.ALLOWED', COIN, NETWORK, null, 'legacy', 0, 1)
-        blocked = await cryptoHelper.getNewFundedAddress('OFFERLIST.BLOCKED', COIN, NETWORK, null, 'legacy', 0, 1)
-        const suffix = maker.address.substring(maker.address.length - 8)
-        tokenA = 'OLSA' + suffix
-        tokenB = 'OLSB' + suffix
-
-        await issueHelper.sendIssueV0(maker, tokenA, 100, 50, 0, 'Offer list token A', 50)
-        await issueHelper.sendIssueV0(maker, tokenB, 100, 50, 0, 'Offer list token B', 50)
-        await sendHelper.sendSendV0(maker, tokenB, 20, allowed.address, 'Fund allowed taker')
-        await sendHelper.sendSendV0(maker, tokenB, 20, blocked.address, 'Fund blocked taker')
-        for(const party of [maker, allowed, blocked]) await gasHelper.ensureGasBalance(party, 100)
-        expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+        ;({ maker, allowed, blocked, tokenA, tokenB, expiration } = await seedParties())
     })
 
     it('matches a counter-offer from an address on the allow list', async function(){
