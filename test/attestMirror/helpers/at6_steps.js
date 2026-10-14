@@ -105,6 +105,7 @@ async function assertMirrorStillLands (ctx, ix, applied, requestId) {
     assert.strictEqual(String(applied[0].response_payload), FIXED_BODY,
         'indexer ' + ix.index + ' applied a body other than the one the provider served')
 
+    // request-row-wait-ok: the caller already waited for every indexer to commit request.blockIndex.
     const req = await readRequestRow(ctx.venue, ix.index, requestId)
     assert.strictEqual(String(req.request_status), 'fulfilled',
         'indexer ' + ix.index + ' left the request ' + req.request_status +
@@ -126,6 +127,7 @@ async function assertGateOnEveryIndexer (ctx, settled, requestId) {
 
 /** The escrow read back from the local request row; refuses a fee-less request. */
 async function readEscrow (ctx, requestId) {
+    // request-row-wait-ok: the caller already waited for every indexer to commit request.blockIndex.
     const local = await readRequestRow(ctx.venue, 0, requestId)
     const escrow = String(local.fee_amount)
     assert.ok(mathjs.bignumber(escrow).gt(mathjs.bignumber('0')),
@@ -212,6 +214,7 @@ async function awaitFulfilled (ctx, requestId) {
     // Let it reach a terminal state FIRST this time.
     const done = await untilOrClearDogeStall(async () => {
         await regtestMinerConnector.generateBlocks(1)
+        // request-row-wait-ok: the caller already waited for every indexer to commit request.blockIndex.
         const req = await readRequestRow(ctx.venue, 0, requestId)
         return { ok: !!req && String(req.request_status) === 'fulfilled', req: req }
     }, { timeoutMs: 15 * 60 * 1000, intervalMs: 3000, tipProbe: venueTipProbe(ctx.venue, 0) })
