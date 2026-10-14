@@ -60,6 +60,35 @@ describe('VOTE callback binding price seed', function(){
     });
 });
 
+async function setUpIssuerAndCallback(sdk){
+    const issuer = await fundedGasAddress(sdk, 0.05);
+    const tick = uniqueTick('VBM');
+    const issue = await submitFrom(sdk, issuer, 'ISSUE', {
+        tick,
+        maxSupply: 10000000,
+        maxMint: 100000,
+        decimals: 0,
+        description: 'vote callback method rail',
+        mintSupply: 1000
+    });
+    assert.strictEqual(String(issue.indexed.status), 'valid');
+
+    const deploy = await submitFrom(sdk, issuer, 'DEPLOY', {
+        code: CALLBACK_TARGET_SOURCE,
+        gasLimit: 200000,
+        constructorParams: 'initialize'
+    });
+    assert.strictEqual(String(deploy.indexed.status), 'valid');
+    return { issuer, tick, callbackContract: actionIndexOf(deploy) };
+}
+
+function submitFrom(sdk, issuer, action, params, opts = {}){
+    return submit(sdk, { action, params }, {
+        pubkey: issuer.address,
+        change: issuer.address
+    }, submitOpts({ wif: issuer.wif, ...opts }));
+}
+
 describe('VOTE callback binding usable method', function(){
     this.timeout(0);
 
@@ -71,65 +100,28 @@ describe('VOTE callback binding usable method', function(){
     before(async function(){
         await seedVoteBindingPrices();
         sdk = makeSdk({ compactAddresses: false });
-        issuer = await fundedGasAddress(sdk, 0.05);
-        tick = uniqueTick('VBM');
-
-        const issue = await submit(sdk, {
-            action: 'ISSUE',
-            params: {
-                tick,
-                maxSupply: 10000000,
-                maxMint: 100000,
-                decimals: 0,
-                description: 'vote callback method rail',
-                mintSupply: 1000
-            }
-        }, {
-            pubkey: issuer.address,
-            change: issuer.address
-        }, submitOpts({ wif: issuer.wif }));
-        assert.strictEqual(String(issue.indexed.status), 'valid');
-
-        const deploy = await submit(sdk, {
-            action: 'DEPLOY',
-            params: {
-                code: CALLBACK_TARGET_SOURCE,
-                gasLimit: 200000,
-                constructorParams: 'initialize'
-            }
-        }, {
-            pubkey: issuer.address,
-            change: issuer.address
-        }, submitOpts({ wif: issuer.wif }));
-        assert.strictEqual(String(deploy.indexed.status), 'valid');
-        callbackContract = actionIndexOf(deploy);
+        ({ issuer, tick, callbackContract } = await setUpIssuerAndCallback(sdk));
         await mine(1);
     });
 
     for(const [index, testCase] of USABLE_METHOD_CASES.entries()){
         it(testCase.name + ' is ' + testCase[MODE] + ' when the gate is ' + MODE, async function(){
             const endBlock = (await global.nodeConnector.getBlockCount()) + 30;
-            const res = await submit(sdk, {
-                action: 'VOTE',
-                params: {
-                    version: 0,
-                    tick,
-                    endBlock,
-                    options: 'YES,NO',
-                    maxSelections: 1,
-                    tallyMode: 'approval',
-                    weightMode: 'balance',
-                    quorum: '0.05',
-                    minVoters: 1,
-                    question: 'Usable callback method ' + index,
-                    callbackContract,
-                    callbackMethod: testCase.method,
-                    callbackOn: 'pass'
-                }
-            }, {
-                pubkey: issuer.address,
-                change: issuer.address
-            }, submitOpts({ wif: issuer.wif, requireValid: false }));
+            const res = await submitFrom(sdk, issuer, 'VOTE', {
+                version: 0,
+                tick,
+                endBlock,
+                options: 'YES,NO',
+                maxSelections: 1,
+                tallyMode: 'approval',
+                weightMode: 'balance',
+                quorum: '0.05',
+                minVoters: 1,
+                question: 'Usable callback method ' + index,
+                callbackContract,
+                callbackMethod: testCase.method,
+                callbackOn: 'pass'
+            }, { requireValid: false });
 
             assert.strictEqual(String(readCaseStatus(res.indexed)), testCase[MODE]);
         });
