@@ -16,7 +16,7 @@
  ********************************************************************/
 
 const assert = require('assert');
-const { drill, HubDbSync, haveHubDbSync, B, RUN5_DEFERRAL_SAMPLES, GRACE_S, statusSeries } = require('./helpers/fixtures.js');
+const { drill, sibling, HubDbSync, haveHubDbSync, B, RUN5_DEFERRAL_SAMPLES, GRACE_S, statusSeries } = require('./helpers/fixtures.js');
 
 function registerUngatedBlock() {
     // `blockMayReadPrice` is `blockTransactions.length > 0`

@@ -97,4 +97,4 @@ function statusSeries(fromAt, toAt, stepS) {
     return out;
 }
 
-module.exports = { drill, REPO_ROOT, protocolTime, HubDbSync, haveHubDbSync, B, PREV_11_DESC, RUN5_DEFERRAL_SAMPLES, GRACE_S, statusSeries };
+module.exports = { drill, REPO_ROOT, sibling, protocolTime, HubDbSync, haveHubDbSync, B, PREV_11_DESC, RUN5_DEFERRAL_SAMPLES, GRACE_S, statusSeries };
