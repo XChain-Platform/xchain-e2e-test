@@ -81,6 +81,11 @@ module.exports = {
     fundingRetryBaseDelayMs: 500,
     fundingMaxAttempts: 3,
 
+    // How long a funding tx may take to reach the node. Each getrawtransaction poll can wait out
+    // its own 15s read timeout on a loaded regtest host, so the window must outlast several polls;
+    // 60s matches every other waitForTx caller.
+    fundingTxWaitMs: 60000,
+
     // The regtest miner occasionally answers send_funds with a transient
     // "problem sending funds" error. Retry only that, up to three attempts
     // with exponential backoff; any other error propagates immediately.
@@ -107,7 +112,7 @@ module.exports = {
         console.log("Sending funds ("+amountToFund+") to "+newAddress)
         const txId = await this.sendFundsWithRetry(newAddress, amountToFund)
         try {
-            const txExists = await nodeConnector.waitForTx(txId)
+            const txExists = await nodeConnector.waitForTx(txId, this.fundingTxWaitMs)
 
             if (!txExists){
                 throw new Error("The sent tx didn't appear in the blockchain")

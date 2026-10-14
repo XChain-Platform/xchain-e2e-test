@@ -81,4 +81,11 @@ describe('cryptoHelper getNewFundedAddress funding retry', () => {
         const delays = clock.getCalls().map(c => c.args[1]).filter(d => d === 20 || d === 40)
         assert.deepStrictEqual(delays, [20, 40])
     })
+    it('waits for the funding tx longer than one slow node read', async () => {
+        sendFunds.resolves('tx1')
+        await fund()
+        const [txid, windowMs] = global.nodeConnector.waitForTx.firstCall.args
+        assert.strictEqual(txid, 'tx1')
+        assert.ok(windowMs >= 60000, 'funding window ' + windowMs + 'ms is shorter than several 15s node reads')
+    })
 })
