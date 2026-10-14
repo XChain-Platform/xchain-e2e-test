@@ -22,8 +22,8 @@ const internalFs   = require('fs');
 const HUB_BASE = (function () {
     const candidates = [
         process.env.XCHAIN_HUB_PATH,
-        internalPath.resolve(__dirname, '../../xchain-hub'),
-        internalPath.resolve(__dirname, '../../../xchain-hub'),
+        internalPath.resolve(__dirname, '../../../../xchain-hub'),
+        internalPath.resolve(__dirname, '../../../../../xchain-hub'),
     ].filter(Boolean);
     for (const c of candidates) {
         if (internalFs.existsSync(internalPath.join(c, 'src/attestation/relay.js'))) return c;
