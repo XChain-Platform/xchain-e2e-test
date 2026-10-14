@@ -77,12 +77,35 @@ module.exports = {
         return {mnemonic: wallet.mnemonic, privateKey: address.privateKey, publicKey: address.publicKey, address:testAddress}
     },
     
+    // Base backoff between funding attempts; doubles each retry (500ms, 1000ms).
+    fundingRetryBaseDelayMs: 500,
+    fundingMaxAttempts: 3,
+
+    // The regtest miner occasionally answers send_funds with a transient
+    // "problem sending funds" error. Retry only that, up to three attempts
+    // with exponential backoff; any other error propagates immediately.
+    async sendFundsWithRetry(address, amount){
+        for (let attempt = 1; ; attempt++){
+            try {
+                return await regtestMinerConnector.sendFunds(address, amount)
+            } catch (err) {
+                const transient = /problem sending funds/i.test((err && err.message) || String(err))
+                if (!transient || attempt >= this.fundingMaxAttempts){
+                    throw err
+                }
+                const delay = this.fundingRetryBaseDelayMs * Math.pow(2, attempt - 1)
+                console.log(`Miner reported a problem sending funds to ${address} (attempt ${attempt}/${this.fundingMaxAttempts}); retrying in ${delay}ms`)
+                await new Promise(resolve => setTimeout(resolve, delay))
+            }
+        }
+    },
+
     async getNewFundedAddress(label, coin, network, mnemonic = null, addressType="legacy", addressIndex=0, amountToFund, seedGas = true){
         const newAddressInfo = await this.getNewAddress(label, coin, network, mnemonic, addressType, addressIndex)
         const newAddress = newAddressInfo["address"]
 
         console.log("Sending funds ("+amountToFund+") to "+newAddress)
-        const txId = await regtestMinerConnector.sendFunds(newAddress, amountToFund)
+        const txId = await this.sendFundsWithRetry(newAddress, amountToFund)
         try {
             const txExists = await nodeConnector.waitForTx(txId)
 
