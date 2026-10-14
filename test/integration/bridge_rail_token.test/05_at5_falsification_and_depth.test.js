@@ -111,7 +111,10 @@ async function observeInjected(row, dest) {
     const venue = state.venue;
     await venue.dogeVenue.injectMirrorRow(row, { table: 'bridge_transfers', key: ['transfer_id'] });
     const idPrefix = row.transfer_id.slice(0, 16);
-    const refusalsNow = () => venue.indexerTails(400).split('\n').filter((l) => l.includes(idPrefix));
+    // Watchdog deferral lines also name the transfer id but are not refusals: the escrow
+    // proof is merely unavailable for now, or a block-processing promise was abandoned.
+    const isDeferral = (l) => /escrow proof unavailable/i.test(l) || /Abandoned block-processing promise/i.test(l);
+    const refusalsNow = () => venue.indexerTails(400).split('\n').filter((l) => l.includes(idPrefix) && !isDeferral(l));
     await venue.waitUntil('the destination to log a refusal naming ' + idPrefix,
         () => refusalsNow().length >= 1, { timeoutMs: 180000 });
     const atRefusal = Number((await venue.venueTips()).DOGE);
