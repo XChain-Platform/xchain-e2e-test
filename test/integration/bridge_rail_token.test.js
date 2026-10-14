@@ -335,15 +335,16 @@ function runDirectCiGate() {
         res = run('npm', ['run', 'ci:full'], E2E_ROOT,
             gateEnv({ CI_TIER: 'full', [ENCLOSING_CI_VENUE_ENV]: venue }));
     } else {
-        // Ship the graded head as a git archive and run the gate in a scratch dir on the venue.
-        const script = 'set -e; git -C "$1" archive HEAD | ssh -o BatchMode=yes "$2" ' +
-            '\'d=$(mktemp -d) && trap "rm -rf $d" EXIT && tar -x -C $d && cd $d && ' +
-            'CI_TIER=full ' + ENCLOSING_CI_VENUE_ENV + '=$(hostname) ' + CI_GATE_COMMAND + '\'';
-        res = run('bash', ['-c', script, 'at9-direct-gate', E2E_ROOT, venue], E2E_ROOT, gateEnv());
+        // ci-venue-worktree: ship the graded head as a tar stream into a scratch worktree of the
+        // venue's cached e2e tree, so sibling checkouts and node_modules resolve there.
+        const remote = loadRailGateContract.venueWorktreeScript(
+            { command: CI_GATE_COMMAND, enclosingEnv: ENCLOSING_CI_VENUE_ENV });
+        const script = 'set -e; (cd "$1" && git archive HEAD) | ssh -o BatchMode=yes "$2" "$3"';
+        res = run('bash', ['-c', script, 'at9-direct-gate', E2E_ROOT, venue, remote], E2E_ROOT, gateEnv());
     }
     const counts = tallies(res.out);
     at9.ordinaryCi = { command: CI_GATE_COMMAND, cwd: E2E_ROOT, venue,
-        transport: target.remote ? 'ssh' : 'direct', directGateTarget: target, exit: res.status, signal: res.signal, counts,
+        transport: target.remote ? 'ci-venue-worktree' : 'direct', directGateTarget: target, exit: res.status, signal: res.signal, counts,
         cachedVerdict: null, failureTail: res.status === 0 ? null : res.tail };
     assert.strictEqual(res.status, 0, 'the full CI gate is red on venue ' + venue + ' (exit ' + res.status +
         (res.signal ? ', signal ' + res.signal : '') + (res.error ? ', ' + res.error : '') + '):\n' + res.tail);
