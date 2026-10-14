@@ -51,6 +51,32 @@ const COUNT         = 10;
 const PEER_WAIT_MS  = 60_000;  // every hub holds an OPEN socket to all 9 others
 const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + applyConfig across 10 hubs
 
+async function assertLeaderConfigAppliesEverywhere(mvh) {
+    const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '101010';
+    const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
+
+    const leader = mvh.hubs.find((h) => {
+        const l = h.consensus.getLeader(h.consensus.seq + 1);
+        return l && l.addr === h.consensus.peerManager.validatorAddr;
+    });
+    assert.ok(leader, 'no round leader could be identified');
+
+    // Resolves on the LEADER's own COMMIT tally (7 of 10), necessarily before the
+    // followers have written their rows; each follower's own DB row is the
+    // post-condition, so wait on it rather than sleeping past it.
+    await leader.addParametersFromJson(config);
+    await waitForConfigEverywhere(
+        mvh.hubs,
+        { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+        { timeoutMs: APPLY_WAIT_MS });
+
+    for (let i = 0; i < mvh.hubs.length; i++) {
+        const cfg = await mvh.hubs[i].db.getConfig(COIN, NET, MODULE);
+        assert.strictEqual(cfg.GAS_PRICE, VALUE,
+            'hub ' + i + ' did not apply the PBFT config change (got ' + JSON.stringify(cfg) + ')');
+    }
+}
+
 describe('MultiValidatorHub: N=10 config-change PBFT scale probe (C.2)', function () {
     this.timeout(300_000);
 
@@ -100,28 +126,6 @@ describe('MultiValidatorHub: N=10 config-change PBFT scale probe (C.2)', functio
     });
 
     it('a leader-proposed config change reaches quorum and applies on EVERY one of the 10 hubs', async function () {
-        const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '101010';
-        const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
-
-        const leader = mvh.hubs.find((h) => {
-            const l = h.consensus.getLeader(h.consensus.seq + 1);
-            return l && l.addr === h.consensus.peerManager.validatorAddr;
-        });
-        assert.ok(leader, 'no round leader could be identified');
-
-        // Resolves on the LEADER's own COMMIT tally (7 of 10), necessarily before the
-        // followers have written their rows; each follower's own DB row is the
-        // post-condition, so wait on it rather than sleeping past it.
-        await leader.addParametersFromJson(config);
-        await waitForConfigEverywhere(
-            mvh.hubs,
-            { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
-            { timeoutMs: APPLY_WAIT_MS });
-
-        for (let i = 0; i < mvh.hubs.length; i++) {
-            const cfg = await mvh.hubs[i].db.getConfig(COIN, NET, MODULE);
-            assert.strictEqual(cfg.GAS_PRICE, VALUE,
-                'hub ' + i + ' did not apply the PBFT config change (got ' + JSON.stringify(cfg) + ')');
-        }
+        return assertLeaderConfigAppliesEverywhere(mvh);
     });
 });

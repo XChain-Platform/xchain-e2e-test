@@ -50,6 +50,60 @@ const COUNT        = 4;
 const PEER_WAIT_MS = 60_000;   // every hub holds an OPEN socket to every other hub
 const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + follower applyConfig
 
+async function assertLeaderConfigAppliesEverywhere(mvh) {
+    // Real path: addParametersFromJson → Consensus.propose → PBFT round →
+    // applyConfig on each hub that observes COMMIT quorum.
+    const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '424242';
+    const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
+
+    const leader = mvh.hubs.find((h) => {
+        const l = h.consensus.getLeader(h.consensus.seq + 1);
+        return l && l.addr === h.consensus.peerManager.validatorAddr;
+    });
+    assert.ok(leader, 'no round leader could be identified');
+
+    // Resolves on the LEADER's own COMMIT tally, which is necessarily before the
+    // followers have written their rows, so the followers are waited on (their
+    // own DB row IS the post-condition) rather than slept past.
+    await leader.addParametersFromJson(config);
+    await waitForConfigEverywhere(
+        mvh.hubs,
+        { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+        { timeoutMs: APPLY_WAIT_MS });
+
+    // The change must be persisted on EVERY hub's own DB. This is proof PBFT
+    // carried it across the federation, not just the proposer.
+    for (let i = 0; i < mvh.hubs.length; i++) {
+        const cfg = await mvh.hubs[i].db.getConfig(COIN, NET, MODULE);
+        assert.strictEqual(cfg.GAS_PRICE, VALUE,
+            'hub ' + i + ' did not apply the PBFT config change (got ' + JSON.stringify(cfg) + ')');
+    }
+}
+
+async function assertNonLeaderProposeRejected(mvh) {
+    // Predict the slot propose() will actually resolve, which is
+    // max(seq, lastAppliedSeq) + 1, not seq + 1. A hub that has applied
+    // rounds as a follower carries lastAppliedSeq above seq, so picking the
+    // non-leader of seq + 1 can hand back the hub that IS the leader of the
+    // slot propose() goes on to use: the proposal is then correctly accepted
+    // and the expected rejection never arrives. That divergence appeared when
+    // a not-leader refusal started consuming its slot, and it fails only when
+    // enough follower rounds have landed first, which is why it is flaky
+    // rather than constant.
+    const nonLeader = mvh.hubs.find((h) => {
+        const c = h.consensus;
+        const nextSeq = Math.max(c.seq, c.lastAppliedSeq) + 1;
+        const l = c.getLeader(nextSeq);
+        return l && l.addr !== c.peerManager.validatorAddr;
+    });
+    assert.ok(nonLeader, 'expected at least one non-leader');
+    await assert.rejects(
+        () => nonLeader.consensus.propose({ BTC: { regtest: { node: { GAS_PRICE: '999' } } } }),
+        /Not the leader/,
+        'a non-leader was allowed to propose'
+    );
+}
+
 describe('MultiValidatorHub: config-change PBFT (L2)', function () {
     this.timeout(180_000);
 
@@ -99,56 +153,10 @@ describe('MultiValidatorHub: config-change PBFT (L2)', function () {
     });
 
     it('a leader-proposed config change reaches quorum and applies on EVERY hub', async function () {
-        // Real path: addParametersFromJson → Consensus.propose → PBFT round →
-        // applyConfig on each hub that observes COMMIT quorum.
-        const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '424242';
-        const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
-
-        const leader = mvh.hubs.find((h) => {
-            const l = h.consensus.getLeader(h.consensus.seq + 1);
-            return l && l.addr === h.consensus.peerManager.validatorAddr;
-        });
-        assert.ok(leader, 'no round leader could be identified');
-
-        // Resolves on the LEADER's own COMMIT tally, which is necessarily before the
-        // followers have written their rows, so the followers are waited on (their
-        // own DB row IS the post-condition) rather than slept past.
-        await leader.addParametersFromJson(config);
-        await waitForConfigEverywhere(
-            mvh.hubs,
-            { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
-            { timeoutMs: APPLY_WAIT_MS });
-
-        // The change must be persisted on EVERY hub's own DB. This is proof PBFT
-        // carried it across the federation, not just the proposer.
-        for (let i = 0; i < mvh.hubs.length; i++) {
-            const cfg = await mvh.hubs[i].db.getConfig(COIN, NET, MODULE);
-            assert.strictEqual(cfg.GAS_PRICE, VALUE,
-                'hub ' + i + ' did not apply the PBFT config change (got ' + JSON.stringify(cfg) + ')');
-        }
+        return assertLeaderConfigAppliesEverywhere(mvh);
     });
 
     it('a non-leader proposing is rejected (only the round leader drives)', async function () {
-        // Predict the slot propose() will actually resolve, which is
-        // max(seq, lastAppliedSeq) + 1, not seq + 1. A hub that has applied
-        // rounds as a follower carries lastAppliedSeq above seq, so picking the
-        // non-leader of seq + 1 can hand back the hub that IS the leader of the
-        // slot propose() goes on to use: the proposal is then correctly accepted
-        // and the expected rejection never arrives. That divergence appeared when
-        // a not-leader refusal started consuming its slot, and it fails only when
-        // enough follower rounds have landed first, which is why it is flaky
-        // rather than constant.
-        const nonLeader = mvh.hubs.find((h) => {
-            const c = h.consensus;
-            const nextSeq = Math.max(c.seq, c.lastAppliedSeq) + 1;
-            const l = c.getLeader(nextSeq);
-            return l && l.addr !== c.peerManager.validatorAddr;
-        });
-        assert.ok(nonLeader, 'expected at least one non-leader');
-        await assert.rejects(
-            () => nonLeader.consensus.propose({ BTC: { regtest: { node: { GAS_PRICE: '999' } } } }),
-            /Not the leader/,
-            'a non-leader was allowed to propose'
-        );
+        return assertNonLeaderProposeRejected(mvh);
     });
 });

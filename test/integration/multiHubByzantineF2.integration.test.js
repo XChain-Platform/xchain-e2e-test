@@ -84,14 +84,156 @@ function alignSeqs(mvh) {
     for (const h of mvh.hubs) if (h.consensus) h.consensus.seq = maxSeq;
 }
 
-function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
-    // A deadline, not a settle: the honest hubs' own config rows are observable, so
-    // the apply wait polls them and returns on the first passing poll.
-    const APPLY_WAIT_MS = 60_000;
-    // Non-occurrence has no event to wait for, so the boundary round's window stays
-    // a fixed observation window.
-    const STALL_WAIT_MS = 8000;
+// A deadline, not a settle: the honest hubs' own config rows are observable, so
+// the apply wait polls them and returns on the first passing poll.
+const APPLY_WAIT_MS = 60_000;
+// Non-occurrence has no event to wait for, so the boundary round's window stays
+// a fixed observation window.
+const STALL_WAIT_MS = 8000;
 
+async function assertBoundaryStalls(mvh, faults, quorum, count) {
+    const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = String(count) + '30001';
+    const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
+
+    // The prior apply round advanced the leader's seq (a proposer bumps its
+    // own seq even before COMMIT), so re-level all hubs to the max and clear
+    // stale pendings. This round is EXPECTED to stall (no quorum), so it
+    // tolerates the levelling; what we assert is the absence of any apply.
+    alignSeqs(mvh);
+    clearPendingProposals(mvh);
+    const leader = findLeader(mvh);
+    assert.ok(leader, 'no leader identified');
+
+    const victims = mvh.hubs.filter((h) => h !== leader).slice(0, faults + 1);
+    const restores = victims.map((v) => silenceValidator(v));
+    try {
+        // Quorum is unreachable, so addParametersFromJson never resolves on a
+        // COMMIT quorum. Fire and forget, then watch that the change applies NOWHERE.
+        leader.addParametersFromJson(config).catch(() => {});
+        await assertNeverApplied(mvh.hubs,
+            { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+            { windowMs: STALL_WAIT_MS + 1000 });
+
+        // Re-read without the watcher's swallowed read errors, so a dead hub DB fails loud.
+        for (let i = 0; i < mvh.hubs.length; i++) {
+            const cfg = await mvh.hubs[i].db.getConfig(COIN, NET, MODULE);
+            assert.notStrictEqual(cfg.GAS_PRICE, VALUE,
+                'hub ' + i + ' applied a change that lacked quorum (only ' + (quorum - 1) + ' of ' + count + ' live, need ' + quorum + ')');
+        }
+    } finally {
+        restores.forEach((r) => r());
+        clearPendingProposals(mvh);
+    }
+}
+
+async function assertSilentFollowersLiveness(mvh, faults, quorum, count) {
+    const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = String(count) + '20001';
+    const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
+
+    const leader = findLeader(mvh);
+    assert.ok(leader, 'no leader identified');
+
+    const victims = mvh.hubs.filter((h) => h !== leader).slice(0, faults);
+    const restores = victims.map((v) => silenceValidator(v));
+    const honest = mvh.hubs.filter((h) => !victims.includes(h));
+    try {
+        await leader.addParametersFromJson(config);   // needs `quorum` of `count`
+        // The honest hubs' own config rows are the post-condition. Waiting on
+        // them also puts the silenced-hub check below strictly AFTER the change
+        // propagated, which is the only moment "it stayed inert" proves anything.
+        await waitForConfigEverywhere(
+            honest,
+            { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+            { timeoutMs: APPLY_WAIT_MS });
+
+        assert.strictEqual(honest.length, quorum, 'expected ' + quorum + ' honest hubs');
+        for (const h of honest) {
+            const cfg = await h.db.getConfig(COIN, NET, MODULE);
+            assert.strictEqual(cfg.GAS_PRICE, VALUE,
+                'an honest hub failed to apply despite quorum (' + quorum + ' of ' + count + ') being reachable');
+        }
+        for (const v of victims) {
+            const cfg = await v.db.getConfig(COIN, NET, MODULE);
+            assert.notStrictEqual(cfg.GAS_PRICE, VALUE,
+                'a silenced validator somehow applied; it should have been inert');
+        }
+    } finally {
+        restores.forEach((r) => r());
+    }
+}
+
+async function assertForgedPrePrepareRejected(mvh, seed, count) {
+    const COIN = 'BTC', NET = 'regtest', MODULE = 'node';
+    const forgedValue = String(count) + '60666';
+    const target = mvh.hubs[mvh.hubs.length - 1];   // any honest hub
+    const seq = 9100;                               // well above any applied seq
+
+    const before = await target.db.getConfig(COIN, NET, MODULE);
+    assert.notStrictEqual(before.GAS_PRICE, forgedValue, 'precondition: forged value not already set');
+
+    await target.consensus.handlePrePrepare(
+        forgedPrePrepare(seq, { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: forgedValue } } } }, seed.blockIndex, target.consensus.validatorSet[0])
+    );
+
+    assert.ok(!target.consensus.pendingProposals.has(seq),
+        'forged PRE_PREPARE created a pending proposal (digest check failed)');
+
+    await assertNeverApplied([target],
+        { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: forgedValue },
+        { windowMs: 500 });
+    const after = await target.db.getConfig(COIN, NET, MODULE);
+    assert.notStrictEqual(after.GAS_PRICE, forgedValue, 'forged config was applied (safety violated)');
+}
+
+async function assertEquivocationRejected(mvh, seed, count) {
+    const COIN = 'BTC', NET = 'regtest', MODULE = 'node';
+    const follower = mvh.hubs[1];
+    const seq = 8100;   // fresh, above any applied seq
+    const view = 0;
+    const configA = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: String(count) + '111' } } } };
+    const configB = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: String(count) + '222' } } } };
+    const digestA = follower.consensus.digest(configA);
+    const digestB = follower.consensus.digest(configB);
+    // A PRE_PREPARE is only accepted from the rotation-designated leader for
+    // (seq, view) with a registered sender. An equivocating leader is still
+    // the LEGITIMATE leader; it just emits two conflicting configs for one seq.
+    const N = follower.consensus.validatorSet.length;
+    const leader = follower.consensus.validatorSet[(seq + view) % N];
+    // Carries the leader's SIGNING KEY as well as its address: admission is
+    // keyed on the proven key, which transport stamps and verifies before a
+    // handler runs. Injecting into the handler skips that, so the fixture
+    // supplies it, otherwise the envelope is unattributable and dropped.
+    const env = (digest, config) => ({
+        sender: leader.addr,
+        sig_pubkey: leader.pubkey,
+        data: { seq, view, configDigest: digest, config, btcBlockHeight: seed.blockIndex }
+    });
+
+    await follower.consensus.handlePrePrepare(env(digestA, configA));
+    assert.ok(follower.consensus.pendingProposals.has(seq), 'first PRE_PREPARE should create a proposal');
+
+    // Equivocation: a second conflicting PRE_PREPARE for the SAME seq. Dedup-by-seq
+    // is the safety mechanism; the follower must stay locked to the first config.
+    await follower.consensus.handlePrePrepare(env(digestB, configB));
+
+    const prop = follower.consensus.pendingProposals.get(seq);
+    assert.strictEqual(prop.digest, digestA, 'follower switched to the equivocating second config');
+    assert.notStrictEqual(prop.digest, digestB);
+}
+
+function assertMeshAndQuorum(mvh, seed, count, quorum) {
+    const quorums = [];
+    for (const h of mvh.hubs) {
+        assert.ok(h.consensus, 'consensus engine not started');
+        const peers = h.peerManager ? h.peerManager.peers.size : 0;
+        assert.strictEqual(peers, count - 1, 'expected ' + (count - 1) + ' peers, got ' + peers);
+        quorums.push(h.consensus.hub.capabilitySnapshot.getQuorum(seed.snapshot));
+    }
+    assert.ok(quorums.every((q) => q === quorums[0]), 'hubs disagree on quorum: ' + JSON.stringify(quorums));
+    assert.strictEqual(quorums[0], quorum, 'expected quorum ' + quorum + ' for N=' + count + ', got ' + quorums[0]);
+}
+
+function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
     describe('MultiValidatorHub: byzantine fault tolerance at f=' + faults + ' (N=' + count + ', C.2)', function () {
         this.timeout(360_000);
 
@@ -124,148 +266,26 @@ function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
         });
 
         it('all ' + count + ' hubs peer-connect (each sees ' + (count - 1) + ') and every hub resolves quorum ' + quorum, function () {
-            const quorums = [];
-            for (const h of mvh.hubs) {
-                assert.ok(h.consensus, 'consensus engine not started');
-                const peers = h.peerManager ? h.peerManager.peers.size : 0;
-                assert.strictEqual(peers, count - 1, 'expected ' + (count - 1) + ' peers, got ' + peers);
-                quorums.push(h.consensus.hub.capabilitySnapshot.getQuorum(seed.snapshot));
-            }
-            assert.ok(quorums.every((q) => q === quorums[0]), 'hubs disagree on quorum: ' + JSON.stringify(quorums));
-            assert.strictEqual(quorums[0], quorum, 'expected quorum ' + quorum + ' for N=' + count + ', got ' + quorums[0]);
+            return assertMeshAndQuorum(mvh, seed, count, quorum);
         });
 
         // Runs FIRST (on a pristine, seq-aligned federation) so the zero-slack
         // quorum round (exactly `quorum` honest, all must COMMIT) has a clean mesh
         // with no carry-over pending state from a prior round.
         it('LIVENESS (f=' + faults + '): ' + faults + ' silent followers do not stall the federation', async function () {
-            const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = String(count) + '20001';
-            const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
-
-            const leader = findLeader(mvh);
-            assert.ok(leader, 'no leader identified');
-
-            const victims = mvh.hubs.filter((h) => h !== leader).slice(0, faults);
-            const restores = victims.map((v) => silenceValidator(v));
-            const honest = mvh.hubs.filter((h) => !victims.includes(h));
-            try {
-                await leader.addParametersFromJson(config);   // needs `quorum` of `count`
-                // The honest hubs' own config rows are the post-condition. Waiting on
-                // them also puts the silenced-hub check below strictly AFTER the change
-                // propagated, which is the only moment "it stayed inert" proves anything.
-                await waitForConfigEverywhere(
-                    honest,
-                    { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
-                    { timeoutMs: APPLY_WAIT_MS });
-
-                assert.strictEqual(honest.length, quorum, 'expected ' + quorum + ' honest hubs');
-                for (const h of honest) {
-                    const cfg = await h.db.getConfig(COIN, NET, MODULE);
-                    assert.strictEqual(cfg.GAS_PRICE, VALUE,
-                        'an honest hub failed to apply despite quorum (' + quorum + ' of ' + count + ') being reachable');
-                }
-                for (const v of victims) {
-                    const cfg = await v.db.getConfig(COIN, NET, MODULE);
-                    assert.notStrictEqual(cfg.GAS_PRICE, VALUE,
-                        'a silenced validator somehow applied; it should have been inert');
-                }
-            } finally {
-                restores.forEach((r) => r());
-            }
+            return assertSilentFollowersLiveness(mvh, faults, quorum, count);
         });
 
         it('LIVENESS BOUNDARY (f+1=' + (faults + 1) + '): one more silent follower drops below quorum, so nothing applies', async function () {
-            const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = String(count) + '30001';
-            const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
-
-            // The prior apply round advanced the leader's seq (a proposer bumps its
-            // own seq even before COMMIT), so re-level all hubs to the max and clear
-            // stale pendings. This round is EXPECTED to stall (no quorum), so it
-            // tolerates the levelling; what we assert is the absence of any apply.
-            alignSeqs(mvh);
-            clearPendingProposals(mvh);
-            const leader = findLeader(mvh);
-            assert.ok(leader, 'no leader identified');
-
-            const victims = mvh.hubs.filter((h) => h !== leader).slice(0, faults + 1);
-            const restores = victims.map((v) => silenceValidator(v));
-            try {
-                // Quorum is unreachable, so addParametersFromJson never resolves on a
-                // COMMIT quorum. Fire and forget, then watch that the change applies NOWHERE.
-                leader.addParametersFromJson(config).catch(() => {});
-                await assertNeverApplied(mvh.hubs,
-                    { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
-                    { windowMs: STALL_WAIT_MS + 1000 });
-
-                // Re-read without the watcher's swallowed read errors, so a dead hub DB fails loud.
-                for (let i = 0; i < mvh.hubs.length; i++) {
-                    const cfg = await mvh.hubs[i].db.getConfig(COIN, NET, MODULE);
-                    assert.notStrictEqual(cfg.GAS_PRICE, VALUE,
-                        'hub ' + i + ' applied a change that lacked quorum (only ' + (quorum - 1) + ' of ' + count + ' live, need ' + quorum + ')');
-                }
-            } finally {
-                restores.forEach((r) => r());
-                clearPendingProposals(mvh);
-            }
+            return assertBoundaryStalls(mvh, faults, quorum, count);
         });
 
         it('SAFETY: a forged-digest PRE_PREPARE is rejected with no state change', async function () {
-            const COIN = 'BTC', NET = 'regtest', MODULE = 'node';
-            const forgedValue = String(count) + '60666';
-            const target = mvh.hubs[mvh.hubs.length - 1];   // any honest hub
-            const seq = 9100;                               // well above any applied seq
-
-            const before = await target.db.getConfig(COIN, NET, MODULE);
-            assert.notStrictEqual(before.GAS_PRICE, forgedValue, 'precondition: forged value not already set');
-
-            await target.consensus.handlePrePrepare(
-                forgedPrePrepare(seq, { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: forgedValue } } } }, seed.blockIndex, target.consensus.validatorSet[0])
-            );
-
-            assert.ok(!target.consensus.pendingProposals.has(seq),
-                'forged PRE_PREPARE created a pending proposal (digest check failed)');
-
-            await assertNeverApplied([target],
-                { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: forgedValue },
-                { windowMs: 500 });
-            const after = await target.db.getConfig(COIN, NET, MODULE);
-            assert.notStrictEqual(after.GAS_PRICE, forgedValue, 'forged config was applied (safety violated)');
+            return assertForgedPrePrepareRejected(mvh, seed, count);
         });
 
         it('SAFETY: an equivocating leader cannot make a follower adopt two configs for one seq', async function () {
-            const COIN = 'BTC', NET = 'regtest', MODULE = 'node';
-            const follower = mvh.hubs[1];
-            const seq = 8100;   // fresh, above any applied seq
-            const view = 0;
-            const configA = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: String(count) + '111' } } } };
-            const configB = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: String(count) + '222' } } } };
-            const digestA = follower.consensus.digest(configA);
-            const digestB = follower.consensus.digest(configB);
-            // A PRE_PREPARE is only accepted from the rotation-designated leader for
-            // (seq, view) with a registered sender. An equivocating leader is still
-            // the LEGITIMATE leader; it just emits two conflicting configs for one seq.
-            const N = follower.consensus.validatorSet.length;
-            const leader = follower.consensus.validatorSet[(seq + view) % N];
-            // Carries the leader's SIGNING KEY as well as its address: admission is
-            // keyed on the proven key, which transport stamps and verifies before a
-            // handler runs. Injecting into the handler skips that, so the fixture
-            // supplies it, otherwise the envelope is unattributable and dropped.
-            const env = (digest, config) => ({
-                sender: leader.addr,
-                sig_pubkey: leader.pubkey,
-                data: { seq, view, configDigest: digest, config, btcBlockHeight: seed.blockIndex }
-            });
-
-            await follower.consensus.handlePrePrepare(env(digestA, configA));
-            assert.ok(follower.consensus.pendingProposals.has(seq), 'first PRE_PREPARE should create a proposal');
-
-            // Equivocation: a second conflicting PRE_PREPARE for the SAME seq. Dedup-by-seq
-            // is the safety mechanism; the follower must stay locked to the first config.
-            await follower.consensus.handlePrePrepare(env(digestB, configB));
-
-            const prop = follower.consensus.pendingProposals.get(seq);
-            assert.strictEqual(prop.digest, digestA, 'follower switched to the equivocating second config');
-            assert.notStrictEqual(prop.digest, digestB);
+            return assertEquivocationRejected(mvh, seed, count);
         });
     });
 }
