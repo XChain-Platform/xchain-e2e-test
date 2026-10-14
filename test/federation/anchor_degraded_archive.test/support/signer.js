@@ -35,7 +35,7 @@ function stageProductionSigner(addressInfo){
         let target;
         try { target = path.dirname(require.resolve(dep + '/package.json')); }
         catch (e) {
-            target = path.resolve(__dirname, '../../../', dep);            // monorepo sibling checkout
+            target = path.resolve(__dirname, '../../../../..', dep);            // monorepo sibling checkout
             if (!fs.existsSync(target)) throw new Error('cannot resolve ' + dep + ' for the staged signer');
         }
         fs.symlinkSync(target, path.join(S.signerDir, 'node_modules', dep), 'dir');
