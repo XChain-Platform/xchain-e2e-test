@@ -478,11 +478,20 @@ describe('XCHAIN price derivation from real fills (spec step 7)', function () {
             // tip read mid-digest under-counts and would over-mine. Blocks on
             // this venue appear only when something transacts, so a tip that
             // holds still across samples IS the chain tip.
+            // Bound the settle by the burial budget below: a backlog is at most one
+            // interrupted burial, so a tip still moving past it means something else mines.
+            const burialBudgetMs = 3000000
+            const quiesceDeadline = Date.now() + burialBudgetMs
             let tipNow = Number((await db.doQuery('SELECT MAX(block_index) AS h FROM blocks'))[0].h)
             for (;;) {
                 await new Promise(r => setTimeout(r, 8000))
                 const again = Number((await db.doQuery('SELECT MAX(block_index) AS h FROM blocks'))[0].h)
                 if (again === tipNow) break
+                if (Date.now() > quiesceDeadline) {
+                    throw new Error('indexer tip still moving after ' + (burialBudgetMs / 1000) +
+                        ' s (' + tipNow + ' -> ' + again + '); something else is mining this venue, ' +
+                        'so the burial cannot be sized')
+                }
                 tipNow = again
             }
             const lookback = await derivation.query.getWindowFills(db, {
@@ -495,7 +504,7 @@ describe('XCHAIN price derivation from real fills (spec step 7)', function () {
             // 3000s covers ~1000 blocks at this venue's parse rate with slack; the
             // wait is on the indexer reaching the chain, so a shorter budget just
             // returns early and moves the failure to an unrelated later assertion.
-            if (burialDeficit > 0) await mineAndIndex(db, burialDeficit + 1, 3000000)
+            if (burialDeficit > 0) await mineAndIndex(db, burialDeficit + 1, burialBudgetMs)
 
             // 2. Wait for two consecutive finalized rounds with the same value:
             //    that is the stabilized carry-forward CF.

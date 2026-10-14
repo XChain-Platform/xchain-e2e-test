@@ -24,6 +24,7 @@ const {
 const { transactionState } = require('../../helpers/core/transactionHelper/lib/01_create_and_send_transaction');
 const { spendableInputCount } = require('../../helpers/rail_preflight/policy_at2_at4');
 const { verdictOf } = require('../../helpers/bridgeRailVenue');
+const { assertHoldsThroughout } = require('../../helpers/consensusWait');
 
 const HASH_SQL = 'SELECT b.block_index AS block_index, t1.hash AS ledger, t2.hash AS actions, ' +
     't3.hash AS contract, t4.hash AS state FROM blocks b ' +
@@ -36,10 +37,6 @@ const HASH_SQL = 'SELECT b.block_index AS block_index, t1.hash AS ledger, t2.has
 function hashRows(rows) {
     return rows.map((row) => [Number(row.block_index), String(row.ledger), String(row.actions),
         String(row.contract), String(row.state)].join(':'));
-}
-
-function pause(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function btcIndexerTip() {
@@ -141,12 +138,25 @@ async function runDeferral(M) {
             listEditWire(1, M.rootIndex, [D.added.address], 'list share AT7 add'));
         await regtestMinerConnector.generateBlocks(3);
         const target = await nodeBtcTip();
-        await pause(30000);
+        // Watch the 30s window, failing the moment a settlement or a new mirror version lands.
+        await assertHoldsThroughout(async () => {
+            const settlements = await btcListSettlements();
+            const mirrorHash = await btcMirrorVersion(await btcIndexerTip());
+            return { ok: settlements === D.settlementsBefore && mirrorHash === D.mirrorHashBefore,
+                saw: { settlements, mirrorHash } };
+        }, { windowMs: 30000, intervalMs: 1000, what: 'no BTC list settlement or mirror change with every hub stopped' });
         D.held = await btcIndexerTip();
         D.settlementsHeld = await btcListSettlements();
         D.mirrorHashHeld = await btcMirrorVersion(D.held);
         await regtestMinerConnector.generateBlocks(2);
-        await pause(30000);
+        // Watch the second 30s window, failing the moment the indexer tip moves off its held block.
+        await assertHoldsThroughout(async () => {
+            const tip = await btcIndexerTip();
+            const settlements = await btcListSettlements();
+            const mirrorHash = await btcMirrorVersion(tip);
+            return { ok: tip === D.held && settlements === D.settlementsBefore && mirrorHash === D.mirrorHashBefore,
+                saw: { tip, settlements, mirrorHash } };
+        }, { windowMs: 30000, intervalMs: 1000, what: 'the BTC indexer holding its tip with every hub stopped' });
         D.heldAgain = await btcIndexerTip();
         D.settlementsHeldAgain = await btcListSettlements();
         D.mirrorHashHeldAgain = await btcMirrorVersion(D.heldAgain);

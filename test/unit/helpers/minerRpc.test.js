@@ -20,8 +20,16 @@ const URL = 'http://miner.invalid:18444'
 
 describe('minerRpc', function () {
     let post
-    beforeEach(function () { post = sinon.stub(axios, 'post') })
-    afterEach(function () { sinon.restore() })
+    // Clear the key env so the exact-argument checks below never pick up the shell's key.
+    const savedEnv = {}
+    beforeEach(function () {
+        for (const k of ['MINER_API_KEY', 'DOGE_MINER_API_KEY']) { savedEnv[k] = process.env[k]; delete process.env[k] }
+        post = sinon.stub(axios, 'post')
+    })
+    afterEach(function () {
+        sinon.restore()
+        for (const k of Object.keys(savedEnv)) { if (savedEnv[k] === undefined) delete process.env[k]; else process.env[k] = savedEnv[k] }
+    })
 
     it('rejects a refusal the miner returns inside result, naming the method', async function () {
         post.resolves({ data: { result: { error: 'There was a problem generating blocks: mining is disabled' } } })

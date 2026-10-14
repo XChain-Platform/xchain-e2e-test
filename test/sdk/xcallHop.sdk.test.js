@@ -32,6 +32,7 @@
 
 const { expect } = require('chai');
 const axios = require('axios');
+const { minerRpc } = require('../helpers/minerRpc');
 const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./helpers/sdkHelper');
 
 // BTC-side contract: fires the outbound call AND receives the bounced-back
@@ -81,8 +82,9 @@ async function rpc(url, method, params) {
     return res.data ? res.data.result : null;
 }
 
+// A refused mine must fail the drill, never read as a block that was mined.
 async function mineTarget(count) {
-    try { await rpc(TARGET_MINER_URL, 'generate_blocks', { count: count || 1 }); } catch (e) { /* best effort */ }
+    await minerRpc(TARGET_MINER_URL, 'generate_blocks', { count: count || 1 }, { timeout: 15000 });
 }
 
 function contractIndexOf(indexed) {

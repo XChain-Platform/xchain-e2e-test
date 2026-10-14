@@ -90,19 +90,7 @@ describe('initialCheck: COIN_CODE_MAP logic', function () {
     });
 });
 
-describe('initialCheck: COIN_CODE_MAP logic', function () {
-    describe('mochaHooks.beforeAll / afterAll', function () {
-        // initialCheck.js bootstraps all global connectors (nodeConnector,
-        // utxoTrackerConnector, encoderConnector, indexerConnector,
-        // indexerDatabase, regtestMinerConnector, hubConnector) and pings
-        // each of them inside mochaHooks.beforeAll.  These calls require
-        // live Docker services and a regtest network.
-        //
-        // Full coverage of beforeAll / afterAll belongs in the e2e test suite
-        // (npm test), which is run against a complete regtest stack.
-        //
-        // Keep this as a pending marker so the report names the boundary
-        // without counting a pass for hooks this suite never runs.
-        it.skip('cannot be unit-tested without live services (integration-test boundary)', function () {});
-    });
-});
+// Leave mochaHooks.beforeAll / afterAll out of this tier: they bootstrap and ping
+// every global connector against live Docker services and a regtest network.
+// Every e2e script loads them with --require, and test/unit/setup/teardown.test.js
+// covers the afterAll miner reset with stubs (no pending marker, which never runs).

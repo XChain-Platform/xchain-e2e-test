@@ -58,6 +58,7 @@
 const { expect } = require('chai');
 const axios = require('axios');
 const { execFileSync } = require('child_process');
+const { minerRpc } = require('../helpers/minerRpc');
 const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./helpers/sdkHelper');
 const federation = require('./helpers/xcallFederationPlan');
 
@@ -111,10 +112,10 @@ async function rpc(url, method, params) {
     return result;
 }
 
-// Best-effort target mining, so "no DOGE-side execution" is a claim about a
-// chain that was producing blocks and still executed nothing.
+// Strict target mining, so "no DOGE-side execution" is a claim about a chain
+// that was producing blocks and still executed nothing: a refused mine fails the drill.
 async function mineTarget(count) {
-    try { await rpc(TARGET_MINER_URL, 'generate_blocks', { count: count || 1 }); } catch (e) { /* best effort */ }
+    await minerRpc(TARGET_MINER_URL, 'generate_blocks', { count: count || 1 }, { timeout: 15000 });
 }
 
 // Live cross_chain stake snapshot, tolerant of the one-block lag between the

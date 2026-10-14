@@ -92,11 +92,21 @@ class RegtestMinerConnector {
         return result
     }
 
-    // Send one control call. Axios rejects on any non-2xx before unwrap() can read
-    // the body, so a refusal is rethrown with the miner's own reason and method.
-    async post(data){
+    // Build a connector for a full endpoint URL, for callers that hold a URL, not a host and port.
+    static fromUrl(url, apiKey = null) {
+        const connector = new RegtestMinerConnector('', '', apiKey)
+        connector.url = url
+        connector.port = null
+        return connector
+    }
+
+    // Send one control call; a timeout bounds this call only, so mining calls stay unbounded.
+    // Axios rejects on any non-2xx before unwrap() can read the body, so a refusal
+    // is rethrown with the miner's own reason and method.
+    async post(data, { timeout } = {}){
+        const config = timeout === undefined ? this.reqConfig : { ...this.reqConfig, timeout }
         try {
-            return await axios.post(this.url, data, this.reqConfig)
+            return await axios.post(this.url, data, config)
         } catch (err) {
             const refusal = serviceRefusal(err)
             // Nothing answered (ECONNREFUSED, timeout, DNS): keep the transport error as it was

@@ -109,7 +109,7 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 // The shared helper rejects a refusal the miner returns inside `result` too.
 function minerRpc(method, params) {
-    return sharedMinerRpc(MINER_URL, method, params, { timeout: 20000 });
+    return sharedMinerRpc(MINER_URL, method, params, { timeout: 20000, coin: 'DOGE' });
 }
 
 // The indexer gates feequotedryrun behind x-api-key (401, -32001 without it); same key precedence as chainRail.

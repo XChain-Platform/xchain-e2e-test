@@ -10,7 +10,8 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Integration tests for the afterAll teardown hook in initial_check.test.js.
+// Unit tests for the miner reset in the afterAll teardown of initial_check.test.js.
+// Hermetic (sinon stubs, no source import or live service), so they run in the unit tier.
 
 const assert = require('assert')
 const sinon = require('sinon')
@@ -28,7 +29,7 @@ describe('Bootstrap: teardown resilience', function () {
         sinon.restore()
     })
 
-    // Replicate the afterAll hook from initial_check.test.js lines 218-225
+    // Replicate the setDefaultMiningTime step of the afterAll teardown in initial_check.test.js
     async function runAfterAll() {
         try {
             await regtestMinerConnector.setDefaultMiningTime()

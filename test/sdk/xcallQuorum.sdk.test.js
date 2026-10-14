@@ -30,6 +30,7 @@
 const { expect } = require('chai');
 const axios = require('axios');
 const { execSync } = require('child_process');
+const { minerRpc } = require('../helpers/minerRpc');
 const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./helpers/sdkHelper');
 
 const CONTRACT_A = `
@@ -73,8 +74,9 @@ async function rpc(url, method, params) {
     return res.data ? res.data.result : null;
 }
 
+// A refused mine must fail the drill, never read as a block that was mined.
 async function mineTarget(count) {
-    try { await rpc(TARGET_MINER_URL, 'generate_blocks', { count: count || 1 }); } catch (e) { /* best effort */ }
+    await minerRpc(TARGET_MINER_URL, 'generate_blocks', { count: count || 1 }, { timeout: 15000 });
 }
 
 function contractIndexOf(indexed) {
@@ -140,6 +142,8 @@ function registerQuorumRecoveryTests() {
         const req = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: callId });
         expect(req.call.request_status, 'request must stay pending').to.equal('pending');
         const target = await rpc(TARGET_INDEXER_URL, 'getcrosschaincallresult', { call_id: callId });
+        // An application error inside `result` must not read as "not executed".
+        expect(target && typeof target.error === 'string' ? target.error : null, 'target indexer read must not be an error').to.equal(null);
         expect(target && target.exists, 'no DOGE-side execution under quorum loss').to.not.equal(true);
         console.log('    [xcall-q] two-down call stalled as required (still pending after 90s)');
         stalled = callId;

@@ -107,8 +107,11 @@ async function mineOneBlockFor (work) {
     let settled = false
     const p = Promise.resolve(work()).finally(() => { settled = true })
     let mined = 0
+    // Stop pumping after 5 min: the EXECUTE's own confirm waits give up within about
+    // a minute, so a work promise still pending past this is hung, not slow.
+    const pumpDeadline = Date.now() + 5 * 60 * 1000
     const miner = (async () => {
-        while (!settled && mined < 1) {
+        while (!settled && mined < 1 && Date.now() < pumpDeadline) {
             await sleep(1000)
             if (settled) break
             let pool = []
@@ -116,6 +119,10 @@ async function mineOneBlockFor (work) {
             if (!pool || pool.length === 0) continue
             await regtestMinerConnector.generateBlocks(1)
             mined++
+        }
+        // Say why the pump went quiet, so a hung EXECUTE is not read as a mining fault.
+        if (!settled && mined < 1) {
+            console.log('mineOneBlockFor: pump deadline passed with the work still pending and no block mined')
         }
     })()
     try { return await p } finally { await miner; }

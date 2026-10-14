@@ -56,8 +56,8 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const axios = require('axios');
 const mariadb = require('mariadb');
+const { minerRpc } = require('../helpers/minerRpc');
 const { makeSdk, submit, fundedGasAddress, mine, submitOpts, XChainSDK } = require('./helpers/sdkHelper');
 
 const DB_HOST = process.env.XCALL_DB_HOST || '127.0.0.1';
@@ -85,10 +85,9 @@ async function btcIdx(sql, params) {
     const conn = await db.getConnection();
     try { return await conn.query(sql, params); } finally { await conn.release(); }
 }
+// A refused mine must fail the drill, never read as a block that was mined.
 async function mineDoge(count) {
-    try {
-        await axios.post(DOGE_MINER_URL, { jsonrpc: '2.0', method: 'generate_blocks', params: { count }, id: 1 }, { timeout: 15000 });
-    } catch (e) { /* best effort; the BTC-side wait keeps polling */ }
+    await minerRpc(DOGE_MINER_URL, 'generate_blocks', { count }, { timeout: 15000 });
 }
 async function dogeBalance(address, tick) {
     const rows = await dogeIdx((c) => c.query(

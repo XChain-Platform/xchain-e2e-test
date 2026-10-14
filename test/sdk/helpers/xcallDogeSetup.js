@@ -121,7 +121,7 @@ const CONTRACT_C = `
 
 // The shared helper rejects a refusal the miner returns inside `result` too.
 function minerRpc(method, params) {
-    return sharedMinerRpc(MINER_URL, method, params, { timeout: 20000 });
+    return sharedMinerRpc(MINER_URL, method, params, { timeout: 20000, coin: 'DOGE' });
 }
 
 async function withConn(database, user, password, fn) {
