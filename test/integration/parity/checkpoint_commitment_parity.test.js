@@ -394,8 +394,7 @@ describe('XCHECKPOINT canonical: builder roster', function () {
 
     it('the roster covers every builder the parity cases exercise', function () {
         assert.strictEqual(ROSTER.length, 7);
-        assert.strictEqual(Object.keys(gatedCanonicals(fixtures('regtest', 100, true).cp)).length
-            + Object.keys(unconditionalCanonicals(fixtures('regtest', 100, true).cp, fixtures('regtest', 100, true).d)).length,
-            ROSTER.length);
+        const { cp, d } = fixtures('regtest', 100, true);
+        assert.strictEqual(Object.keys({ ...gatedCanonicals(cp), ...unconditionalCanonicals(cp, d) }).length, ROSTER.length);
     });
 });
