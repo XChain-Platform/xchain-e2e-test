@@ -61,6 +61,14 @@ function requireArmingVariables(env){
     }
 }
 
+// The suite gate: reads the expectation and only an armed run needs the arming variables.
+function armedSuiteMode(env){
+    const source = env !== null && typeof env === 'object' ? env : {};
+    const mode = expectMode(source.XC_OFFER_LIST_EXPECT);
+    if(mode === 'armed') requireArmingVariables(source);
+    return mode;
+}
+
 // Plans the sendOrderV0 ALLOW_LIST and BLOCK_LIST positions and the counter-order
 // GET_ADDRESS for one case. xchain-hub attachedListIds treats only a nonzero value
 // as attached, so the unused list position is an empty string.
@@ -318,6 +326,7 @@ module.exports = {
     OFFER_LIST_ARMED_CASES,
     armedListAction,
     armedOrderActions,
+    armedSuiteMode,
     checkArmedOutcome,
     connectionQuery,
     expectMode,

@@ -12,6 +12,7 @@ const {
     OFFER_LIST_ARMED_CASES,
     armedListAction,
     armedOrderActions,
+    armedSuiteMode,
     checkArmedOutcome,
     connectionQuery,
     expectMode,
@@ -26,6 +27,26 @@ const {
 } = require('../../rail/offer_lists/helpers/armed_list_cases');
 
 describe('offer list armed rail cases', function(){
+    it('reads the suite mode and refuses an unarmed armed run', function(){
+        const both = {
+            XC_OFFER_LIST_REGTEST_ACTIVATION: '1',
+            EXACT_INTEGER_WIRE_FIELDS_REGTEST_TIME: '1700000000'
+        };
+        assert.strictEqual(armedSuiteMode(both), 'armed');
+        assert.strictEqual(armedSuiteMode({ ...both, XC_OFFER_LIST_EXPECT: 'armed' }), 'armed');
+        assert.throws(
+            () => armedSuiteMode({ EXACT_INTEGER_WIRE_FIELDS_REGTEST_TIME: '1' }),
+            /XC_OFFER_LIST_REGTEST_ACTIVATION/
+        );
+        assert.throws(
+            () => armedSuiteMode({ XC_OFFER_LIST_REGTEST_ACTIVATION: '1' }),
+            /EXACT_INTEGER_WIRE_FIELDS_REGTEST_TIME/
+        );
+        assert.throws(() => armedSuiteMode(undefined), /XC_OFFER_LIST_REGTEST_ACTIVATION/);
+        assert.strictEqual(armedSuiteMode({ XC_OFFER_LIST_EXPECT: 'inert' }), 'inert');
+        assert.throws(() => armedSuiteMode({ ...both, XC_OFFER_LIST_EXPECT: 'on' }), /XC_OFFER_LIST_EXPECT/);
+    });
+
     it('pins the ordered cases', function(){
         assert.deepStrictEqual(OFFER_LIST_ARMED_CASES, [
             {
