@@ -59,6 +59,12 @@ describe('XPOLICY: policy AT2: an issuer edit reaches the copy', function(){
 
 describe('policy AT6: sleep travels, and only when it changes', function(){
 
+    let ids, validators;
+
+    before(function(){
+        ({ ids, validators } = makeFixture());
+    });
+
     it('injects an indefinite SLEEP at its pinned ordinal when the origin is asleep', async function(){
         const row = snapshot(ids, { sleeping: true });
         const { ctx, state } = SETTLE.makeSettleContext({
