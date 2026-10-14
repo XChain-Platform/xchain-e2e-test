@@ -66,7 +66,7 @@ const HELPER_DIR = path.join(ROOT, 'test', 'helpers')
 // coverage OF the wait machinery, not uses of it.
 const SKIP_DIRS = new Set(['node_modules', 'unit'])
 
-// Only the Database row polls (src/db.js `waitForX` -> `_waitFor`), which are
+// Only the Database row polls (src/db/ `waitForX` -> `_waitFor`), which are
 // the family that returns null and prints GAVE UP. The suite's other waitForX
 // helpers (waitForReady, waitForMesh, waitForMirror, waitForGossip, and the
 // deliberately status-agnostic waitForAnyX in stakeHelper) answer a different
