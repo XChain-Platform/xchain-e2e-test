@@ -16,7 +16,7 @@
  ********************************************************************/
 
 const assert = require('assert');
-const { drill, HubDbSync, haveHubDbSync, B, RUN5_DEFERRAL_SAMPLES, GRACE_S, statusSeries } = require('./fixtures.js');
+const { drill, HubDbSync, haveHubDbSync, B, RUN5_DEFERRAL_SAMPLES, GRACE_S, statusSeries } = require('./helpers/fixtures.js');
 
 function registerUngatedBlock() {
     // `blockMayReadPrice` is `blockTransactions.length > 0`
@@ -188,4 +188,9 @@ async function readViaStub(body) {
     }
 }
 
-module.exports = { registerUngatedBlock, registerDeferralSample, registerReadBarrierState };
+
+describe('AT5 barrier drill: which escape opened the block (row 56)', function () {
+    describe('a block the barrier never gated', registerUngatedBlock);
+    describe('a deferral line is a sample of the same two fields', registerDeferralSample);
+    describe('readBarrierState reads the fields mirrorStatus actually publishes', registerReadBarrierState);
+});

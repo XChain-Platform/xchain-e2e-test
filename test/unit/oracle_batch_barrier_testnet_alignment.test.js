@@ -41,16 +41,9 @@
  *   npx mocha --no-config test/unit/oracle_batch_barrier_testnet_alignment.test.js
  ********************************************************************/
 
-const { registerFixtureIsTheDefect, registerAlignOnTxHashPredicate, registerNullTxIndex, registerNamedRefusals, registerMultiActionTransaction, registerOriginActionIndexWindow } = require('./oracle_batch_barrier_testnet_alignment.test/alignment_predicate.js');
-const { registerObserveBlockAsksOrigin, registerEmptyBlockStopsNothing } = require('./oracle_batch_barrier_testnet_alignment.test/observe_block.js');
+const DIR = './oracle_batch_barrier_testnet_alignment.test/';
 
-describe('AT5 barrier drill: aligning two nodes on the chain\'s own coordinate (row 55)', function () {
-    describe('the fixture is the defect', registerFixtureIsTheDefect);
-    describe('alignOnTxHash: the predicate', registerAlignOnTxHashPredicate);
-    describe('a null tx_index, deliberately', registerNullTxIndex);
-    describe('refusals name the cause instead of reporting a bare false', registerNamedRefusals);
-    describe('one transaction carrying more than one action', registerMultiActionTransaction);
-    describe('buildOriginActionIndex: the window', registerOriginActionIndexWindow);
-    describe('observeBlock asks origin for ORIGIN\'s action index', registerObserveBlockAsksOrigin);
-    describe('a block with nothing to compare still stops nothing', registerEmptyBlockStopsNothing);
-});
+module.exports = {};
+
+require(DIR + '01_alignment_predicate.test.js');
+require(DIR + '02_observe_block.test.js');

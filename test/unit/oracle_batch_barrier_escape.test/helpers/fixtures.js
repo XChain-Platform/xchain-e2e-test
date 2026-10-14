@@ -17,9 +17,9 @@
 
 const path   = require('path');
 
-const drill = require('../../drills/lib/oracle_batch_barrier_testnet.js');
+const drill = require('../../../drills/lib/oracle_batch_barrier_testnet.js');
 
-const REPO_ROOT = path.join(__dirname, '..', '..', '..', '..');
+const REPO_ROOT = path.join(__dirname, '..', '..', '..', '..', '..');
 
 // The sibling indexer, where it is checked out. Every assertion that depends on
 // it is skipped rather than silently weakened when it is not: a false green on

@@ -16,7 +16,7 @@
  ********************************************************************/
 
 const assert = require('assert');
-const { drill, REAL_PAIRS, WINDOW } = require('./fixtures.js');
+const { drill, REAL_PAIRS, WINDOW } = require('./helpers/fixtures.js');
 
 // ---------------------------------------------------------------------------
 // Wired into the drill, not merely exported
@@ -182,4 +182,8 @@ function registerEmptyBlockStopsNothing() {
     });
 }
 
-module.exports = { registerObserveBlockAsksOrigin, registerEmptyBlockStopsNothing };
+
+describe('AT5 barrier drill: aligning two nodes on the chain\'s own coordinate (row 55)', function () {
+    describe('observeBlock asks origin for ORIGIN\'s action index', registerObserveBlockAsksOrigin);
+    describe('a block with nothing to compare still stops nothing', registerEmptyBlockStopsNothing);
+});

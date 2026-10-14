@@ -16,7 +16,7 @@
  ********************************************************************/
 
 const assert = require('assert');
-const { drill, REAL_PAIRS, DERIVED_ROWS, WINDOW, ORDER_666, indexOf } = require('./fixtures.js');
+const { drill, REAL_PAIRS, DERIVED_ROWS, WINDOW, ORDER_666, indexOf } = require('./helpers/fixtures.js');
 
 function registerFixtureIsTheDefect() {
 
@@ -233,4 +233,12 @@ function registerOriginActionIndexWindow() {
     });
 }
 
-module.exports = { registerFixtureIsTheDefect, registerAlignOnTxHashPredicate, registerNullTxIndex, registerNamedRefusals, registerMultiActionTransaction, registerOriginActionIndexWindow };
+
+describe('AT5 barrier drill: aligning two nodes on the chain\'s own coordinate (row 55)', function () {
+    describe('the fixture is the defect', registerFixtureIsTheDefect);
+    describe('alignOnTxHash: the predicate', registerAlignOnTxHashPredicate);
+    describe('a null tx_index, deliberately', registerNullTxIndex);
+    describe('refusals name the cause instead of reporting a bare false', registerNamedRefusals);
+    describe('one transaction carrying more than one action', registerMultiActionTransaction);
+    describe('buildOriginActionIndex: the window', registerOriginActionIndexWindow);
+});

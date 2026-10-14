@@ -15,7 +15,7 @@
  * Part of test/unit/oracle_batch_barrier_testnet_alignment.test.js
  ********************************************************************/
 
-const drill = require('../../drills/lib/oracle_batch_barrier_testnet.js');
+const drill = require('../../../drills/lib/oracle_batch_barrier_testnet.js');
 
 // ---------------------------------------------------------------------------
 // Run 5's own 20 actions, node side and origin side

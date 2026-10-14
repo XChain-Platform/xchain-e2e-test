@@ -16,7 +16,7 @@
  ********************************************************************/
 
 const assert = require('assert');
-const { drill, REPO_ROOT, protocolTime, HubDbSync, haveHubDbSync, B, PREV_11_DESC, RUN5_DEFERRAL_SAMPLES, GRACE_S } = require('./fixtures.js');
+const { drill, REPO_ROOT, protocolTime, HubDbSync, haveHubDbSync, B, PREV_11_DESC, RUN5_DEFERRAL_SAMPLES, GRACE_S } = require('./helpers/fixtures.js');
 
 function registerPredicateMirror() {
     // The differential test. `_priceTimeSyncSatisfied` is the code that
@@ -185,4 +185,9 @@ function registerRun5Evidence() {
     });
 }
 
-module.exports = { registerPredicateMirror, registerProtocolClock, registerRun5Evidence };
+
+describe('AT5 barrier drill: which escape opened the block (row 56)', function () {
+    describe('barrierClauses mirrors the SHIPPED predicate, clause for clause', registerPredicateMirror);
+    describe('the clock the barrier gates on is the PROTOCOL time, not the raw stamp', registerProtocolClock);
+    describe("run 5's own evidence, re-read", registerRun5Evidence);
+});

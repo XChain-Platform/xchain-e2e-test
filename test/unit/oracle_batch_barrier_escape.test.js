@@ -51,18 +51,10 @@
  *   npx mocha --no-config test/unit/oracle_batch_barrier_escape.test.js
  ********************************************************************/
 
-const { registerPredicateMirror, registerProtocolClock, registerRun5Evidence } = require('./oracle_batch_barrier_escape.test/predicate_and_clock.js');
-const { registerSampledAttribution, registerBeforePermission } = require('./oracle_batch_barrier_escape.test/sampled_attribution.js');
-const { registerUngatedBlock, registerDeferralSample, registerReadBarrierState } = require('./oracle_batch_barrier_escape.test/ungated_and_state.js');
+const DIR = './oracle_batch_barrier_escape.test/';
 
-describe('AT5 barrier drill: which escape opened the block (row 56)', function () {
-    describe('barrierClauses mirrors the SHIPPED predicate, clause for clause', registerPredicateMirror);
-    describe('the clock the barrier gates on is the PROTOCOL time, not the raw stamp', registerProtocolClock);
-    describe("run 5's own evidence, re-read", registerRun5Evidence);
-    describe('the sampled attribution, over the same window', registerSampledAttribution);
-    describe("TA5's second half: was the block processed BEFORE the barrier permitted it?",
-        registerBeforePermission);
-    describe('a block the barrier never gated', registerUngatedBlock);
-    describe('a deferral line is a sample of the same two fields', registerDeferralSample);
-    describe('readBarrierState reads the fields mirrorStatus actually publishes', registerReadBarrierState);
-});
+module.exports = {};
+
+require(DIR + '01_predicate_and_clock.test.js');
+require(DIR + '02_sampled_attribution.test.js');
+require(DIR + '03_ungated_and_state.test.js');

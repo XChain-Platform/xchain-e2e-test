@@ -16,7 +16,7 @@
  ********************************************************************/
 
 const assert = require('assert');
-const { drill, B, GRACE_S, statusSeries } = require('./fixtures.js');
+const { drill, B, GRACE_S, statusSeries } = require('./helpers/fixtures.js');
 
 function registerSampledAttribution() {
     // The drill polls /status every POLL_MS; this is that series across the
@@ -177,4 +177,9 @@ function registerPermissionClockChecks(SERIES) {
     });
 }
 
-module.exports = { registerSampledAttribution, registerBeforePermission };
+
+describe('AT5 barrier drill: which escape opened the block (row 56)', function () {
+    describe('the sampled attribution, over the same window', registerSampledAttribution);
+    describe("TA5's second half: was the block processed BEFORE the barrier permitted it?",
+        registerBeforePermission);
+});
