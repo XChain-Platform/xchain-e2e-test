@@ -73,108 +73,126 @@ const { runResponseWindowCase } = require('./at5_batch_replay.test/response_wind
 const { runEmptyWindowCase } = require('./at5_batch_replay.test/empty_window.test.js')
 const { RESPONSE_PROVIDER } = require('./at5_batch_replay.test/config.test.js')
 
-describe('AT5: the responses of a window land on chain as one batch', function () {
-    this.timeout(120 * 60 * 1000)
-
-    // Everything the parts share. `tipFeeder` and `tipFeedBusy` are the live BTC tip
-    // feeder and its re-entrancy latch; `btcNode` is the BTC connector as it stands
-    // before the first rail switch (see pushLiveTipToAllHubs in the parts).
-    const ctx = {
+// Everything the parts share. `tipFeeder` and `tipFeedBusy` are the live BTC tip
+// feeder and its re-entrancy latch; `btcNode` is the BTC connector as it stands
+// before the first rail switch (see pushLiveTipToAllHubs in the parts).
+function newContext() {
+    return {
         venue: null, dogeVenue: null, up: false, contract: null, publisher: null,
         dogeRail: null, testServer: null, llm: { ok: false, why: 'not probed' },
         responseProvider: RESPONSE_PROVIDER, tipFeeder: null, tipFeedBusy: false, btcNode: null,
     }
+}
 
-    before(async function () {
-        await prepareProvider(ctx)
-        if (!(await openDogeRail(ctx))) return this.skip()
-        if (!(await bootDrill(ctx))) return this.skip()
-    })
+async function removeSignerDir(ctx) {
+    // The staged signer holds a WIF only in the hub children's environment, but the
+    // directory itself is this drill's litter and goes back.
+    if (!(ctx.publisher && ctx.publisher.signerDir)) return
+    try { require('fs').rmSync(ctx.publisher.signerDir, { recursive: true, force: true }) }
+    catch (internal) { /* already gone */ }
+}
 
-    after(async function () {
-        if (ctx.tipFeeder) { clearInterval(ctx.tipFeeder); ctx.tipFeeder = null }
-        // The attached venue first: its indexer follows a hub the owner is about to kill.
-        if (ctx.dogeVenue) await ctx.dogeVenue.stop()
-        if (ctx.venue) await ctx.venue.stop()
-        if (ctx.testServer) await ctx.testServer.close()
-        // The staged signer holds a WIF only in the hub children's environment, but the
-        // directory itself is this drill's litter and goes back.
-        if (ctx.publisher && ctx.publisher.signerDir) {
-            try { require('fs').rmSync(ctx.publisher.signerDir, { recursive: true, force: true }) }
-            catch (internal) { /* already gone */ }
-        }
+async function tearDown(ctx) {
+    if (ctx.tipFeeder) { clearInterval(ctx.tipFeeder); ctx.tipFeeder = null }
+    // The attached venue first: its indexer follows a hub the owner is about to kill.
+    if (ctx.dogeVenue) await ctx.dogeVenue.stop()
+    if (ctx.venue) await ctx.venue.stop()
+    if (ctx.testServer) await ctx.testServer.close()
+    await removeSignerDir(ctx)
+}
+
+async function bringUp(ctx, mocha) {
+    await prepareProvider(ctx)
+    if (!(await openDogeRail(ctx))) return mocha.skip()
+    if (!(await bootDrill(ctx))) return mocha.skip()
+}
+
+// Skipped, not passed, and not silently re-aimed at http_get. AT5's
+// response-carrying clause is unproven by a run that reports this case
+// pending, and the reason is printed in the before-hook rather than left
+// to whoever reads a pending dot.
+async function landWindow(ctx, mocha) {
+    if (ctx.responseProvider === 'llm' && !ctx.llm.ok) mocha.skip()
+    await runResponseWindowCase(ctx)
+}
+
+/**
+ * NOT DRIVABLE AT ANY REASONABLE COST, and the number is the reason.
+ *
+ * A window dead-letters when it holds more rows than `ATTEST_BATCH_MAX_ROWS`,
+ * which is a frozen protocol constant of 256, compared in the publisher at
+ * `rows.length > ATTEST_BATCH_MAX_ROWS` against a read that deliberately
+ * over-selects by one so 257 is detectable. Producing 257 terminal responses
+ * inside a single window means 257 full PBFT attestation rounds, each with a
+ * provider fetch, in one window; on this venue that is hours of drilling to
+ * exercise one comparison.
+ *
+ * The other dead-letter causes are byte-size rather than row count
+ * (`ATTEST_BATCH_MAX_INFLATED_BYTES` at 1 MiB, reached at roughly 128 rows at
+ * the body cap), so they are no cheaper. None of the three is overridable: they
+ * are consensus constants with no environment seam, correctly.
+ *
+ * WHAT COVERS IT INSTEAD, so this is a judgement rather than a hole: the hub's
+ * own unit tier drives the publisher against a synthetic over-cap window and
+ * asserts both halves of "loudly", the CRITICAL log and the `deadletter` marker
+ * row, which is where a 257-row fixture costs milliseconds instead of hours.
+ *
+ * The operator's call, and it is a wording question rather than a work question:
+ * accept the unit coverage for this clause, or fund the hours.
+ */
+function skipDeadLetter() {
+    it.skip('dead-letters an over-budget window loudly (needs 257 rounds: see comment)', async function () {
+        assert.fail('unreachable: 257 attestation rounds in one window')
     })
+}
+
+/**
+ * NEEDS A VENUE THIS HELPER DOES NOT BUILD, and the shape of it is worth naming
+ * because it is a real gap rather than a hard one.
+ *
+ * The clause wants a FRESH CHAIN-ONLY node: a BTC indexer with its mirror
+ * DISABLED, which advances only on batch coverage, rebuilds
+ * `attestation_responses` from the v5/v6 bodies its DOGE side parses, and
+ * re-derives every callback with zero mismatches against a mirror-fed node.
+ *
+ * `AttestMirrorVenue` stands up indexers that all follow a hub with
+ * `HUB_DB_SYNC_ENABLED=true`; there is no option for a mirror-disabled member,
+ * and adding one is not a one-line change, because such a node also needs its
+ * own DOGE-side indexer to do the parsing and a hub to push the parsed rows to.
+ * The road is real and shipped (`price/index.js`'s batch parse enqueues a hub push,
+ * the hub validates and inserts, the ordinary mirror broadcast follows), so
+ * what is missing is venue construction, not product.
+ *
+ * It also inherits the standing caveat that chain-only reconstruction still
+ * needs a Bitcoin indexer for capability snapshots, which is why the clause
+ * says "with its BTC indexer" rather than "from DOGE alone".
+ *
+ * Recommended as its own item rather than folded into this drill: a
+ * `chainOnlyIndexers` option on the venue plus a DOGE-side child, then this case
+ * is a comparison of two databases.
+ */
+function skipChainOnly() {
+    it.skip('rebuilds the mirror on a chain-only node with 0 mismatches (needs a venue option: see comment)',
+        async function () {
+            assert.fail('unreachable: the venue builds no mirror-disabled indexer')
+        })
+}
+
+describe('AT5: the responses of a window land on chain as one batch', function () {
+    this.timeout(120 * 60 * 1000)
+    const ctx = newContext()
+
+    before(async function () { await bringUp(ctx, this) })
+    after(async function () { await tearDown(ctx) })
 
     it('lands a window of responses on DOGE as a valid v5 head with its continuations', async function () {
-        if (ctx.responseProvider === 'llm' && !ctx.llm.ok) {
-            // Skipped, not passed, and not silently re-aimed at http_get. AT5's
-            // response-carrying clause is unproven by a run that reports this case
-            // pending, and the reason is printed in the before-hook rather than left
-            // to whoever reads a pending dot.
-            this.skip()
-        }
-        await runResponseWindowCase(ctx)
+        await landWindow(ctx, this)
     })
 
     it('publishes nothing for an empty window', async function () {
         await runEmptyWindowCase(ctx)
     })
 
-    /**
-     * NOT DRIVABLE AT ANY REASONABLE COST, and the number is the reason.
-     *
-     * A window dead-letters when it holds more rows than `ATTEST_BATCH_MAX_ROWS`,
-     * which is a frozen protocol constant of 256, compared in the publisher at
-     * `rows.length > ATTEST_BATCH_MAX_ROWS` against a read that deliberately
-     * over-selects by one so 257 is detectable. Producing 257 terminal responses
-     * inside a single window means 257 full PBFT attestation rounds, each with a
-     * provider fetch, in one window; on this venue that is hours of drilling to
-     * exercise one comparison.
-     *
-     * The other dead-letter causes are byte-size rather than row count
-     * (`ATTEST_BATCH_MAX_INFLATED_BYTES` at 1 MiB, reached at roughly 128 rows at
-     * the body cap), so they are no cheaper. None of the three is overridable: they
-     * are consensus constants with no environment seam, correctly.
-     *
-     * WHAT COVERS IT INSTEAD, so this is a judgement rather than a hole: the hub's
-     * own unit tier drives the publisher against a synthetic over-cap window and
-     * asserts both halves of "loudly", the CRITICAL log and the `deadletter` marker
-     * row, which is where a 257-row fixture costs milliseconds instead of hours.
-     *
-     * The operator's call, and it is a wording question rather than a work question:
-     * accept the unit coverage for this clause, or fund the hours.
-     */
-    it.skip('dead-letters an over-budget window loudly (needs 257 rounds: see comment)', async function () {
-        assert.fail('unreachable: 257 attestation rounds in one window')
-    })
-
-    /**
-     * NEEDS A VENUE THIS HELPER DOES NOT BUILD, and the shape of it is worth naming
-     * because it is a real gap rather than a hard one.
-     *
-     * The clause wants a FRESH CHAIN-ONLY node: a BTC indexer with its mirror
-     * DISABLED, which advances only on batch coverage, rebuilds
-     * `attestation_responses` from the v5/v6 bodies its DOGE side parses, and
-     * re-derives every callback with zero mismatches against a mirror-fed node.
-     *
-     * `AttestMirrorVenue` stands up indexers that all follow a hub with
-     * `HUB_DB_SYNC_ENABLED=true`; there is no option for a mirror-disabled member,
-     * and adding one is not a one-line change, because such a node also needs its
-     * own DOGE-side indexer to do the parsing and a hub to push the parsed rows to.
-     * The road is real and shipped (`price/index.js`'s batch parse enqueues a hub push,
-     * the hub validates and inserts, the ordinary mirror broadcast follows), so
-     * what is missing is venue construction, not product.
-     *
-     * It also inherits the standing caveat that chain-only reconstruction still
-     * needs a Bitcoin indexer for capability snapshots, which is why the clause
-     * says "with its BTC indexer" rather than "from DOGE alone".
-     *
-     * Recommended as its own item rather than folded into this drill: a
-     * `chainOnlyIndexers` option on the venue plus a DOGE-side child, then this case
-     * is a comparison of two databases.
-     */
-    it.skip('rebuilds the mirror on a chain-only node with 0 mismatches (needs a venue option: see comment)',
-        async function () {
-            assert.fail('unreachable: the venue builds no mirror-disabled indexer')
-        })
+    skipDeadLetter()
+    skipChainOnly()
 })
