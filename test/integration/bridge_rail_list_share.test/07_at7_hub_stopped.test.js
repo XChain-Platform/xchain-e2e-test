@@ -211,6 +211,7 @@ bridgeRailSuite('list_share AT7: stopped hubs defer the venue and a restart resu
         this.timeout(0);
         if (needsFederation(this, 'list_share AT7 replay')) return;
         const M = state.listShare.home;
+        assert.ok(M.seq4, 'the resume half must have finalized seq 4');
         await compareFreshReplay(M);
     });
 });

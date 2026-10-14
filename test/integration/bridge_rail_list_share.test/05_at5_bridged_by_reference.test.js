@@ -169,6 +169,9 @@ bridgeRailSuite('list_share AT5: a bridged token carries its shared list by refe
     it('list_share AT5: a home edit reaches the copy with no new policy snapshot or policy settlement', async function () {
         this.timeout(0);
         if (needsFederation(this, 'list_share AT5 edit')) return;
+        const M = state.listShare.home;
+        const R = state.listShare.referenced;
+        assert.ok(R && R.reading, 'the reference half must have run');
         await checkHomeEditReachesCopy(M, R);
     });
 });
