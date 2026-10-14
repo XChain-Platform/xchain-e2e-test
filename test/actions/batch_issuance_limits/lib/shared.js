@@ -155,7 +155,7 @@ function issueCmd(tick, maxSupply, maxMint, mintSupply, description){
 // a FEE_DESTINATION, and a natively-paid ISSUE debits no gas at all. A6's arithmetic
 // is a gas balance, so its setup ISSUE has to take this path.
 async function sendGasPaidIssue(addressInfo, tick, description){
-    const transactionHelper = require('../../helpers/core/transactionHelper')
+    const transactionHelper = require('../../../helpers/core/transactionHelper')
     const txHash = await transactionHelper.createAndSendTransaction(
         addressInfo, issueCmd(tick, 100000, 100000, 10, description), null, [], null, null, true)
     const row = await indexerDatabase.waitForIssue({
