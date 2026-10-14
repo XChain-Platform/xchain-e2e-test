@@ -15,14 +15,8 @@
 // Shared helpers and guard contract sources for the Controller Policy Layer
 // scenarios. See controller_policy.test.js for the scenario overview.
 
-const assert = require('assert')
 const cryptoHelper = require('../../../helpers/core/cryptoHelper')
 const gasHelper = require('../../../helpers/gasHelper')
-const issueHelper = require('../../../helpers/issueHelper')
-const orderHelper = require('../../../helpers/orderHelper')
-const sendHelper = require('../../../helpers/sendHelper')
-const destroyHelper = require('../../../helpers/destroyHelper')
-const vmHelper = require('../../../helpers/vmHelper')
 const transactionHelper = require('../../../helpers/core/transactionHelper')
 const { waitForTxIndexed } = require('../../../helpers/indexerWait')
 
@@ -63,7 +57,7 @@ async function addressControllerEvents(address) {
 function randTick(p) { let s = p; for (let i = 0; i < 6; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 // BigInt-safe JSON (mariadb returns BigInt for BIGINT columns).
 const j = (x) => JSON.stringify(x, (k, v) => typeof v === 'bigint' ? Number(v) : v)
-async function mine(n) { try { await regtestMinerConnector.generateBlocks(n) } catch (e) {} }
+async function mine(n) { try { await regtestMinerConnector.generateBlocks(n) } catch (e) { void e } }
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
 // Submit a raw wire string; returns the broadcast txHash.

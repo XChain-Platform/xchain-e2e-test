@@ -16,10 +16,9 @@
 
 const assert = require('assert')
 const cryptoHelper = require('../../helpers/core/cryptoHelper')
+const gasHelper = require('../../helpers/gasHelper')
 const issueHelper = require('../../helpers/issueHelper')
-const sendHelper = require('../../helpers/sendHelper')
 const vmHelper = require('../../helpers/vmHelper')
-const { waitForTxIndexed } = require('../../helpers/indexerWait')
 const {
     balanceOf, randTick, mine, sleep, submitRaw, issueBindWire, waitValidOrder, waitTokenController, royaltyGate, newOwner,
 } = require('./support/shared')
