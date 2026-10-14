@@ -85,6 +85,7 @@ async function setUpActors() {
 
 // Broadcast a raw MINT wire string from the source and mine it.
 async function broadcastMint(msg) {
+    // stake-teardown-ok: raw MINT wire string, never a STAKE
     const txHash = await transactionHelper.createAndSendTransaction(st.src, msg)
     try { await global.regtestMinerConnector.generateBlocks(1) } catch (e) { void e }
     return txHash

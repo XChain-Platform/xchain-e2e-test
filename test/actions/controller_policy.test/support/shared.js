@@ -62,6 +62,7 @@ async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
 // Submit a raw wire string; returns the broadcast txHash.
 async function submitRaw(addr, wire) {
+    // stake-teardown-ok: raw ISSUE/ADDRESS/ORDER/SEND wires, never a STAKE
     return await transactionHelper.createAndSendTransaction(addr, wire)
 }
 
