@@ -89,6 +89,9 @@ function registerCrossReferenceAndInputCases () {
         assert.match(result.stderr, /at2b.*no matching active case title/)
     })
 
+}
+
+function registerEmptyInputCases () {
     it('refuses an empty directory as zero files read', function () {
         const result = run(fixture())
         assert.strictEqual(result.status, 1)
@@ -125,6 +128,9 @@ function registerCensusLineCases () {
         assert.match(result.stdout, /PENDING .*at5\.test\.js:2 \| title: AT5 > dead-letters the window \(needs 257 rounds\) \| reason: needs 257 rounds/)
     })
 
+}
+
+function registerReasonSourceCases () {
     it('uses a directly attached comment as the stated reason', function () {
         const root = fixture({
             'at6.test.js': [
@@ -157,7 +163,9 @@ function registerCensusLineCases () {
 describe('check-mirror-pendings', function () {
     registerSkipReasonCases()
     registerCrossReferenceAndInputCases()
+    registerEmptyInputCases()
     registerCensusLineCases()
+    registerReasonSourceCases()
 })
 
 const LEG_SUITE = "describe('delivery past the forward margin', () => { it('holds the barrier', () => {}) })"
@@ -169,7 +177,7 @@ function crossrefRun (pendingTitle, legSource) {
     }))
 }
 
-describe('check-mirror-pendings: a cross-reference names its target case', function () {
+function registerAnchorRefusalCases () {
     it('refuses a bare reference even when the leg shares every claim word', function () {
         const result = crossrefRun('holds delivery past the forward margin (DRIVEN in at2b)', LEG_SUITE)
         assert.strictEqual(result.status, 1)
@@ -197,7 +205,9 @@ describe('check-mirror-pendings: a cross-reference names its target case', funct
         assert.strictEqual(skippedSuite.status, 1)
         assert.match(skippedSuite.stderr, /no active case titled "holds the barrier"/)
     })
+}
 
+function registerAnchorCommentCases () {
     it('reads the anchor from the attached comment, normalizing case and spacing', function () {
         const root = fixture({
             'at2.test.js': [
@@ -212,9 +222,14 @@ describe('check-mirror-pendings: a cross-reference names its target case', funct
         assert.strictEqual(result.status, 0, result.stderr)
         assert.match(result.stdout, /cross-references 1/)
     })
+}
+
+describe('check-mirror-pendings: a cross-reference names its target case', function () {
+    registerAnchorRefusalCases()
+    registerAnchorCommentCases()
 })
 
-describe('check-mirror-pendings: every skip form is reported', function () {
+function registerSkipFormCases () {
     it('reports a skipped suite with a reason and refuses one without', function () {
         const reasoned = run(fixture({ 'at3.test.js': "describe.skip('AT3 deadline (needs 257 rounds)', () => { it('a', () => {}); it('b', () => {}) })" }))
         assert.strictEqual(reasoned.status, 0, reasoned.stderr)
@@ -235,7 +250,9 @@ describe('check-mirror-pendings: every skip form is reported', function () {
         const titles = checker.parseSource(source, 'at7.test.js').pending.map((p) => p.claim)
         assert.deepStrictEqual(titles, ['aliased case', 'aliased suite', 'aliased context'])
     })
+}
 
+function registerAliasAndBodySkipCases () {
     it('reports a this.skip in a test body, reasoned by its attached comment', function () {
         const source = (comment) => [
             "describe('AT8', function () {",
@@ -255,7 +272,9 @@ describe('check-mirror-pendings: every skip form is reported', function () {
         assert.strictEqual(bare.length, 1)
         assert.strictEqual(bare[0].reason, '')
     })
+}
 
+function registerRegexMemberCase () {
     it('does not mistake a regex .test( member call for a mocha test', function () {
         const source = [
             "describe('AT9', function () {",
@@ -270,9 +289,15 @@ describe('check-mirror-pendings: every skip form is reported', function () {
         assert.strictEqual(pending.length, 1)
         assert.strictEqual(pending[0].claim, 'runs only when ready')
     })
+}
+
+describe('check-mirror-pendings: every skip form is reported', function () {
+    registerSkipFormCases()
+    registerAliasAndBodySkipCases()
+    registerRegexMemberCase()
 })
 
-describe('check-mirror-pendings: a call binds only the callback inside its own parentheses', function () {
+function registerExpressionBodyCases () {
     it('reports an expression-bodied skip that no block-bodied function follows', function () {
         const source = "describe('AT10', () => { it.skip('rejects the stale proof (needs a reorg lever)', () => assert.ok(false)) })"
         const pending = checker.parseSource(source, 'at10.test.js').pending
@@ -296,7 +321,9 @@ describe('check-mirror-pendings: a call binds only the callback inside its own p
         assert.ok(body, 'the runtime skip in the next test must be reported')
         assert.strictEqual(body.claim, 'runs when ready')
     })
+}
 
+function registerCallbacklessCases () {
     it('counts the cases of an expression-bodied skipped suite and hides them from cross-references', function () {
         const leg = "describe.skip('m (needs a lever)', () => it('holds the barrier', () => {}))"
         const parsed = checker.parseSource(leg, 'at2b-forward-margin.test.js')
@@ -321,7 +348,9 @@ describe('check-mirror-pendings: a call binds only the callback inside its own p
         assert.strictEqual(result.status, 1)
         assert.match(result.stderr, /no active case titled "holds the barrier"/)
     })
+}
 
+function registerSuiteBindingCases () {
     it('binds a callback-less pending to its own suite and leaves the next test its own body', function () {
         const source = [
             "describe('Outer', () => { it.skip('x') })",
@@ -349,9 +378,18 @@ describe('check-mirror-pendings: a call binds only the callback inside its own p
         const pending = checker.parseSource("describe.skip('S', () => { it('a'); it('b', fn); it('c', () => {}) })", 'at12.test.js').pending
         assert.ok(pending.some((entry) => /\[skipped suite, 3 cases\]/.test(entry.title)), JSON.stringify(pending))
     })
+}
 
+function registerNamedHookCase () {
     it('reports nothing for named hooks and named test callbacks that are not skipped', function () {
         const source = "describe('AT12', function () { before(setupFn); it('runs', runIt) })"
         assert.deepStrictEqual(checker.parseSource(source, 'at12.test.js').pending, [])
     })
+}
+
+describe('check-mirror-pendings: a call binds only the callback inside its own parentheses', function () {
+    registerExpressionBodyCases()
+    registerCallbacklessCases()
+    registerSuiteBindingCases()
+    registerNamedHookCase()
 })
