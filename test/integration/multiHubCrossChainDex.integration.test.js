@@ -90,6 +90,203 @@ function crossingPair({ ltcIdx, dogeIdx, ltcGive = '90', dogeGive = '40' }){
     });
 }
 
+// Attach finalize listeners to every hub's DEX consensus, trigger one discovery
+// round on every engine (leader PROPOSEs, followers validate+sign), wait for
+// PBFT to settle over P2P, return the collected finalize events.
+async function driveRound(mvh, settleMs = SETTLE_MS){
+    const dexes = mvh.getCrossChainDexes();
+    const events = [];
+    const listeners = dexes.map((d, i) => {
+        const fn = (ev) => events.push(Object.assign({ hubIndex: i }, ev));
+        d.consensus.on('match:finalized', fn);
+        return fn;
+    });
+    await Promise.all(dexes.map((d) => d.discoverAndMatch().catch(() => {})));
+    // The post-condition of the positive case is the PERSISTED cross_chain_matches
+    // row on every hub, which the finalize event only STARTS: the event is emitted
+    // synchronously by CrossChainDexConsensus.finalize, and the row is written by
+    // CrossChainDexEngine's un-awaited `this._writeFinalizedMatch(ev)` listener on
+    // that same emit, so an event-count poll clears while the INSERT is still in
+    // flight. Poll the row, keyed by the match_id this round finalized exactly as
+    // the assertions key it. The cases that expect FEWER finalizes (byzantine,
+    // sub-quorum) never satisfy the poll and therefore still observe the full
+    // window, which is what proves their negative.
+    await waitFor(async () => {
+        if (!events.length) return { ok: false, held: 0 };
+        const matchId = events[0].matchId;
+        let held = 0;
+        for (const hub of mvh.hubs) {
+            try {
+                const r = await hub.db.doQuery(
+                    "SELECT match_id FROM cross_chain_matches WHERE match_id = ? AND status = 'finalized'",
+                    [matchId]);
+                if (r.length >= 1) held++;
+            } catch (internal) { /* a hub that cannot be read has not persisted it */ }
+        }
+        return { ok: held === mvh.hubs.length, held: held };
+    }, { timeoutMs: settleMs, intervalMs: 100 });
+    dexes.forEach((d, i) => d.consensus.removeListener('match:finalized', listeners[i]));
+    return events;
+}
+
+function verifyingPubkeys(mvh, ev){
+    const dex = mvh.getCrossChainDexes()[ev.hubIndex];
+    const canonical = dex.canonicalMatch(ev.row);
+    const ok = new Set();
+    for (const s of (ev.signatures || [])) {
+        const pk = String(s.pubkey || '').toLowerCase();
+        if (ValidatorIdentity.verify(canonical, String(s.sig || ''), pk)) ok.add(pk);
+    }
+    return ok;
+}
+
+async function assertOrderMatchFinalizesEverywhere(mvh, book) {
+    book.setBook('shared', {
+        network: NETWORK, latestBlockIndex: 200,
+        ordersByCoin: crossingPair({ ltcIdx: 10, dogeIdx: 20 })
+    });
+
+    const events = await driveRound(mvh);
+
+    // Every hub finalized the SAME match.
+    assert.strictEqual(events.length, COUNT,
+        'expected all ' + COUNT + ' hubs to finalize, got ' + events.length);
+    const matchIds = new Set(events.map((e) => e.matchId));
+    assert.strictEqual(matchIds.size, 1, 'hubs finalized different match_ids: ' + JSON.stringify([...matchIds]));
+
+    // The core anti-regression vs the single-validator proof (`1 sig`): >= 2f+1
+    // DISTINCT validator signatures, each verifying against the canonical.
+    for (const ev of events) {
+        const ok = verifyingPubkeys(mvh, ev);
+        assert.ok(ok.size >= 3,
+            'hub ' + ev.hubIndex + ' finalized with only ' + ok.size + ' verifying sigs (need >= 3)');
+        assert.ok(ok.size >= 2, 'multi-validator signing did not occur (would be the old 1-sig path)');
+    }
+
+    // Persisted to EVERY hub's own DB with the multi-sig bundle.
+    const matchId = [...matchIds][0];
+    for (let i = 0; i < mvh.hubs.length; i++) {
+        const rows = await mvh.hubs[i].db.doQuery(
+            'SELECT validator_signatures, status FROM cross_chain_matches WHERE match_id = ?', [matchId]);
+        assert.strictEqual(rows.length, 1, 'hub ' + i + ' has no cross_chain_matches row');
+        assert.strictEqual(rows[0].status, 'finalized', 'hub ' + i + ' row not finalized');
+        const sigs = JSON.parse(rows[0].validator_signatures || '[]');
+        assert.ok(sigs.length >= 3, 'hub ' + i + ' persisted only ' + sigs.length + ' sigs');
+    }
+}
+
+async function assertByzantineExcluded(mvh, book) {
+    // Honest book (fill 40) for 3 hubs; divergent book (fill 30 → a different
+    // canonical for the SAME match_id) for the byzantine hub, which will reject
+    // the leader's PROPOSE on the canonical check and withhold its signature.
+    book.setBook('shared', {
+        network: NETWORK, latestBlockIndex: 200,
+        ordersByCoin: crossingPair({ ltcIdx: 11, dogeIdx: 21, dogeGive: '40' })
+    });
+    book.setBook('divergent', {
+        network: NETWORK, latestBlockIndex: 200,
+        ordersByCoin: crossingPair({ ltcIdx: 11, dogeIdx: 21, dogeGive: '30' })
+    });
+
+    // The byzantine hub MUST be a non-leader (a byzantine leader would propose the
+    // wrong canonical and the round would stall to view-change). Leader is
+    // deterministic: sorted(pubkeys)[(matchIdInt + view) % N].
+    const dex0 = mvh.getCrossChainDexes()[0];
+    const lo = { home_network: NETWORK, home_coin: 'DOGE', action_index: 21 };
+    const hi = { home_network: NETWORK, home_coin: 'LTC',  action_index: 11 };
+    const matchId = dex0.deriveMatchId(lo, hi, BLOCK_INDEX, '0', '0');
+    const validatorObjs = mvh.getPubkeys().map((pk) => ({ pubkey: pk }));
+    const leaderPubkey = dex0.consensus.leaderFor(matchId, validatorObjs, 0);
+    const byzIdx = mvh.getPubkeys().findIndex((pk) => pk.toLowerCase() !== leaderPubkey);
+    assert.ok(byzIdx >= 0, 'could not pick a non-leader byzantine hub');
+    const byzPubkey = mvh.getPubkeys()[byzIdx].toLowerCase();
+
+    // Repoint only the byzantine hub at the divergent book.
+    const byzDex = mvh.getCrossChainDexes()[byzIdx];
+    const savedIndexers = JSON.parse(JSON.stringify(byzDex.indexers));
+    byzDex.indexers.LTC  = { url: book.urlFor('divergent', 'LTC'),  key: '' };
+    byzDex.indexers.DOGE = { url: book.urlFor('divergent', 'DOGE'), key: '' };
+
+    try {
+        const events = await driveRound(mvh);
+        const honest = events.filter((e) => e.hubIndex !== byzIdx);
+        const byz    = events.filter((e) => e.hubIndex === byzIdx);
+
+        // The honest majority finalized the TRUE match with a real 2f+1 of distinct
+        // verifying signatures, none of them the byzantine validator's.
+        assert.ok(honest.length >= 3, 'honest majority failed to finalize (got ' + honest.length + ')');
+        for (const ev of honest) {
+            const ok = verifyingPubkeys(mvh, ev);
+            assert.ok(ok.size >= 3, 'honest hub ' + ev.hubIndex + ' finalized with < 3 verifying sigs (' + ok.size + ')');
+            assert.ok(!ok.has(byzPubkey), 'byzantine pubkey appeared in an honest finalize signature set');
+        }
+
+        // The byzantine validator (divergent canonical) CANNOT produce a settleable
+        // match: even if it locally finalizes on peer COMMIT count, its signature
+        // bundle holds < quorum VALID sigs over its own canonical, so the indexer's
+        // cross_settle (which re-verifies 2f+1) would reject it. This is the safety
+        // boundary: a bad view harms only itself, never the federation's settlement.
+        for (const ev of byz) {
+            const ok = verifyingPubkeys(mvh, ev);
+            assert.ok(ok.size < 3,
+                'byzantine node reached a VALID quorum on a divergent canonical (' + ok.size + ' sigs; safety violation)');
+        }
+    } finally {
+        byzDex.indexers = savedIndexers;
+    }
+}
+
+async function assertNoFinalizeBelowQuorum(mvh, book) {
+    book.setBook('shared', {
+        network: NETWORK, latestBlockIndex: 200,
+        ordersByCoin: crossingPair({ ltcIdx: 12, dogeIdx: 22 })
+    });
+
+    // Silence two hubs' DEX consensus; only 2 honest remain, below quorum 3.
+    const restore0 = silenceDexValidator(mvh.hubs[0]);
+    const restore1 = silenceDexValidator(mvh.hubs[1]);
+    try {
+        const events = await driveRound(mvh);
+        assert.strictEqual(events.length, 0,
+            'a match finalized despite 2 of 4 faulty (quorum should be unreachable): ' +
+            JSON.stringify(events.map((e) => ({ hub: e.hubIndex, sigs: (e.signatures || []).length }))));
+    } finally {
+        restore0();
+        restore1();
+    }
+}
+
+async function startDexFederation(book) {
+    const mvh = new MultiValidatorHub({
+        count:           COUNT,
+        basePort:        32000,
+        startCrossChain: true,
+        startAttestation: false,                  // DEX-focused; skip attestation cost
+        crossChainIndexerUrls: {
+            LTC:  book.urlFor('shared', 'LTC'),
+            DOGE: book.urlFor('shared', 'DOGE')
+        }
+    });
+    await mvh.start();
+    await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });   // mesh IS formed before we propose
+    return mvh;
+}
+
+function assertDexEnginesActive(mvh) {
+    for (const h of mvh.hubs) {
+        assert.ok(h.getCrossChainDex(), 'cross-chain DEX engine not started');
+        assert.ok(h.getCrossChainDex().consensus, 'DEX consensus not wired');
+        const peers = h.peerManager ? h.peerManager.peers.size : 0;
+        assert.strictEqual(peers, COUNT - 1, 'expected ' + (COUNT - 1) + ' peers, got ' + peers);
+    }
+}
+
+function assertSameQuorum(mvh, seed) {
+    const quorums = mvh.hubs.map((h) => h.capabilitySnapshot.getQuorum(seed.snapshot));
+    assert.ok(quorums.every((q) => q === quorums[0]), 'hubs disagree on quorum: ' + JSON.stringify(quorums));
+    assert.strictEqual(quorums[0], 3, 'expected quorum 3 for N=4, got ' + quorums[0]);
+}
+
 describe('MultiValidatorHub: cross-chain DEX match PBFT (L2)', function () {
     this.timeout(180_000);
 
@@ -109,18 +306,7 @@ describe('MultiValidatorHub: cross-chain DEX match PBFT (L2)', function () {
         book = new MockCrossChainOfferBook();
         await book.start();
 
-        mvh = new MultiValidatorHub({
-            count:           COUNT,
-            basePort:        32000,
-            startCrossChain: true,
-            startAttestation: false,                  // DEX-focused; skip attestation cost
-            crossChainIndexerUrls: {
-                LTC:  book.urlFor('shared', 'LTC'),
-                DOGE: book.urlFor('shared', 'DOGE')
-            }
-        });
-        await mvh.start();
-        await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });   // mesh IS formed before we propose
+        mvh = await startDexFederation(book);
 
         // Deterministic cross_chain validator set + BTC block, so every hub resolves
         // the same quorum 3 with no indexer / chain behind it.
@@ -135,184 +321,23 @@ describe('MultiValidatorHub: cross-chain DEX match PBFT (L2)', function () {
         if (db)   { await db.stop(); }
     });
 
-    // Attach finalize listeners to every hub's DEX consensus, trigger one discovery
-    // round on every engine (leader PROPOSEs, followers validate+sign), wait for
-    // PBFT to settle over P2P, return the collected finalize events.
-    async function driveRound(settleMs = SETTLE_MS){
-        const dexes = mvh.getCrossChainDexes();
-        const events = [];
-        const listeners = dexes.map((d, i) => {
-            const fn = (ev) => events.push(Object.assign({ hubIndex: i }, ev));
-            d.consensus.on('match:finalized', fn);
-            return fn;
-        });
-        await Promise.all(dexes.map((d) => d.discoverAndMatch().catch(() => {})));
-        // The post-condition of the positive case is the PERSISTED cross_chain_matches
-        // row on every hub, which the finalize event only STARTS: the event is emitted
-        // synchronously by CrossChainDexConsensus.finalize, and the row is written by
-        // CrossChainDexEngine's un-awaited `this._writeFinalizedMatch(ev)` listener on
-        // that same emit, so an event-count poll clears while the INSERT is still in
-        // flight. Poll the row, keyed by the match_id this round finalized exactly as
-        // the assertions key it. The cases that expect FEWER finalizes (byzantine,
-        // sub-quorum) never satisfy the poll and therefore still observe the full
-        // window, which is what proves their negative.
-        await waitFor(async () => {
-            if (!events.length) return { ok: false, held: 0 };
-            const matchId = events[0].matchId;
-            let held = 0;
-            for (const hub of mvh.hubs) {
-                try {
-                    const r = await hub.db.doQuery(
-                        "SELECT match_id FROM cross_chain_matches WHERE match_id = ? AND status = 'finalized'",
-                        [matchId]);
-                    if (r.length >= 1) held++;
-                } catch (internal) { /* a hub that cannot be read has not persisted it */ }
-            }
-            return { ok: held === mvh.hubs.length, held: held };
-        }, { timeoutMs: settleMs, intervalMs: 100 });
-        dexes.forEach((d, i) => d.consensus.removeListener('match:finalized', listeners[i]));
-        return events;
-    }
-
-    function verifyingPubkeys(ev){
-        const dex = mvh.getCrossChainDexes()[ev.hubIndex];
-        const canonical = dex.canonicalMatch(ev.row);
-        const ok = new Set();
-        for (const s of (ev.signatures || [])) {
-            const pk = String(s.pubkey || '').toLowerCase();
-            if (ValidatorIdentity.verify(canonical, String(s.sig || ''), pk)) ok.add(pk);
-        }
-        return ok;
-    }
-
     it('hubs are peer-connected and the DEX engine is active on every node', function () {
-        for (const h of mvh.hubs) {
-            assert.ok(h.getCrossChainDex(), 'cross-chain DEX engine not started');
-            assert.ok(h.getCrossChainDex().consensus, 'DEX consensus not wired');
-            const peers = h.peerManager ? h.peerManager.peers.size : 0;
-            assert.strictEqual(peers, COUNT - 1, 'expected ' + (COUNT - 1) + ' peers, got ' + peers);
-        }
+        return assertDexEnginesActive(mvh);
     });
 
     it('every hub independently resolves the SAME, fault-tolerant quorum (3 for N=4)', function () {
-        const quorums = mvh.hubs.map((h) => h.capabilitySnapshot.getQuorum(seed.snapshot));
-        assert.ok(quorums.every((q) => q === quorums[0]), 'hubs disagree on quorum: ' + JSON.stringify(quorums));
-        assert.strictEqual(quorums[0], 3, 'expected quorum 3 for N=4, got ' + quorums[0]);
+        return assertSameQuorum(mvh, seed);
     });
 
     it('a cross-chain ORDER match finalizes on EVERY hub with >= 3 distinct verifying sigs', async function () {
-        book.setBook('shared', {
-            network: NETWORK, latestBlockIndex: 200,
-            ordersByCoin: crossingPair({ ltcIdx: 10, dogeIdx: 20 })
-        });
-
-        const events = await driveRound();
-
-        // Every hub finalized the SAME match.
-        assert.strictEqual(events.length, COUNT,
-            'expected all ' + COUNT + ' hubs to finalize, got ' + events.length);
-        const matchIds = new Set(events.map((e) => e.matchId));
-        assert.strictEqual(matchIds.size, 1, 'hubs finalized different match_ids: ' + JSON.stringify([...matchIds]));
-
-        // The core anti-regression vs the single-validator proof (`1 sig`): >= 2f+1
-        // DISTINCT validator signatures, each verifying against the canonical.
-        for (const ev of events) {
-            const ok = verifyingPubkeys(ev);
-            assert.ok(ok.size >= 3,
-                'hub ' + ev.hubIndex + ' finalized with only ' + ok.size + ' verifying sigs (need >= 3)');
-            assert.ok(ok.size >= 2, 'multi-validator signing did not occur (would be the old 1-sig path)');
-        }
-
-        // Persisted to EVERY hub's own DB with the multi-sig bundle.
-        const matchId = [...matchIds][0];
-        for (let i = 0; i < mvh.hubs.length; i++) {
-            const rows = await mvh.hubs[i].db.doQuery(
-                'SELECT validator_signatures, status FROM cross_chain_matches WHERE match_id = ?', [matchId]);
-            assert.strictEqual(rows.length, 1, 'hub ' + i + ' has no cross_chain_matches row');
-            assert.strictEqual(rows[0].status, 'finalized', 'hub ' + i + ' row not finalized');
-            const sigs = JSON.parse(rows[0].validator_signatures || '[]');
-            assert.ok(sigs.length >= 3, 'hub ' + i + ' persisted only ' + sigs.length + ' sigs');
-        }
+        return assertOrderMatchFinalizesEverywhere(mvh, book);
     });
 
     it('a byzantine validator on a divergent book is excluded, honest majority still finalizes', async function () {
-        // Honest book (fill 40) for 3 hubs; divergent book (fill 30 → a different
-        // canonical for the SAME match_id) for the byzantine hub, which will reject
-        // the leader's PROPOSE on the canonical check and withhold its signature.
-        book.setBook('shared', {
-            network: NETWORK, latestBlockIndex: 200,
-            ordersByCoin: crossingPair({ ltcIdx: 11, dogeIdx: 21, dogeGive: '40' })
-        });
-        book.setBook('divergent', {
-            network: NETWORK, latestBlockIndex: 200,
-            ordersByCoin: crossingPair({ ltcIdx: 11, dogeIdx: 21, dogeGive: '30' })
-        });
-
-        // The byzantine hub MUST be a non-leader (a byzantine leader would propose the
-        // wrong canonical and the round would stall to view-change). Leader is
-        // deterministic: sorted(pubkeys)[(matchIdInt + view) % N].
-        const dex0 = mvh.getCrossChainDexes()[0];
-        const lo = { home_network: NETWORK, home_coin: 'DOGE', action_index: 21 };
-        const hi = { home_network: NETWORK, home_coin: 'LTC',  action_index: 11 };
-        const matchId = dex0.deriveMatchId(lo, hi, BLOCK_INDEX, '0', '0');
-        const validatorObjs = mvh.getPubkeys().map((pk) => ({ pubkey: pk }));
-        const leaderPubkey = dex0.consensus.leaderFor(matchId, validatorObjs, 0);
-        const byzIdx = mvh.getPubkeys().findIndex((pk) => pk.toLowerCase() !== leaderPubkey);
-        assert.ok(byzIdx >= 0, 'could not pick a non-leader byzantine hub');
-        const byzPubkey = mvh.getPubkeys()[byzIdx].toLowerCase();
-
-        // Repoint only the byzantine hub at the divergent book.
-        const byzDex = mvh.getCrossChainDexes()[byzIdx];
-        const savedIndexers = JSON.parse(JSON.stringify(byzDex.indexers));
-        byzDex.indexers.LTC  = { url: book.urlFor('divergent', 'LTC'),  key: '' };
-        byzDex.indexers.DOGE = { url: book.urlFor('divergent', 'DOGE'), key: '' };
-
-        try {
-            const events = await driveRound();
-            const honest = events.filter((e) => e.hubIndex !== byzIdx);
-            const byz    = events.filter((e) => e.hubIndex === byzIdx);
-
-            // The honest majority finalized the TRUE match with a real 2f+1 of distinct
-            // verifying signatures, none of them the byzantine validator's.
-            assert.ok(honest.length >= 3, 'honest majority failed to finalize (got ' + honest.length + ')');
-            for (const ev of honest) {
-                const ok = verifyingPubkeys(ev);
-                assert.ok(ok.size >= 3, 'honest hub ' + ev.hubIndex + ' finalized with < 3 verifying sigs (' + ok.size + ')');
-                assert.ok(!ok.has(byzPubkey), 'byzantine pubkey appeared in an honest finalize signature set');
-            }
-
-            // The byzantine validator (divergent canonical) CANNOT produce a settleable
-            // match: even if it locally finalizes on peer COMMIT count, its signature
-            // bundle holds < quorum VALID sigs over its own canonical, so the indexer's
-            // cross_settle (which re-verifies 2f+1) would reject it. This is the safety
-            // boundary: a bad view harms only itself, never the federation's settlement.
-            for (const ev of byz) {
-                const ok = verifyingPubkeys(ev);
-                assert.ok(ok.size < 3,
-                    'byzantine node reached a VALID quorum on a divergent canonical (' + ok.size + ' sigs; safety violation)');
-            }
-        } finally {
-            byzDex.indexers = savedIndexers;
-        }
+        return assertByzantineExcluded(mvh, book);
     });
 
     it('with 2 of 4 faulty, quorum is unreachable and NO match finalizes (safety)', async function () {
-        book.setBook('shared', {
-            network: NETWORK, latestBlockIndex: 200,
-            ordersByCoin: crossingPair({ ltcIdx: 12, dogeIdx: 22 })
-        });
-
-        // Silence two hubs' DEX consensus; only 2 honest remain, below quorum 3.
-        const restore0 = silenceDexValidator(mvh.hubs[0]);
-        const restore1 = silenceDexValidator(mvh.hubs[1]);
-        try {
-            const events = await driveRound();
-            assert.strictEqual(events.length, 0,
-                'a match finalized despite 2 of 4 faulty (quorum should be unreachable): ' +
-                JSON.stringify(events.map((e) => ({ hub: e.hubIndex, sigs: (e.signatures || []).length }))));
-        } finally {
-            restore0();
-            restore1();
-        }
+        return assertNoFinalizeBelowQuorum(mvh, book);
     });
 });

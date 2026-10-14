@@ -130,6 +130,157 @@ function seedBoundarySnapshot(mvh, members, getBlock) {
     return { restore() { restores.forEach((r) => r()); restores.length = 0; } };
 }
 
+// B1: boundary parity. Same fixture, decision flips with the rule.
+//
+// The two sides run on SEPARATE fresh federations (each at seq 0) because the
+// PBFT leader rotates by seq. A second round in the same federation lands on
+// a different leader and findLeader (proven at seq 0) wouldn't resolve it. The
+// no-fork property is unaffected: each side is asserted across EVERY hub of its
+// federation, and only the activation gate differs between them (the validator
+// set, the live-signer ratio, and the snapshot are identical). The 3 live hubs
+// are a COUNT majority (3 of N=4) but a STAKE minority (3000/10000).
+const MEMBERS = (ids) => [
+    { pubkey: ids[0].pubkeyHex, source: 'sA',    weight: '1000' },
+    { pubkey: ids[1].pubkeyHex, source: 'sB',    weight: '1000' },
+    { pubkey: ids[2].pubkeyHex, source: 'sC',    weight: '1000' },
+    { pubkey: 'ff'.repeat(32),  source: 'whale', weight: '7000' },   // offline
+];
+
+function singleOperatorSuite() {
+    describe('B2: single-operator regression across the boundary', function () {
+            let db, mvh, seed, currentBlock;
+
+            before(async function () {
+                db = await startDisposableHubDb();
+                if (!db) { console.log('Skipping B2: no env DB and Docker unavailable'); this.skip(); }
+                mvh = new MultiValidatorHub({ count: 1, basePort: 32300 });
+                await mvh.start();
+                await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
+                const ids = mvh.identities;
+                const members = [{ pubkey: ids[0].pubkeyHex, source: 'solo', weight: '5000' }];
+                currentBlock = ACT - 1;
+                seed = seedBoundarySnapshot(mvh, members, () => currentBlock);
+                // N=1 → getQuorum 0 → single-node fast path in BOTH modes.
+            });
+
+            after(async function () {
+                if (seed) seed.restore();
+                if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
+                if (db)  { await db.stop(); }
+            });
+
+            it('finalizes immediately on its own signature below the boundary', async function () {
+                currentBlock = ACT - 1;
+                const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '111';
+                const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
+                await mvh.hubs[0].addParametersFromJson(config);
+                await waitForConfigEverywhere(
+                    mvh.hubs,
+                    { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+                    { timeoutMs: APPLY_WAIT_MS });
+                const cfg = await mvh.hubs[0].db.getConfig(COIN, NET, MODULE);
+                assert.strictEqual(cfg && cfg.GAS_PRICE, VALUE, 'sole operator did not finalize below the boundary');
+            });
+
+            it('finalizes immediately on its own signature above the boundary', async function () {
+                currentBlock = ACT + 1;
+                const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '222';
+                const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
+                await mvh.hubs[0].addParametersFromJson(config);
+                await waitForConfigEverywhere(
+                    mvh.hubs,
+                    { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+                    { timeoutMs: APPLY_WAIT_MS });
+                const cfg = await mvh.hubs[0].db.getConfig(COIN, NET, MODULE);
+                assert.strictEqual(cfg && cfg.GAS_PRICE, VALUE, 'sole operator did not finalize above the boundary');
+            });
+        });
+}
+
+function weightedAboveSuite() {
+    describe('B1b: ABOVE the height the WEIGHTED rule blocks the SAME set on every hub', function () {
+            let db, mvh, seed;
+            before(async function () {
+                db = await startDisposableHubDb();
+                if (!db) { console.log('Skipping B1b: no env DB and Docker unavailable'); this.skip(); }
+                mvh = new MultiValidatorHub({ count: 3, basePort: 32250 });
+                await mvh.start();
+                await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
+                seed = seedBoundarySnapshot(mvh, MEMBERS(mvh.identities), () => ACT + 1);
+            });
+            after(async function () {
+                if (seed) seed.restore();
+                if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
+                if (db)  { await db.stop(); }
+            });
+
+            it('a stake minority (3000/10000) never finalizes: config applies on NO hub', async function () {
+                assert.ok(swq.isStakeWeightedQuorumActive(ACT + 1, 'regtest'),
+                    'block ' + (ACT + 1) + ' should be AT/ABOVE the activation height');
+                const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '9999';
+                const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
+                const leader = findLeader(mvh);
+                assert.ok(leader, 'no round leader among the live hubs');
+
+                // Stake-minority → never reaches weighted quorum → the propose promise
+                // rejects on timeout; fire-and-forget, assert no-apply on every hub.
+                leader.addParametersFromJson(config).catch(() => {});
+                await assertNeverApplied(mvh.hubs,
+                    { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+                    { windowMs: STALL_WAIT_MS });
+
+                // Re-read without the watcher's swallowed read errors, so a dead hub DB fails loud.
+                for (let i = 0; i < mvh.hubs.length; i++) {
+                    const cfg = await mvh.hubs[i].db.getConfig(COIN, NET, MODULE);
+                    assert.notStrictEqual(cfg && cfg.GAS_PRICE, VALUE,
+                        'hub ' + i + ' applied a config a STAKE minority must never finalize above the boundary');
+                }
+            });
+        });
+}
+
+function countBelowSuite() {
+    describe('B1a: BELOW the height the COUNT rule applies on every hub', function () {
+            let db, mvh, seed;
+            before(async function () {
+                db = await startDisposableHubDb();
+                if (!db) { console.log('Skipping B1a: no env DB and Docker unavailable'); this.skip(); }
+                mvh = new MultiValidatorHub({ count: 3, basePort: 32200 });
+                await mvh.start();
+                await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
+                seed = seedBoundarySnapshot(mvh, MEMBERS(mvh.identities), () => ACT - 1);
+            });
+            after(async function () {
+                if (seed) seed.restore();
+                if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
+                if (db)  { await db.stop(); }
+            });
+
+            it('count quorum (3 of N=4) finalizes the change on EVERY hub', async function () {
+                assert.ok(!swq.isStakeWeightedQuorumActive(ACT - 1, 'regtest'),
+                    'block ' + (ACT - 1) + ' should be BELOW the activation height');
+                const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '5151';
+                const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
+                const leader = findLeader(mvh);
+                assert.ok(leader, 'no round leader among the live hubs');
+
+                // Resolves on the LEADER's own COUNT tally, before the followers have
+                // written theirs; each follower's own config row is the post-condition.
+                await leader.addParametersFromJson(config);
+                await waitForConfigEverywhere(
+                    mvh.hubs,
+                    { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+                    { timeoutMs: APPLY_WAIT_MS });
+
+                for (let i = 0; i < mvh.hubs.length; i++) {
+                    const cfg = await mvh.hubs[i].db.getConfig(COIN, NET, MODULE);
+                    assert.strictEqual(cfg && cfg.GAS_PRICE, VALUE,
+                        'hub ' + i + ' did not apply under the count rule below the boundary (got ' + JSON.stringify(cfg) + ')');
+                }
+            });
+        });
+}
+
 describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM activation boundary (WI-1 Suite B, L2)', function () {
     this.timeout(300_000);
 
@@ -151,149 +302,10 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM activation boundary (WI-1 Sui
         if (FILE_ACT !== ACT) swq.STAKE_WEIGHTED_QUORUM_ACTIVATION.regtest = FILE_ACT;
     });
 
-    // B1: boundary parity. Same fixture, decision flips with the rule.
-    //
-    // The two sides run on SEPARATE fresh federations (each at seq 0) because the
-    // PBFT leader rotates by seq. A second round in the same federation lands on
-    // a different leader and findLeader (proven at seq 0) wouldn't resolve it. The
-    // no-fork property is unaffected: each side is asserted across EVERY hub of its
-    // federation, and only the activation gate differs between them (the validator
-    // set, the live-signer ratio, and the snapshot are identical). The 3 live hubs
-    // are a COUNT majority (3 of N=4) but a STAKE minority (3000/10000).
-    const MEMBERS = (ids) => [
-        { pubkey: ids[0].pubkeyHex, source: 'sA',    weight: '1000' },
-        { pubkey: ids[1].pubkeyHex, source: 'sB',    weight: '1000' },
-        { pubkey: ids[2].pubkeyHex, source: 'sC',    weight: '1000' },
-        { pubkey: 'ff'.repeat(32),  source: 'whale', weight: '7000' },   // offline
-    ];
+    countBelowSuite();
 
-    describe('B1a: BELOW the height the COUNT rule applies on every hub', function () {
-        let db, mvh, seed;
-        before(async function () {
-            db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping B1a: no env DB and Docker unavailable'); this.skip(); }
-            mvh = new MultiValidatorHub({ count: 3, basePort: 32200 });
-            await mvh.start();
-            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
-            seed = seedBoundarySnapshot(mvh, MEMBERS(mvh.identities), () => ACT - 1);
-        });
-        after(async function () {
-            if (seed) seed.restore();
-            if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
-            if (db)  { await db.stop(); }
-        });
-
-        it('count quorum (3 of N=4) finalizes the change on EVERY hub', async function () {
-            assert.ok(!swq.isStakeWeightedQuorumActive(ACT - 1, 'regtest'),
-                'block ' + (ACT - 1) + ' should be BELOW the activation height');
-            const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '5151';
-            const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
-            const leader = findLeader(mvh);
-            assert.ok(leader, 'no round leader among the live hubs');
-
-            // Resolves on the LEADER's own COUNT tally, before the followers have
-            // written theirs; each follower's own config row is the post-condition.
-            await leader.addParametersFromJson(config);
-            await waitForConfigEverywhere(
-                mvh.hubs,
-                { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
-                { timeoutMs: APPLY_WAIT_MS });
-
-            for (let i = 0; i < mvh.hubs.length; i++) {
-                const cfg = await mvh.hubs[i].db.getConfig(COIN, NET, MODULE);
-                assert.strictEqual(cfg && cfg.GAS_PRICE, VALUE,
-                    'hub ' + i + ' did not apply under the count rule below the boundary (got ' + JSON.stringify(cfg) + ')');
-            }
-        });
-    });
-
-    describe('B1b: ABOVE the height the WEIGHTED rule blocks the SAME set on every hub', function () {
-        let db, mvh, seed;
-        before(async function () {
-            db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping B1b: no env DB and Docker unavailable'); this.skip(); }
-            mvh = new MultiValidatorHub({ count: 3, basePort: 32250 });
-            await mvh.start();
-            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
-            seed = seedBoundarySnapshot(mvh, MEMBERS(mvh.identities), () => ACT + 1);
-        });
-        after(async function () {
-            if (seed) seed.restore();
-            if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
-            if (db)  { await db.stop(); }
-        });
-
-        it('a stake minority (3000/10000) never finalizes: config applies on NO hub', async function () {
-            assert.ok(swq.isStakeWeightedQuorumActive(ACT + 1, 'regtest'),
-                'block ' + (ACT + 1) + ' should be AT/ABOVE the activation height');
-            const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '9999';
-            const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
-            const leader = findLeader(mvh);
-            assert.ok(leader, 'no round leader among the live hubs');
-
-            // Stake-minority → never reaches weighted quorum → the propose promise
-            // rejects on timeout; fire-and-forget, assert no-apply on every hub.
-            leader.addParametersFromJson(config).catch(() => {});
-            await assertNeverApplied(mvh.hubs,
-                { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
-                { windowMs: STALL_WAIT_MS });
-
-            // Re-read without the watcher's swallowed read errors, so a dead hub DB fails loud.
-            for (let i = 0; i < mvh.hubs.length; i++) {
-                const cfg = await mvh.hubs[i].db.getConfig(COIN, NET, MODULE);
-                assert.notStrictEqual(cfg && cfg.GAS_PRICE, VALUE,
-                    'hub ' + i + ' applied a config a STAKE minority must never finalize above the boundary');
-            }
-        });
-    });
+    weightedAboveSuite();
 
     // B2: single-operator finalizes on its own signature in BOTH modes.
-    describe('B2: single-operator regression across the boundary', function () {
-        let db, mvh, seed, currentBlock;
-
-        before(async function () {
-            db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping B2: no env DB and Docker unavailable'); this.skip(); }
-            mvh = new MultiValidatorHub({ count: 1, basePort: 32300 });
-            await mvh.start();
-            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
-            const ids = mvh.identities;
-            const members = [{ pubkey: ids[0].pubkeyHex, source: 'solo', weight: '5000' }];
-            currentBlock = ACT - 1;
-            seed = seedBoundarySnapshot(mvh, members, () => currentBlock);
-            // N=1 → getQuorum 0 → single-node fast path in BOTH modes.
-        });
-
-        after(async function () {
-            if (seed) seed.restore();
-            if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
-            if (db)  { await db.stop(); }
-        });
-
-        it('finalizes immediately on its own signature below the boundary', async function () {
-            currentBlock = ACT - 1;
-            const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '111';
-            const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
-            await mvh.hubs[0].addParametersFromJson(config);
-            await waitForConfigEverywhere(
-                mvh.hubs,
-                { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
-                { timeoutMs: APPLY_WAIT_MS });
-            const cfg = await mvh.hubs[0].db.getConfig(COIN, NET, MODULE);
-            assert.strictEqual(cfg && cfg.GAS_PRICE, VALUE, 'sole operator did not finalize below the boundary');
-        });
-
-        it('finalizes immediately on its own signature above the boundary', async function () {
-            currentBlock = ACT + 1;
-            const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '222';
-            const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
-            await mvh.hubs[0].addParametersFromJson(config);
-            await waitForConfigEverywhere(
-                mvh.hubs,
-                { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
-                { timeoutMs: APPLY_WAIT_MS });
-            const cfg = await mvh.hubs[0].db.getConfig(COIN, NET, MODULE);
-            assert.strictEqual(cfg && cfg.GAS_PRICE, VALUE, 'sole operator did not finalize above the boundary');
-        });
-    });
+    singleOperatorSuite();
 });
