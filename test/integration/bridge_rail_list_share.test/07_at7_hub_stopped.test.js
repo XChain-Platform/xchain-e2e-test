@@ -102,63 +102,91 @@ async function nodeBtcTip() {
     return Number(await nodeConnector.getBlockCount());
 }
 
+function assertHeldWhileStopped(D, target) {
+    assert.ok(D.nodeTip > target, 'the BTC chain did not grow while the hubs were stopped');
+    assert.ok(D.held < D.nodeTip, 'the BTC indexer reached the chain tip ' + D.nodeTip + ' with every hub stopped');
+    assert.strictEqual(D.heldAgain, D.held, 'the BTC indexer moved from ' + D.held + ' to ' + D.heldAgain +
+        ' with every hub stopped');
+    assert.ok(D.mirrorStatus, 'the BTC indexer reports no hub mirror status');
+    assert.strictEqual(D.mirrorStatus.connected, false,
+        'the BTC indexer reports its hub mirror connected with every hub stopped');
+    assert.strictEqual(D.mirrorStatus.bootstrapped, false,
+        'the BTC indexer reports its hub mirror bootstrapped with every hub stopped');
+    const listHeights = D.mirrorStatus.heights && D.mirrorStatus.heights.list_snapshots;
+    assert.strictEqual(listHeights && listHeights.BTC, undefined,
+        'the BTC indexer retained an active list_snapshots height with every hub stopped');
+    // A shortfall is recorded only when a block asks that barrier, and with every hub
+    // stopped an earlier barrier holds the tip first, so the map is evidence, not a gate.
+    D.mirrorHeightShortfalls = D.mirrorStatus.heightShortfalls || {};
+    assert.strictEqual(D.settlementsHeld, D.settlementsBefore,
+        'BTC applied a shared-list settlement during the first stopped-hub window');
+    assert.strictEqual(D.mirrorHashHeld, D.mirrorHashBefore,
+        'the BTC mirror version changed during the first stopped-hub window');
+    assert.strictEqual(D.settlementsHeldAgain, D.settlementsBefore,
+        'BTC applied a shared-list settlement during the second stopped-hub window');
+    assert.strictEqual(D.mirrorHashHeldAgain, D.mirrorHashBefore,
+        'the BTC mirror version changed during the second stopped-hub window');
+}
+
+async function runDeferral(M) {
+    const D = state.listShare.deferred = {};
+    D.added = await sharedBtcLtcAddress('LISTSHARE.AT7.ADDED');
+    await fundOwnerInput(M.owner);
+    D.settlementsBefore = await btcListSettlements();
+    D.tipBefore = await btcIndexerTip();
+    D.mirrorHashBefore = await btcMirrorVersion(D.tipBefore);
+    await stopEveryHub();
+    try {
+        D.tx = await broadcastHomeEdit(M.owner,
+            listEditWire(1, M.rootIndex, [D.added.address], 'list share AT7 add'));
+        await regtestMinerConnector.generateBlocks(3);
+        const target = await nodeBtcTip();
+        await pause(30000);
+        D.held = await btcIndexerTip();
+        D.settlementsHeld = await btcListSettlements();
+        D.mirrorHashHeld = await btcMirrorVersion(D.held);
+        await regtestMinerConnector.generateBlocks(2);
+        await pause(30000);
+        D.heldAgain = await btcIndexerTip();
+        D.settlementsHeldAgain = await btcListSettlements();
+        D.mirrorHashHeldAgain = await btcMirrorVersion(D.heldAgain);
+        D.mirrorStatus = await btcListMirrorStatus();
+        D.nodeTip = await nodeBtcTip();
+        assertHeldWhileStopped(D, target);
+    } finally {
+        await startEveryHub();
+    }
+    state.evidence.at7_deferred = { held: D.held, mirrorHeightShortfalls: D.mirrorHeightShortfalls,
+        nodeTip: D.nodeTip, edit: D.tx };
+}
+
+async function compareFreshReplay(M) {
+    const first = Number(M.seq1.admit_block_btc);
+    const tip = await btcIndexerTip();
+    const handle = await state.venue.replayIndexer('BTC');
+    try {
+        const live = hashRows(await state.venue.queryIndexerDb('BTC', HASH_SQL, [first]));
+        const replayed = hashRows(await handle.queryDb(HASH_SQL, [first]));
+        const last = Number(replayed[replayed.length - 1].split(':')[0]);
+        assert.ok(last >= tip, 'the BTC replay stopped at ' + last + ', below the tip ' + tip);
+        const compared = Math.min(live.length, replayed.length);
+        assert.ok(compared >= tip - first + 1, 'only ' + compared + ' blocks compare from ' + first + ' to ' + tip);
+        for (let i = 0; i < compared; i++) {
+            assert.strictEqual(replayed[i], live[i], 'the BTC replay differs from the live indexer at row ' + i);
+        }
+        state.evidence.at7_replay = { from: first, to: tip, blocks: compared };
+    } finally {
+        await handle.stop();
+    }
+}
+
 bridgeRailSuite('list_share AT7: stopped hubs defer the venue and a restart resumes it', function () {
     it('list_share AT7: with every hub stopped a home edit is not applied and the BTC indexer holds its tip', async function () {
         this.timeout(0);
         if (needsFederation(this, 'list_share AT7 deferral')) return;
         const M = state.listShare.home;
         assert.ok(state.evidence.at5 && M.seq3, 'AT5 must have finalized seq 3');
-        const D = state.listShare.deferred = {};
-        D.added = await sharedBtcLtcAddress('LISTSHARE.AT7.ADDED');
-        await fundOwnerInput(M.owner);
-        D.settlementsBefore = await btcListSettlements();
-        D.tipBefore = await btcIndexerTip();
-        D.mirrorHashBefore = await btcMirrorVersion(D.tipBefore);
-        await stopEveryHub();
-        try {
-            D.tx = await broadcastHomeEdit(M.owner,
-                listEditWire(1, M.rootIndex, [D.added.address], 'list share AT7 add'));
-            await regtestMinerConnector.generateBlocks(3);
-            const target = await nodeBtcTip();
-            await pause(30000);
-            D.held = await btcIndexerTip();
-            D.settlementsHeld = await btcListSettlements();
-            D.mirrorHashHeld = await btcMirrorVersion(D.held);
-            await regtestMinerConnector.generateBlocks(2);
-            await pause(30000);
-            D.heldAgain = await btcIndexerTip();
-            D.settlementsHeldAgain = await btcListSettlements();
-            D.mirrorHashHeldAgain = await btcMirrorVersion(D.heldAgain);
-            D.mirrorStatus = await btcListMirrorStatus();
-            D.nodeTip = await nodeBtcTip();
-            assert.ok(D.nodeTip > target, 'the BTC chain did not grow while the hubs were stopped');
-            assert.ok(D.held < D.nodeTip, 'the BTC indexer reached the chain tip ' + D.nodeTip + ' with every hub stopped');
-            assert.strictEqual(D.heldAgain, D.held, 'the BTC indexer moved from ' + D.held + ' to ' + D.heldAgain +
-                ' with every hub stopped');
-            assert.ok(D.mirrorStatus, 'the BTC indexer reports no hub mirror status');
-            assert.strictEqual(D.mirrorStatus.connected, false,
-                'the BTC indexer reports its hub mirror connected with every hub stopped');
-            assert.strictEqual(D.mirrorStatus.bootstrapped, false,
-                'the BTC indexer reports its hub mirror bootstrapped with every hub stopped');
-            const listHeights = D.mirrorStatus.heights && D.mirrorStatus.heights.list_snapshots;
-            assert.strictEqual(listHeights && listHeights.BTC, undefined,
-                'the BTC indexer retained an active list_snapshots height with every hub stopped');
-            // A shortfall is recorded only when a block asks that barrier, and with every hub
-            // stopped an earlier barrier holds the tip first, so the map is evidence, not a gate.
-            D.mirrorHeightShortfalls = D.mirrorStatus.heightShortfalls || {};
-            assert.strictEqual(D.settlementsHeld, D.settlementsBefore,
-                'BTC applied a shared-list settlement during the first stopped-hub window');
-            assert.strictEqual(D.mirrorHashHeld, D.mirrorHashBefore,
-                'the BTC mirror version changed during the first stopped-hub window');
-            assert.strictEqual(D.settlementsHeldAgain, D.settlementsBefore,
-                'BTC applied a shared-list settlement during the second stopped-hub window');
-            assert.strictEqual(D.mirrorHashHeldAgain, D.mirrorHashBefore,
-                'the BTC mirror version changed during the second stopped-hub window');
-        } finally {
-            await startEveryHub();
-        }
-        state.evidence.at7_deferred = { held: D.held, mirrorHeightShortfalls: D.mirrorHeightShortfalls,
-            nodeTip: D.nodeTip, edit: D.tx };
+        await runDeferral(M);
     });
 
     it('list_share AT7: the restarted hubs finalize the next seq and the BTC mirror applies it', async function () {
@@ -183,23 +211,7 @@ bridgeRailSuite('list_share AT7: stopped hubs defer the venue and a restart resu
         this.timeout(0);
         if (needsFederation(this, 'list_share AT7 replay')) return;
         const M = state.listShare.home;
-        assert.ok(M.seq4, 'the resume half must have applied seq 4');
-        const first = Number(M.seq1.admit_block_btc);
-        const tip = await btcIndexerTip();
-        const handle = await state.venue.replayIndexer('BTC');
-        try {
-            const live = hashRows(await state.venue.queryIndexerDb('BTC', HASH_SQL, [first]));
-            const replayed = hashRows(await handle.queryDb(HASH_SQL, [first]));
-            const last = Number(replayed[replayed.length - 1].split(':')[0]);
-            assert.ok(last >= tip, 'the BTC replay stopped at ' + last + ', below the tip ' + tip);
-            const compared = Math.min(live.length, replayed.length);
-            assert.ok(compared >= tip - first + 1, 'only ' + compared + ' blocks compare from ' + first + ' to ' + tip);
-            for (let i = 0; i < compared; i++) {
-                assert.strictEqual(replayed[i], live[i], 'the BTC replay differs from the live indexer at row ' + i);
-            }
-            state.evidence.at7_replay = { from: first, to: tip, blocks: compared };
-        } finally {
-            await handle.stop();
-        }
+        assert.ok(M.seq4, 'the resume half must have finalized seq 4');
+        await compareFreshReplay(M);
     });
 });
