@@ -16,8 +16,8 @@
 
 const assert = require('assert');
 const drive = require('../../../helpers/oracleBatchDrive');
-const { WINDOW_ROUNDS } = require('../helpers/pairs');
-const { roundsOn } = require('../helpers/wire');
+const { WINDOW_ROUNDS } = require('../helpers/pairs.test');
+const { roundsOn } = require('../helpers/wire.test');
 
 // Registers part of the assertions inside the caller's describe.
 module.exports = function registerNeighbours(ctx) {

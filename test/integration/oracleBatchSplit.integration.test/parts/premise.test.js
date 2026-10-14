@@ -15,7 +15,7 @@
  ********************************************************************/
 
 const assert = require('assert');
-const { WIRE_MAX_BYTES } = require('../helpers/pairs');
+const { WIRE_MAX_BYTES } = require('../helpers/pairs.test');
 
 // Registers part of the assertions inside the caller's describe.
 module.exports = function registerPremise(ctx) {

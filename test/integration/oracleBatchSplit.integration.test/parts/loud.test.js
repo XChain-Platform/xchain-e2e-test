@@ -15,7 +15,7 @@
  ********************************************************************/
 
 const assert = require('assert');
-const { WINDOW_ROUNDS } = require('../helpers/pairs');
+const { WINDOW_ROUNDS } = require('../helpers/pairs.test');
 
 // Registers part of the assertions inside the caller's describe.
 module.exports = function registerLoud(ctx) {

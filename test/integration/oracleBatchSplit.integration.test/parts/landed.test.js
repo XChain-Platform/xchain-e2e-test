@@ -16,7 +16,7 @@
 
 const assert = require('assert');
 const drive = require('../../../helpers/oracleBatchDrive');
-const { KNOWN_CAPABILITY_GAP_STATUS } = require('../helpers/pairs');
+const { KNOWN_CAPABILITY_GAP_STATUS } = require('../helpers/pairs.test');
 
 // Registers part of the assertions inside the caller's describe.
 module.exports = function registerLanded(ctx) {

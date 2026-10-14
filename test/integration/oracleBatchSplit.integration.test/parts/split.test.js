@@ -16,8 +16,8 @@
 
 const assert = require('assert');
 const drive = require('../../../helpers/oracleBatchDrive');
-const { WINDOW_ROUNDS, MIN_SIGNATURES, WIRE_MAX_BYTES } = require('../helpers/pairs');
-const { sumStat, roundsOn } = require('../helpers/wire');
+const { WINDOW_ROUNDS, MIN_SIGNATURES, WIRE_MAX_BYTES } = require('../helpers/pairs.test');
+const { sumStat, roundsOn } = require('../helpers/wire.test');
 
 // One split wire: parses as a PRICE batch, fits the reader cap, re-anchored and co-signed.
 function assertSplitWire(p, venue, signerSet) {

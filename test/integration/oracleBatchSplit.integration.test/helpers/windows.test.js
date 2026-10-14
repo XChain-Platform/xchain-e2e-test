@@ -16,8 +16,8 @@
 
 const fs = require('fs');
 const drive = require('../../../helpers/oracleBatchDrive');
-const { WINDOW_ROUNDS, names, submissionSet } = require('./pairs');
-const { readBatchWire, sumStat } = require('./wire');
+const { WINDOW_ROUNDS, names, submissionSet } = require('./pairs.test');
+const { readBatchWire, sumStat } = require('./wire.test');
 
 // Index 6 is the third round of window B, so the packer meets it AFTER it has
 // already packed and published rounds 4-5, and it still has round 7 to pack

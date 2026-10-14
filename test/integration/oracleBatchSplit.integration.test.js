@@ -104,9 +104,9 @@ const path   = require('path');
 
 const { OracleBatchVenue } = require('../helpers/oracleBatchVenue');
 const drive = require('../helpers/oracleBatchDrive');
-const pairs = require('./oracleBatchSplit.integration.test/helpers/pairs');
-const { calibrate } = require('./oracleBatchSplit.integration.test/helpers/calibrate');
-const windows = require('./oracleBatchSplit.integration.test/helpers/windows');
+const pairs = require('./oracleBatchSplit.integration.test/helpers/pairs.test');
+const { calibrate } = require('./oracleBatchSplit.integration.test/helpers/calibrate.test');
+const windows = require('./oracleBatchSplit.integration.test/helpers/windows.test');
 const { WINDOW_ROUNDS, VALIDATORS, GRACE_MS, NAME_POOL } = pairs;
 
 // Brings the venue up, or returns false (after cleanup) when it is unavailable.

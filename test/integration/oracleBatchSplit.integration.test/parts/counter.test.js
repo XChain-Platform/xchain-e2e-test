@@ -16,7 +16,7 @@
 
 const assert = require('assert');
 const drive = require('../../../helpers/oracleBatchDrive');
-const { sumStat } = require('../helpers/wire');
+const { sumStat } = require('../helpers/wire.test');
 
 // Registers part of the assertions inside the caller's describe.
 module.exports = function registerCounter(ctx) {

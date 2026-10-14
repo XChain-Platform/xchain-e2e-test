@@ -16,7 +16,7 @@
 
 const assert = require('assert');
 const drive = require('../../../helpers/oracleBatchDrive');
-const { WINDOW_ROUNDS, VALIDATORS, MIN_SIGNATURES } = require('../helpers/pairs');
+const { WINDOW_ROUNDS, VALIDATORS, MIN_SIGNATURES } = require('../helpers/pairs.test');
 
 // Registers part of the assertions inside the caller's describe.
 module.exports = function registerConsensus(ctx) {

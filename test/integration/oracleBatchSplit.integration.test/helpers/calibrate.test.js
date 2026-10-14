@@ -14,7 +14,7 @@
  *
  ********************************************************************/
 
-const { VALIDATORS, bufferedPairSet, names } = require('./pairs');
+const { VALIDATORS, bufferedPairSet, names } = require('./pairs.test');
 
 // Measures N rounds of M pairs against the venue publisher's OWN packer.
 function makeMeasure(venue, pub) {

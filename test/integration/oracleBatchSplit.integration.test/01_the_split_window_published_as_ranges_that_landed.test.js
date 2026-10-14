@@ -17,10 +17,10 @@
 // Registers the assertions of this part inside the caller's describe, reading
 // what its before() put on ctx.
 const parts = [
-    require('./parts/premise'),
-    require('./parts/consensus'),
-    require('./parts/split'),
-    require('./parts/landed'),
+    require('./parts/premise.test'),
+    require('./parts/consensus.test'),
+    require('./parts/split.test'),
+    require('./parts/landed.test'),
 ];
 
 module.exports = function register(ctx) {
