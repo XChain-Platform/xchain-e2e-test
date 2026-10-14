@@ -9,7 +9,7 @@
 
 'use strict';
 
-const anchorVersions = require('../../helpers/anchorVersionHelper');
+const anchorVersions = require('../../../helpers/anchorVersionHelper');
 const { S, N, sleep } = require('./state');
 const { indexerQuery } = require('./db');
 

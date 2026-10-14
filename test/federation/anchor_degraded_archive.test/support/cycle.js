@@ -12,7 +12,7 @@
 const assert = require('assert');
 const crypto = require('crypto');
 
-const anchorVersions = require('../../helpers/anchorVersionHelper');
+const anchorVersions = require('../../../helpers/anchorVersionHelper');
 const { S, ROUND_TIMEOUT_MS } = require('./state');
 const { signedCheckpoint, nextCheckpointSeq, insertCheckpointEverywhere, insertMatchEverywhere,
         archivePipeline, describePipeline } = require('./db');

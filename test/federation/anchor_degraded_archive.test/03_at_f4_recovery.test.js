@@ -12,10 +12,10 @@
 const assert = require('assert');
 
 const { silenceArchiveAttestor } = require('../../helpers/byzantineFaults');
-const { S } = require('./state');
-const { waitForIndexedAnchor, waitForRewardRecord, rewardRecordsAnywhere } = require('./waits');
-const { bootFederation } = require('./federation');
-const { runCycle } = require('./cycle');
+const { S } = require('./support/state');
+const { waitForIndexedAnchor, waitForRewardRecord, rewardRecordsAnywhere } = require('./support/waits');
+const { bootFederation } = require('./support/federation');
+const { runCycle } = require('./support/cycle');
 
 // The baseline cycle, really degraded, in a federation of its own.
 async function runBaseline(){

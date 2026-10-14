@@ -111,10 +111,10 @@
 
 'use strict';
 
-const { installHooks } = require('./anchor_degraded_archive.test/hooks');
-const atF1F2 = require('./anchor_degraded_archive.test/at_f1_f2_attested');
-const atF3   = require('./anchor_degraded_archive.test/at_f3_degraded');
-const atF4   = require('./anchor_degraded_archive.test/at_f4_recovery');
+const { installHooks } = require('./anchor_degraded_archive.test/support/hooks');
+const atF1F2 = require('./anchor_degraded_archive.test/01_at_f1_f2_attested.test');
+const atF3   = require('./anchor_degraded_archive.test/02_at_f3_degraded.test');
+const atF4   = require('./anchor_degraded_archive.test/03_at_f4_recovery.test');
 
 describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two validators (DOGE regtest)', function () {
     this.timeout(30 * 60 * 1000);

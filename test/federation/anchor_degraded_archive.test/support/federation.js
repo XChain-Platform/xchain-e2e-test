@@ -11,8 +11,8 @@
 
 const assert = require('assert');
 
-const { MultiValidatorHub, ValidatorIdentity } = require('../../helpers/multiValidatorHubHelper');
-const { seedWeightSnapshot } = require('../../helpers/seededWeightSnapshot');
+const { MultiValidatorHub, ValidatorIdentity } = require('../../../helpers/multiValidatorHubHelper');
+const { seedWeightSnapshot } = require('../../../helpers/seededWeightSnapshot');
 const { S, N, SNAPSHOT_BLOCK_BASE, ROUND_TIMEOUT_MS } = require('./state');
 const { indexerQuery, allHubs } = require('./db');
 const { waitForPeering } = require('./waits');

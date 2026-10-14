@@ -14,8 +14,8 @@ const path   = require('path');
 const fs     = require('fs');
 const { encode: wifEncode } = require('wif');
 
-const CryptoNetworks = require('../../../src/crypto_networks');
-const { loadHubModule, resolveHubFile } = require('../../helpers/multiValidatorHubHelper');
+const CryptoNetworks = require('../../../../src/crypto_networks');
+const { loadHubModule, resolveHubFile } = require('../../../helpers/multiValidatorHubHelper');
 const { S } = require('./state');
 
 // The staged production signer, exactly as anchorAcceptance stages it: the

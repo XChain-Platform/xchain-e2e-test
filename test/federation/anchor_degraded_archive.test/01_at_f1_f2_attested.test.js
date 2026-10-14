@@ -11,10 +11,10 @@
 
 const assert = require('assert');
 
-const { S } = require('./state');
-const { waitForIndexedAnchor, waitForRewardRecord } = require('./waits');
-const { bootFederation } = require('./federation');
-const { runCycle } = require('./cycle');
+const { S } = require('./support/state');
+const { waitForIndexedAnchor, waitForRewardRecord } = require('./support/waits');
+const { bootFederation } = require('./support/federation');
+const { runCycle } = require('./support/cycle');
 
 // AT-F2: the signing set the round resolves, and the broadcast the co-signer saw.
 // Returns the distinct sources for the closing log line.

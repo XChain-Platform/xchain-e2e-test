@@ -11,9 +11,9 @@
 
 const fs = require('fs');
 
-const cryptoHelper = require('../../helpers/core/cryptoHelper');
-const { loadHubModule } = require('../../helpers/multiValidatorHubHelper');
-const { startDisposableHubDb } = require('../../helpers/disposableHubDb');
+const cryptoHelper = require('../../../helpers/core/cryptoHelper');
+const { loadHubModule } = require('../../../helpers/multiValidatorHubHelper');
+const { startDisposableHubDb } = require('../../../helpers/disposableHubDb');
 const { S, HUB_DB_PORT, HUB_DB_NAME } = require('./state');
 const { stageProductionSigner } = require('./signer');
 const { stopFederation } = require('./federation');
