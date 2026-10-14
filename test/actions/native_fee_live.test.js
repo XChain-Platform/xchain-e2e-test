@@ -86,83 +86,91 @@ function issueMessage(tick){
     return "ISSUE|0|" + tick + "|1000|1000|0|native fee live test|1000" + "||||||||||||||||||"
 }
 
+// This suite seeds the pair and computes its expected fees FROM the fixture prices,
+// so on a venue whose hub publishes the pair the seed would shadow every derived
+// round. Not runnable there; the derivation suite owns native-fee proof on
+// publishing venues.
+async function resolveFeeLane(suite) {
+    if (NO_PRICE_SEED) suite.skip()
+    // Throws on LTC/DOGE when unresolvable (loud failure beats a silent
+    // permanent skip on the very chains this suite targets).
+    nativeFeeHelper = require('../helpers/nativeFeeHelper')
+    const mode = await nativeFeeHelper.discoverFeeMode()
+    if (!mode.enabled) suite.skip()
+    assert(mode.destination, 'native fees enabled but no FEE_DESTINATION resolvable')
+    FEE_DEST = mode.destination
+}
+
+async function seedFeePrices(xchainRound, coinRound) {
+    const tip = Number((await q("SELECT MAX(block_index) AS h FROM blocks"))[0].h || 0)
+    await seedPrice('XCHAIN/USD', BOOTSTRAP_XCHAIN_USD, tip, xchainRound)
+    await seedPrice(COIN_CODE + '/USD', '100000.00000000', tip, coinRound)
+}
+
+function assertNativeFeeRow(fee) {
+    assert(fee, "a fee row should exist")
+    assert.strictEqual(Number(fee.payment_mode), 1, "fee recorded as native-coin (payment_mode=1)")
+    assert.strictEqual(fee.native_coin, COIN_CODE, "native_coin = chain coin")
+    assert(fee.native_coin_amount, "native_coin_amount recorded")
+    assert(fee.oracle_round != null, "oracle_round recorded")
+}
+
+async function acceptsNativeFeeIssue() {
+    // Seed XCHAIN $1.00 and a high coin price so the native fee is a tiny sat amount.
+    // reference_block is the current indexer tip; the ISSUE lands in a later block.
+    await seedFeePrices(999200001, 999200002)
+
+    // Fresh address: ZERO XCHAIN, so the ISSUE can ONLY be valid via native-coin fee detection.
+    const addr = await cryptoHelper.getNewFundedAddress("NATIVEFEE.LIVE", COIN, NETWORK, null, "legacy", 0, 1)
+    const address = addr["address"]
+    const tick = "NFL" + address.substring(address.length - 8)
+
+    // Generous fee output (overpayment is always accepted; only underpayment is rejected).
+    const feeSats = 50000
+    const txHash = await transactionHelper.createAndSendTransaction(
+        addr, issueMessage(tick), null, [{ address: FEE_DEST, value: feeSats }]
+    )
+    console.log("native-fee ISSUE txHash:", txHash)
+
+    const issueRow = await indexerDatabase.waitForIssue({
+        source: address, tick: tick, txHash: txHash, status: "valid"
+    }, 90000)
+    assert(issueRow, "ISSUE paid with a native-coin fee should be VALID")
+
+    const fee = await feeRow(txHash)
+    assertNativeFeeRow(fee)
+    assert.strictEqual(await actionCount(txHash), 1, "fee output must NOT spawn a second action")
+    console.log("native-fee row:", JSON.stringify(fee, (k, v) => typeof v === 'bigint' ? Number(v) : v))
+}
+
+async function rejectsUnpaidIssue() {
+    await seedFeePrices(999200011, 999200012)
+
+    // seedGas=false: this case asserts the no-fee-output, no-XCHAIN-balance path.
+    const addr = await cryptoHelper.getNewFundedAddress("NATIVEFEE.NEG", COIN, NETWORK, null, "legacy", 0, 1, false)
+    const address = addr["address"]
+    const tick = "NFN" + address.substring(address.length - 8)
+
+    // No fee output, no XCHAIN balance -> the issuance fee cannot be paid -> invalid.
+    // Opt out of the harness's native-fee injection (last arg) so this path
+    // truly sends a tx with NO fee output. The rejection differs by chain:
+    // BTC falls back to XCHAIN-balance deduction ("insufficient funds (FEE)"),
+    // LTC/DOGE require a native fee output ("native coin output required").
+    const txHash = await transactionHelper.createAndSendTransaction(addr, issueMessage(tick), null, [], null, null, true)
+    const expectedStatus = (COIN_CODE === 'LTC' || COIN_CODE === 'DOGE')
+        ? "invalid: insufficient fee (native coin output required)"
+        : "invalid: insufficient funds (FEE)"
+    const invalid = await indexerDatabase.waitForIssue({
+        source: address, tick: tick, txHash: txHash, status: expectedStatus
+    }, 90000)
+    assert(invalid, "ISSUE with no fee output and no XCHAIN should be INVALID")
+    console.log("negative case: ISSUE correctly rejected (fee unpaid)")
+}
+
 describe('Native-coin fee payment (live stack)', function () {
-    before(async function () {
-        // This suite seeds the pair and computes its expected fees
-        // FROM the fixture prices, so on a venue whose hub publishes the pair the
-        // seed would shadow every derived round. Not runnable there; the
-        // derivation suite owns native-fee proof on publishing venues.
-        if (NO_PRICE_SEED) this.skip()
-        // Throws on LTC/DOGE when unresolvable (loud failure beats a silent
-        // permanent skip on the very chains this suite targets).
-        nativeFeeHelper = require('../helpers/nativeFeeHelper')
-        const mode = await nativeFeeHelper.discoverFeeMode()
-        if (!mode.enabled) this.skip()
-        assert(mode.destination, 'native fees enabled but no FEE_DESTINATION resolvable')
-        FEE_DEST = mode.destination
-    })
+    before(async function () { await resolveFeeLane(this) })
 
-    it('accepts an ISSUE whose fee is paid in native coin, with NO XCHAIN balance', async function () {
-        // Seed XCHAIN $1.00 and a high coin price so the native fee is a tiny sat amount.
-        // reference_block is the current indexer tip; the ISSUE lands in a later block.
-        const tip = Number((await (async () => {
-            const c = await indexerDatabase.getConnection()
-            try { const r = await c.query("SELECT MAX(block_index) AS h FROM blocks"); return (r[0].h || 0) } finally { await c.release() }
-        })()))
-        await seedPrice('XCHAIN/USD', BOOTSTRAP_XCHAIN_USD, tip, 999200001)
-        await seedPrice(COIN_CODE + '/USD', '100000.00000000', tip, 999200002)
+    it('accepts an ISSUE whose fee is paid in native coin, with NO XCHAIN balance', acceptsNativeFeeIssue)
 
-        // Fresh address: ZERO XCHAIN, so the ISSUE can ONLY be valid via native-coin fee detection.
-        const addr = await cryptoHelper.getNewFundedAddress("NATIVEFEE.LIVE", COIN, NETWORK, null, "legacy", 0, 1)
-        const address = addr["address"]
-        const tick = "NFL" + address.substring(address.length - 8)
-
-        // Generous fee output (overpayment is always accepted; only underpayment is rejected).
-        const feeSats = 50000
-        const txHash = await transactionHelper.createAndSendTransaction(
-            addr, issueMessage(tick), null, [{ address: FEE_DEST, value: feeSats }]
-        )
-        console.log("native-fee ISSUE txHash:", txHash)
-
-        const issueRow = await indexerDatabase.waitForIssue({
-            source: address, tick: tick, txHash: txHash, status: "valid"
-        }, 90000)
-        assert(issueRow, "ISSUE paid with a native-coin fee should be VALID")
-
-        const fee = await feeRow(txHash)
-        assert(fee, "a fee row should exist")
-        assert.strictEqual(Number(fee.payment_mode), 1, "fee recorded as native-coin (payment_mode=1)")
-        assert.strictEqual(fee.native_coin, COIN_CODE, "native_coin = chain coin")
-        assert(fee.native_coin_amount, "native_coin_amount recorded")
-        assert(fee.oracle_round != null, "oracle_round recorded")
-
-        assert.strictEqual(await actionCount(txHash), 1, "fee output must NOT spawn a second action")
-        console.log("native-fee row:", JSON.stringify(fee, (k, v) => typeof v === 'bigint' ? Number(v) : v))
-    })
-
-    it('rejects an ISSUE with NO fee output and NO XCHAIN balance (fee unpaid)', async function () {
-        const tip = Number((await q("SELECT MAX(block_index) AS h FROM blocks"))[0].h || 0)
-        await seedPrice('XCHAIN/USD', BOOTSTRAP_XCHAIN_USD, tip, 999200011)
-        await seedPrice(COIN_CODE + '/USD', '100000.00000000', tip, 999200012)
-
-        // seedGas=false: this case asserts the no-fee-output, no-XCHAIN-balance path.
-        const addr = await cryptoHelper.getNewFundedAddress("NATIVEFEE.NEG", COIN, NETWORK, null, "legacy", 0, 1, false)
-        const address = addr["address"]
-        const tick = "NFN" + address.substring(address.length - 8)
-
-        // No fee output, no XCHAIN balance -> the issuance fee cannot be paid -> invalid.
-        // Opt out of the harness's native-fee injection (last arg) so this path
-        // truly sends a tx with NO fee output. The rejection differs by chain:
-        // BTC falls back to XCHAIN-balance deduction ("insufficient funds (FEE)"),
-        // LTC/DOGE require a native fee output ("native coin output required").
-        const txHash = await transactionHelper.createAndSendTransaction(addr, issueMessage(tick), null, [], null, null, true)
-        const expectedStatus = (COIN_CODE === 'LTC' || COIN_CODE === 'DOGE')
-            ? "invalid: insufficient fee (native coin output required)"
-            : "invalid: insufficient funds (FEE)"
-        const invalid = await indexerDatabase.waitForIssue({
-            source: address, tick: tick, txHash: txHash, status: expectedStatus
-        }, 90000)
-        assert(invalid, "ISSUE with no fee output and no XCHAIN should be INVALID")
-        console.log("negative case: ISSUE correctly rejected (fee unpaid)")
-    })
+    it('rejects an ISSUE with NO fee output and NO XCHAIN balance (fee unpaid)', rejectsUnpaidIssue)
 })

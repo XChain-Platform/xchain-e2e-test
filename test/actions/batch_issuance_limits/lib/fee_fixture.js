@@ -10,7 +10,7 @@
 //
 
 const assert = require('assert')
-const { BOOTSTRAP_XCHAIN_USD } = require('../../helpers/xchainPriceConstants')
+const { BOOTSTRAP_XCHAIN_USD } = require('../../../helpers/xchainPriceConstants')
 const { state, q, chainTipTime } = require('./shared')
 
 // Resolved per call, never held at load time. chainRail drops nativeFeeHelper and
@@ -20,8 +20,8 @@ const { state, q, chainTipTime } = require('./shared')
 // OLD instance's throttle while the live one, which every batch passes through, can
 // still be due: it re-seeds mid-build and wipes the re-priced pair, so one ORDER's fee
 // is valued at the seed pair and covers all of them (release matrix A5 on LTC).
-function nativeFeeHelper(){ return require('../../helpers/nativeFeeHelper') }
-function priceSnapshotHelper(){ return require('../../helpers/priceSnapshotHelper') }
+function nativeFeeHelper(){ return require('../../../helpers/nativeFeeHelper') }
+function priceSnapshotHelper(){ return require('../../../helpers/priceSnapshotHelper') }
 
 // Fallback native-fee fixture for A4/A5, used ONLY when the suite's standard pair
 // would size one command's worth of fee below the chain's dust threshold (which is

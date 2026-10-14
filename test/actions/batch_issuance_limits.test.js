@@ -42,15 +42,15 @@
 // parameter (the seed guard pins it), and the shared fixture is restored afterwards.
 
 const nativeFeeHelper = require('../helpers/nativeFeeHelper')
-const { state } = require('./batch_issuance_limits/shared')
-const registerIssuanceCases = require('./batch_issuance_limits/issuance')
-const registerCommandCapCases = require('./batch_issuance_limits/command_caps')
-const registerGasChildrenCases = require('./batch_issuance_limits/gas_children')
-const registerCaretTickCases = require('./batch_issuance_limits/caret_ticks')
-const registerNativeFeeCases = require('./batch_issuance_limits/native_fees')
-const registerCoinpayCases = require('./batch_issuance_limits/coinpay')
-const registerDispenserSinglePaymentCases = require('./batch_issuance_limits/dispenser_single_payment')
-const registerDispenserBatchCreateCases = require('./batch_issuance_limits/dispenser_batch_creates')
+const { state } = require('./batch_issuance_limits/lib/shared')
+const registerIssuanceCases = require('./batch_issuance_limits/issuance.test')
+const registerCommandCapCases = require('./batch_issuance_limits/command_caps.test')
+const registerGasChildrenCases = require('./batch_issuance_limits/gas_children.test')
+const registerCaretTickCases = require('./batch_issuance_limits/caret_ticks.test')
+const registerNativeFeeCases = require('./batch_issuance_limits/native_fees.test')
+const registerCoinpayCases = require('./batch_issuance_limits/coinpay.test')
+const registerDispenserSinglePaymentCases = require('./batch_issuance_limits/dispenser_single_payment.test')
+const registerDispenserBatchCreateCases = require('./batch_issuance_limits/dispenser_batch_creates.test')
 
 async function discoverFeeMode() {
     const mode = await nativeFeeHelper.discoverFeeMode()
