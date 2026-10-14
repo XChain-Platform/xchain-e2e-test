@@ -53,6 +53,7 @@ const {
     waitForAppliedSeq,
     copyPolicy,
     appliedLedger,
+    logOffset,
     policyLines,
     policyTransferMatches,
     needsFederation,
@@ -101,13 +102,14 @@ async function injectAndObserve(row, fenced) {
     const venue = state.venue;
     const startTip = Number((await venue.venueTips()).DOGE);
     const hashBefore = await venue.blockHashes('DOGE', startTip);
+    const offset = logOffset();
     await injectPolicyRowEverywhere(row, { fenced: !!fenced });
     await venue.waitForVenueTip('DOGE', startTip + 3, 'past the forged snapshot ' + row.snapshot_id.slice(0, 16),
         { timeoutMs: 15 * 60 * 1000, everyMs: 5000 });
     const settled = await venue.queryIndexerDb('DOGE',
         "SELECT transfer_id FROM bridge_settlements WHERE kind = 'policy' AND transfer_id = ?", [row.snapshot_id]);
     const mirrored = await venue.queryMirrorDb('DOGE', 'SELECT snapshot_id FROM policy_snapshots WHERE snapshot_id = ?', [row.snapshot_id]);
-    return { settled: settled.length, mirrored: mirrored.length, lines: policyLines(row.snapshot_id),
+    return { settled: settled.length, mirrored: mirrored.length, lines: policyLines(row.snapshot_id, offset),
         hashBefore: String(hashBefore[0].ledger_hash), hashAfter: String((await venue.blockHashes('DOGE', startTip))[0].ledger_hash) };
 }
 
@@ -160,10 +162,11 @@ bridgeRailSuite(GROUP, function () {
             originBlock: Number(G.seq1.origin_block), effectiveTime: Number(G.seq1.effective_time), network: String(G.seq1.network),
             view: Number(G.seq1.finalizing_view || 0), btcChainId: G.seq1.btc_chain_id, block: [G.member2.address],
         }), venueSigners());
+        const offset = logOffset();
         await injectPolicyRowEverywhere(row);
         const applied = await waitForAppliedSeq(G.tick, 3, { snapshotId: row.snapshot_id });
         const copyAt3 = await copyPolicy(G.tick);
-        const lines = policyLines(row.snapshot_id);
+        const lines = policyLines(row.snapshot_id, offset);
         const seq4 = await waitForFinalizedSeq(G.tick, 4);
         await waitForAppliedSeq(G.tick, 4, { snapshotId: seq4.snapshot_id });
         const copyAt4 = await copyPolicy(G.tick);
