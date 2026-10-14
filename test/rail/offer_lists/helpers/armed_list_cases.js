@@ -296,6 +296,22 @@ async function runArmedCase(testCase, mode, io){
     return outcome;
 }
 
+// Read adapter for runArmedCase's io.query: acquire, query, release, and hand
+// back a plain array so a driver result's meta never reaches observedOutcome.
+function connectionQuery(getConnection) {
+    if (typeof getConnection !== 'function') {
+        throw new TypeError('connectionQuery needs a getConnection function');
+    }
+    return async function query(sql, params) {
+        const connection = await getConnection();
+        try {
+            return Array.from(await connection.query(sql, params));
+        } finally {
+            await connection.release();
+        }
+    };
+}
+
 module.exports = {
     ADDRESS_LIST_TYPE,
     ARMING_VARIABLES,
@@ -303,6 +319,7 @@ module.exports = {
     armedListAction,
     armedOrderActions,
     checkArmedOutcome,
+    connectionQuery,
     expectMode,
     indexedActionIndex,
     observedOutcome,

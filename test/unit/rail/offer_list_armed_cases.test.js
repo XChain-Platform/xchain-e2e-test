@@ -13,6 +13,7 @@ const {
     armedListAction,
     armedOrderActions,
     checkArmedOutcome,
+    connectionQuery,
     expectMode,
     indexedActionIndex,
     observedOutcome,
@@ -328,6 +329,43 @@ describe('offer list armed rail cases', function(){
             const t = fakeIo([]);
             t.io.submit = async () => '7';
             await assert.rejects(runArmedCase(OFFER_LIST_ARMED_CASES[0], 'armed', t.io), /LIST/);
+        });
+    });
+
+    describe('connectionQuery', function(){
+        function fakeConnection(log, fail) {
+            return {
+                query: async (sql, params) => {
+                    log.push(['query', sql, params]);
+                    if (fail) throw fail;
+                    const rows = [{ status: 'finalized' }];
+                    rows.meta = [1];
+                    return rows;
+                },
+                release: async () => { log.push(['release']); }
+            };
+        }
+
+        it('reads rows through an injected connection and always releases it', async function(){
+            const log = [];
+            const read = connectionQuery(async () => { log.push(['acquire']); return fakeConnection(log); });
+            const rows = await read('SELECT 1', [1, 2]);
+            assert.deepStrictEqual(rows, [{ status: 'finalized' }]);
+            assert.strictEqual(rows.meta, undefined);
+            assert.deepStrictEqual(log, [['acquire'], ['query', 'SELECT 1', [1, 2]], ['release']]);
+        });
+
+        it('releases after a throwing query and propagates its error', async function(){
+            const log = [];
+            const boom = new Error('boom');
+            const read = connectionQuery(async () => fakeConnection(log, boom));
+            await assert.rejects(read('SELECT 1', []), err => err === boom);
+            assert.deepStrictEqual(log[log.length - 1], ['release']);
+        });
+
+        it('throws at construction when getConnection is not a function', function(){
+            assert.throws(() => connectionQuery(null), /getConnection/);
+            assert.throws(() => connectionQuery('pool'), /getConnection/);
         });
     });
 
