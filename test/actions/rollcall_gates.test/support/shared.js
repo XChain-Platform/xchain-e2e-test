@@ -92,9 +92,9 @@ function requestBlockFor(buriedBlock){
 
 // True when the venue can run this suite. False means the caller must skip:
 // only the mocha context can, so this reports and the hook acts.
-function venueReady(suite){
-    if (!rc.requireRollcallVenue(suite)) return false
-    if (!requireFederationEnv(suite)) return false
+function venueReady(mocha){
+    if (!rc.requireRollcallVenue(mocha)) return false
+    if (!requireFederationEnv(mocha)) return false
 
     // The gates rail is the VENUE's opt-in, so an unarmed venue skips with the
     // reason rather than failing: every other rollcall suite runs happily on a
@@ -104,7 +104,7 @@ function venueReady(suite){
         console.log('[skip] ZC7 needs the ROLLCALL GATES rail armed as well as the ROLLCALL rail. Set ' +
                     rc.ROLLCALL_GATES_ARMING_ENV + '=armed in this shell AND in both indexer containers\' ' +
                     'environments (the BTC close and the DOGE parser each read it at startup), then re-run.')
-        suite.skip()
+        mocha.skip()
         return false
     }
     return true
