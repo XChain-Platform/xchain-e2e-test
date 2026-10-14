@@ -74,6 +74,17 @@ describe('XBRIDGE transfer: base AT1: the IN leg mints on the destination chain'
         assert.strictEqual(fields[2], 'XCHAIN', 'the lazily created row is not the GAS tick');
         assert.deepStrictEqual(state.credits, [['XCHAIN', '10.00000000', DEST_ADDR]]);
     });
+});
+
+describe('XBRIDGE transfer: base AT1: the IN leg mints on the destination chain (continued)', function(){
+    this.timeout(240_000);
+
+    let ids, validators;
+
+    before(function(){
+        ({ ids, validators } = makeFixture());
+    });
+
 
     it('refuses a FORGED escrow proof and moves nothing (D2)', async function(){
         const row = inLeg(ids);

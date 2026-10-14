@@ -69,6 +69,17 @@ describe('XPOLICY: policy AT5: apply order is by policy_seq, never by time', fun
             ['LIST', '1', '1', '77', '', MEMBER_B]
         ], 'seq 2 did not bring the existing list to its new membership');
     });
+});
+
+describe('XPOLICY: policy AT5: apply order is by policy_seq, never by time (continued)', function(){
+    this.timeout(240_000);
+
+    let ids, validators;
+
+    before(function(){
+        ({ ids, validators } = makeFixture());
+    });
+
 
     it('a snapshot ahead of the block protocol time is carried, not refused', async function(){
         const row = snapshot(ids, { block: [MEMBER_A], effectiveTime: BLOCK_TIME + 600 });

@@ -46,6 +46,20 @@ async function startSource(){
     return source;
 }
 
+// Registers the shared pending source for the enclosing describe and returns a holder
+// whose .source is live while the tests run.
+function usePendingSource(){
+    const held = {};
+
+    before(async function(){
+        held.source = await startSource();
+    });
+
+    after(async function(){ if(held.source) await held.source.stop(); });
+
+    return held;
+}
+
 describe('XBRIDGE transfer: the federation client and the pending read it polls', function(){
     this.timeout(240_000);
 
@@ -61,17 +75,11 @@ describe('XBRIDGE transfer: the federation client and the pending read it polls'
     // the only thing standing between a mock that drifted from api.js and a round that
     // is silently vacuous on every venue that can run it.
 
-    let source;
-
-    before(async function(){
-        source = await startSource();
-    });
-
-    after(async function(){ if(source) await source.stop(); });
+    const held = usePendingSource();
 
     it('answers getpendingbridgetransfers in the shape the engine parses', async function(){
         const eng = HUB.hubEngine();
-        eng.indexers = { BTC: { url: source.urlFor('shared', 'BTC'), key: '' } };
+        eng.indexers = { BTC: { url: held.source.urlFor('shared', 'BTC'), key: '' } };
 
         const res = await eng.indexerCall('BTC', 'getpendingbridgetransfers', { limit: 100 });
 
@@ -97,6 +105,11 @@ describe('XBRIDGE transfer: the federation client and the pending read it polls'
             'a leg served here derives a different transfer_id than the record under test');
     });
 
+});
+
+describe('XBRIDGE transfer: the federation client and the pending read it polls (depth)', function(){
+    this.timeout(240_000);
+
     it('a MIN_DEPTH raises the confirmation wait and can never lower it (token AT5)', function(){
         const eng = HUB.hubEngine();
         // The platform depths the base spec names, as coins.resolveConfirmations gives
@@ -110,10 +123,16 @@ describe('XBRIDGE transfer: the federation client and the pending read it polls'
         assert.strictEqual(eng.effectiveDepth('DOGE', 3), 60, 'the DOGE platform depth was lowered');
         assert.strictEqual(eng.effectiveDepth('BTC', 'nonsense'), 6, 'a junk MIN_DEPTH did not fall back to the platform depth');
     });
+});
+
+describe('XBRIDGE transfer: the federation client and the pending read it polls (policy read)', function(){
+    this.timeout(240_000);
+
+    const held = usePendingSource();
 
     it('serves the origin policy read, and answers an unknown tick with an error the engine abstains on', async function(){
         const eng = HUB.hubEngine();
-        eng.indexers = { BTC: { url: source.urlFor('shared', 'BTC'), key: '' } };
+        eng.indexers = { BTC: { url: held.source.urlFor('shared', 'BTC'), key: '' } };
 
         const known = await eng.indexerCall('BTC', 'gettokenpolicy', { tick: 'FUFU', origin_block: 1150 });
         assert.strictEqual(known.policy_hash, BS.policyHash(null, null, false));
@@ -129,3 +148,4 @@ describe('XBRIDGE transfer: the federation client and the pending read it polls'
             'the tip read does not answer block_index, so policyOriginBlock would abstain forever');
     });
 });
+

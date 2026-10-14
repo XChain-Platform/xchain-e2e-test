@@ -46,6 +46,17 @@ describe('XBRIDGE transfer: the cross-repository seam', function(){
         assert.strictEqual(row.transfer_id, expected,
             'the hub derives a transfer_id the base spec preimage does not produce');
     });
+});
+
+describe('XBRIDGE transfer: the cross-repository seam (continued)', function(){
+    this.timeout(240_000);
+
+    let ids, validators;
+
+    before(function(){
+        ({ ids, validators } = makeFixture());
+    });
+
 
     it('signs the canonical the indexer rebuilds, byte for byte', function(){
         const row = inLeg(ids);

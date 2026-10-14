@@ -166,65 +166,69 @@ function tamperBundle(row){
     return tampered;
 }
 
+async function bootFederation(t, st){
+    st.db = await startDisposableHubDb();
+    if(!st.db){
+        console.log('Skipping the federated XBRIDGE round: no env hub DB and Docker unavailable');
+        t.skip();
+    }
+    st.source = await startSource();
+    st.mvh = await startMesh();
+    st.seed = seedWeights(st.mvh);
+    await seedCheckpoints(st.mvh);
+    repointEngines(st.mvh, st.source);
+    await Promise.all(st.mvh.hubs.map(h => h.crossChainBridge.poll().catch(() => {})));
+    const held = await waitForRowOnEveryHub(st.mvh);
+    if(held.ok) st.transferRow = await readTransferRow(st.mvh);
+}
+
+async function tearDownFederation(st){
+    if(st.seed)   st.seed.restore();
+    if(st.source) await st.source.stop();
+    if(st.mvh)    { await st.mvh.stop(); await st.mvh.dropDatabases(); }
+    if(st.db)     await st.db.stop();
+}
+
 describe('XBRIDGE transfer: the federation produces the record (multi-hub PBFT)', function(){
     this.timeout(240_000);
 
-    let db, mvh, seed, source, transferRow;
+    const st = {};
 
-    before(async function(){
-        db = await startDisposableHubDb();
-        if(!db){
-            console.log('Skipping the federated XBRIDGE round: no env hub DB and Docker unavailable');
-            this.skip();
-        }
-        source = await startSource();
-        mvh = await startMesh();
-        seed = seedWeights(mvh);
-        await seedCheckpoints(mvh);
-        repointEngines(mvh, source);
-        await Promise.all(mvh.hubs.map(h => h.crossChainBridge.poll().catch(() => {})));
-        const held = await waitForRowOnEveryHub(mvh);
-        if(held.ok) transferRow = await readTransferRow(mvh);
-    });
+    before(async function(){ await bootFederation(this, st); });
 
-    after(async function(){
-        if(seed)   seed.restore();
-        if(source) await source.stop();
-        if(mvh)    { await mvh.stop(); await mvh.dropDatabases(); }
-        if(db)     await db.stop();
-    });
+    after(async function(){ await tearDownFederation(st); });
 
     it('finalizes a bridge_transfers row carrying a 2f+1 signature bundle', function(){
-        assert.ok(transferRow, 'the federation finalized no bridge_transfers row');
-        assert.strictEqual(transferRow.status, 'finalized');
-        assert.strictEqual(String(transferRow.tick), 'XCHAIN');
-        assert.strictEqual(String(transferRow.dest_address), DEST_ADDR);
-        assert.strictEqual(String(transferRow.src_chain), 'BTC');
-        assert.strictEqual(Number(transferRow.src_action_index), FED_SRC_IDX);
-        const sigs = JSON.parse(transferRow.validator_signatures || '[]');
+        assert.ok(st.transferRow, 'the federation finalized no bridge_transfers row');
+        assert.strictEqual(st.transferRow.status, 'finalized');
+        assert.strictEqual(String(st.transferRow.tick), 'XCHAIN');
+        assert.strictEqual(String(st.transferRow.dest_address), DEST_ADDR);
+        assert.strictEqual(String(st.transferRow.src_chain), 'BTC');
+        assert.strictEqual(Number(st.transferRow.src_action_index), FED_SRC_IDX);
+        const sigs = JSON.parse(st.transferRow.validator_signatures || '[]');
         assert.ok(sigs.length >= 3, 'expected >= 3 federated signatures, got ' + sigs.length);
     });
 
     it('the federated row passes the indexer settle pass and mints the exact credit', async function(){
-        assert.ok(transferRow, 'no finalized row from before()');
+        assert.ok(st.transferRow, 'no finalized row from before()');
         // The row's own effective_time carries the hub's relay margin, so the applying
         // block's protocol time is taken from it rather than from a constant that would
         // make the row perpetually not-yet-due.
-        const { ctx, state } = settleContextFor(transferRow);
+        const { ctx, state } = settleContextFor(st.transferRow);
 
-        const res = await BS.applyBridgeTransfer(transferRow, ctx);
+        const res = await BS.applyBridgeTransfer(st.transferRow, ctx);
 
         assert.strictEqual(res.applied, true,
             'the indexer refused a genuinely federated record (canonical or quorum drift?): ' + res.reason);
         assert.deepStrictEqual(state.credits, [['XCHAIN', FED_AMOUNT, DEST_ADDR]]);
-        assert.strictEqual(state.settlements[0].transfer_id, transferRow.transfer_id);
+        assert.strictEqual(state.settlements[0].transfer_id, st.transferRow.transfer_id);
     });
 
     it('a tampered federated bundle applies nothing', async function(){
-        assert.ok(transferRow, 'no finalized row from before()');
-        const { ctx, state } = settleContextFor(transferRow);
+        assert.ok(st.transferRow, 'no finalized row from before()');
+        const { ctx, state } = settleContextFor(st.transferRow);
 
-        const res = await BS.applyBridgeTransfer(tamperBundle(transferRow), ctx);
+        const res = await BS.applyBridgeTransfer(tamperBundle(st.transferRow), ctx);
 
         assert.strictEqual(res.applied, false, 'a tampered federated bundle was applied');
         assert.deepStrictEqual(state.credits, []);

@@ -71,6 +71,17 @@ describe('XPOLICY: policy AT1: the first snapshot materializes onto the copy', f
         assert.strictEqual(state.settlements[0].kind, 'policy',
             'a policy snapshot was recorded under the transfer kind, which would collide the unique key');
     });
+});
+
+describe('XPOLICY: policy AT1: the first snapshot materializes onto the copy (continued)', function(){
+    this.timeout(240_000);
+
+    let ids, validators;
+
+    before(function(){
+        ({ ids, validators } = makeFixture());
+    });
+
 
     it('an ABSENT list injects nothing for it and still records the snapshot', async function(){
         // seq 1 of a tick with no lists that is awake: every leg is a no-op, which is

@@ -67,6 +67,17 @@ describe('XBRIDGE transfer: base AT4: falsification of a mirrored record', funct
         assert.strictEqual(res.applied, false, 'a record minted on a dead chain instance applied');
         assert.deepStrictEqual(state.credits, []);
     });
+});
+
+describe('XBRIDGE transfer: base AT4: falsification of a mirrored record (continued)', function(){
+    this.timeout(240_000);
+
+    let ids, validators;
+
+    before(function(){
+        ({ ids, validators } = makeFixture());
+    });
+
 
     it('does not apply a record twice (the local settlement record, not the mirror)', async function(){
         const row = inLeg(ids);

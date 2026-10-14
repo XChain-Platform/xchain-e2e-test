@@ -65,6 +65,17 @@ describe('XBRIDGE transfer: token AT1, AT2 and AT5: a general token leg', functi
         assert.deepStrictEqual(state.credits, [['BTC.FUFU', TOKEN_AMOUNT, DEST_ADDR]]);
         assert.strictEqual(state.actions[0].FORMAT, 5, 'a token settle leg is not XBRIDGE v5');
     });
+});
+
+describe('XBRIDGE transfer: token AT1, AT2 and AT5: a general token leg (continued)', function(){
+    this.timeout(240_000);
+
+    let ids, validators;
+
+    before(function(){
+        ({ ids, validators } = makeFixture());
+    });
+
 
     it('AT5: signed decimals that disagree with an existing child row holding supply apply nothing', async function(){
         const row = tokenInLeg(ids);        // signed decimals 4
