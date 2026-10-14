@@ -22,28 +22,86 @@ const ECPair = ECPairFactory(ecc)
 const transactionHelper = require('../../helpers/core/transactionHelper')
 const issueHelper = require('../../helpers/issueHelper')
 
+function makeAddressInfo() {
+    const keyPair = ECPair.makeRandom({ network: bitcoin.networks.regtest })
+    const { address } = bitcoin.payments.p2pkh({
+        pubkey: keyPair.publicKey,
+        network: bitcoin.networks.regtest
+    })
+    return { address, privateKey: keyPair.privateKey, publicKey: keyPair.publicKey }
+}
+
+function snapshotGlobals() {
+    return {
+        NETWORK_OBJECT: global.NETWORK_OBJECT,
+        encoderConnector: global.encoderConnector,
+        nodeConnector: global.nodeConnector,
+        utxoTrackerConnector: global.utxoTrackerConnector,
+        indexerDatabase: global.indexerDatabase,
+    }
+}
+
+// Build a valid PSBT for the encoder to return
+function buildEncoderPsbt(addressInfo) {
+    const psbt = new bitcoin.Psbt({ network: bitcoin.networks.regtest })
+    const fundingTx = new bitcoin.Transaction()
+    fundingTx.version = 2
+    fundingTx.addInput(Buffer.alloc(32, 0), 0)
+    fundingTx.addOutput(
+        bitcoin.payments.p2pkh({
+            pubkey: addressInfo.publicKey,
+            network: bitcoin.networks.regtest
+        }).output,
+        100000
+    )
+    psbt.addInput({ hash: fundingTx.getHash(), index: 0, nonWitnessUtxo: fundingTx.toBuffer() })
+    const data = Buffer.from('TEST', 'utf8')
+    psbt.addOutput({ script: bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, data]), value: 0 })
+    psbt.addOutput({ address: addressInfo.address, value: 90000 })
+    return psbt
+}
+
+function describeBroadcastRejection(getAddressInfo) {
+    describe('Scenario 3.7.3: Broadcast rejection with node error', function () {
+
+        it('node broadcast error propagates with descriptive message', async function () {
+            const addressInfo = getAddressInfo()
+            const psbt = buildEncoderPsbt(addressInfo)
+
+            global.encoderConnector = {
+                createTx: async () => ({ encoding: 'opreturn', psbt: psbt.toHex() })
+            }
+            global.nodeConnector = {
+                broadcastTx: async () => {
+                    throw new Error('Error sending transaction to the node: {"code":-26,"message":"dust"}')
+                },
+                waitForTx: async () => true,
+            }
+            global.utxoTrackerConnector = { getUtxosFromAddress: async () => ({ utxos: [] }) }
+
+            await assert.rejects(
+                () => transactionHelper.createAndSendTransaction(addressInfo, 'ISSUE|0|TEST'),
+                (err) => {
+                    assert(err.message.includes('dust') || err.message.includes('Error sending'),
+                        'error should include node rejection reason')
+                    return true
+                }
+            )
+        })
+    })
+}
+
 describe('Error Propagation: Connector Errors', function () {
 
     let savedGlobals
     let addressInfo
 
     before(function () {
-        const keyPair = ECPair.makeRandom({ network: bitcoin.networks.regtest })
-        const { address } = bitcoin.payments.p2pkh({
-            pubkey: keyPair.publicKey,
-            network: bitcoin.networks.regtest
-        })
-        addressInfo = { address, privateKey: keyPair.privateKey, publicKey: keyPair.publicKey }
+        addressInfo = makeAddressInfo()
     })
 
     beforeEach(function () {
-        savedGlobals = {
-            NETWORK_OBJECT: global.NETWORK_OBJECT,
-            encoderConnector: global.encoderConnector,
-            nodeConnector: global.nodeConnector,
-            utxoTrackerConnector: global.utxoTrackerConnector,
-            indexerDatabase: global.indexerDatabase,
-        }
+        savedGlobals = snapshotGlobals()
         global.NETWORK_OBJECT = { ...bitcoin.networks.regtest, dustThreshold: 546 }
     })
 
@@ -72,47 +130,8 @@ describe('Error Propagation: Connector Errors', function () {
         })
     })
 
-    describe('Scenario 3.7.3: Broadcast rejection with node error', function () {
 
-        it('node broadcast error propagates with descriptive message', async function () {
-            // Build a valid PSBT for the encoder to return
-            const psbt = new bitcoin.Psbt({ network: bitcoin.networks.regtest })
-            const fundingTx = new bitcoin.Transaction()
-            fundingTx.version = 2
-            fundingTx.addInput(Buffer.alloc(32, 0), 0)
-            fundingTx.addOutput(
-                bitcoin.payments.p2pkh({
-                    pubkey: addressInfo.publicKey,
-                    network: bitcoin.networks.regtest
-                }).output,
-                100000
-            )
-            psbt.addInput({ hash: fundingTx.getHash(), index: 0, nonWitnessUtxo: fundingTx.toBuffer() })
-            const data = Buffer.from('TEST', 'utf8')
-            psbt.addOutput({ script: bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, data]), value: 0 })
-            psbt.addOutput({ address: addressInfo.address, value: 90000 })
-
-            global.encoderConnector = {
-                createTx: async () => ({ encoding: 'opreturn', psbt: psbt.toHex() })
-            }
-            global.nodeConnector = {
-                broadcastTx: async () => {
-                    throw new Error('Error sending transaction to the node: {"code":-26,"message":"dust"}')
-                },
-                waitForTx: async () => true,
-            }
-            global.utxoTrackerConnector = { getUtxosFromAddress: async () => ({ utxos: [] }) }
-
-            await assert.rejects(
-                () => transactionHelper.createAndSendTransaction(addressInfo, 'ISSUE|0|TEST'),
-                (err) => {
-                    assert(err.message.includes('dust') || err.message.includes('Error sending'),
-                        'error should include node rejection reason')
-                    return true
-                }
-            )
-        })
-    })
+    describeBroadcastRejection(() => addressInfo)
 
     describe('Scenario 3.7.1: Connector timeout during helper execution', function () {
 
