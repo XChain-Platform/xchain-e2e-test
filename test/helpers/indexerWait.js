@@ -87,4 +87,52 @@ async function waitForTxIndexed(txHash, opts) {
     }
 }
 
-module.exports = { actionRowsForTx, waitForTxIndexed };
+// Highest block the indexer has written, or 0 for an empty blocks table.
+async function indexerTip(db) {
+    const database = db || global.indexerDatabase;
+    if (!database) throw new Error('indexerTip: no indexerDatabase (pass db)');
+    const connection = await database.getConnection();
+    try {
+        const r = await connection.query('SELECT MAX(block_index) AS h FROM blocks');
+        return Number((r[0] && r[0].h) || 0);
+    } finally {
+        await connection.release();
+    }
+}
+
+/**
+ * Block until the indexer tip reaches a target height: opts.target if given,
+ * else the node tip read once from opts.nodeTip (an async getter, injectable).
+ * Throws on the deadline, naming the tip it reached.
+ *
+ * @param opts  {target, nodeTip, timeoutMs, intervalMs, db}
+ * @returns the indexer tip that satisfied the target
+ */
+async function waitForIndexerAtTip(opts) {
+    opts = opts || {};
+    const timeoutMs  = opts.timeoutMs  === undefined ? DEFAULT_TIMEOUT_MS  : opts.timeoutMs;
+    const intervalMs = opts.intervalMs === undefined ? DEFAULT_INTERVAL_MS : opts.intervalMs;
+    const deadline = Date.now() + timeoutMs;
+    let target = opts.target;
+    if (target === undefined || target === null) {
+        if (typeof opts.nodeTip !== 'function') {
+            throw new Error('waitForIndexerAtTip: pass opts.target or opts.nodeTip');
+        }
+        target = Number(await opts.nodeTip());
+    }
+    let tip = 0;
+    let lastErr = null;
+
+    for (;;) {
+        try { tip = await indexerTip(opts.db); lastErr = null; }
+        catch (err) { lastErr = err; }
+        if (!lastErr && tip >= target) return tip;
+        if (Date.now() >= deadline) {
+            throw new Error('indexer did not reach height ' + target + ' within ' + timeoutMs +
+                'ms (tip ' + tip + ')' + (lastErr ? '; last read failed: ' + lastErr.message : ''));
+        }
+        await sleep(intervalMs);
+    }
+}
+
+module.exports = { actionRowsForTx, waitForTxIndexed, indexerTip, waitForIndexerAtTip };
