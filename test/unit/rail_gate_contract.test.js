@@ -112,3 +112,47 @@ describe('directGateTarget', function () {
             /no CI venue is reachable.*a, b/);
     });
 });
+
+describe('venueWorktreeScript', function () {
+    const { venueWorktreeScript } = loadRailGateContract;
+    const { spawnSync } = require('child_process');
+
+    it('runs the gate in a scratch worktree of the cached tree and cleans it up', function () {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'venue-wt-'));
+        try {
+            const git = (cwd, ...args) => {
+                const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8' });
+                assert.strictEqual(r.status, 0, r.stderr);
+            };
+            const tree = path.join(root, 'e2e');
+            fs.mkdirSync(path.join(tree, 'node_modules'), { recursive: true });
+            fs.mkdirSync(path.join(root, 'sibling'));
+            fs.writeFileSync(path.join(tree, 'old.txt'), 'old');
+            git(tree, 'init', '-q');
+            git(tree, 'add', 'old.txt');
+            git(tree, 'commit', '-qm', 'cached');
+            const head = path.join(root, 'head');
+            fs.mkdirSync(head);
+            fs.writeFileSync(path.join(head, 'new.txt'), 'new');
+            const tar = spawnSync('tar', ['-c', '-C', head, '.']);
+            assert.strictEqual(tar.status, 0);
+
+            const gate = 'sh -c \'echo "tier=$CI_TIER enc=$ENC nm=$(test -d node_modules && echo y) ' +
+                'sib=$(test -d ../sibling && echo y) old=$(test -e old.txt && echo y) new=$(test -e new.txt && echo y)"\'';
+            const script = venueWorktreeScript({ tree, command: gate, enclosingEnv: 'ENC' });
+            const res = spawnSync('bash', ['-c', script], { input: tar.stdout, encoding: 'utf8' });
+            assert.strictEqual(res.status, 0, res.stderr);
+            assert.match(res.stdout, /tier=full enc=\S+ nm=y sib=y old= new=y/);
+            assert.deepStrictEqual(fs.readdirSync(root).filter((n) => n.startsWith('.at9-wt')), []);
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('fails without running the gate when the cached tree is absent', function () {
+        const script = venueWorktreeScript({ tree: path.join(os.tmpdir(), 'no-such-tree'), command: 'echo ran', enclosingEnv: 'ENC' });
+        const res = spawnSync('bash', ['-c', script], { input: '', encoding: 'utf8' });
+        assert.strictEqual(res.status, 1);
+        assert.ok(!res.stdout.includes('ran'));
+    });
+});
