@@ -35,7 +35,7 @@ function config (overrides) {
     }, overrides || {})
 }
 
-describe('attest-mirror stack readiness', function () {
+function useStackFixture () {
     let fixtureRoot
 
     beforeEach(function () {
@@ -72,6 +72,10 @@ describe('attest-mirror stack readiness', function () {
         ].join('\n'))
     }
 
+    return { fixtureRoot: () => fixtureRoot, runFixture, installFakeMariadb }
+}
+
+function registerMissingDependencyCase ({ runFixture, fixtureRoot }) {
     it('diagnoses a missing dependency in one line and exits non-zero without exposing credential values', function () {
         const credentialCanary = ['credential', 'canary', String(Date.now())].join('-')
         const result = runFixture({
@@ -79,7 +83,7 @@ describe('attest-mirror stack readiness', function () {
             SERVICE_PASS: credentialCanary,
             SERVICE_SECRET: credentialCanary,
         })
-        const expected = 'Missing dependency "mariadb" in ' + fs.realpathSync(fixtureRoot) +
+        const expected = 'Missing dependency "mariadb" in ' + fs.realpathSync(fixtureRoot()) +
             '; install dependencies in that tree or point the driver at the staged tree that has them.\n'
         assert.strictEqual(result.status, 1)
         assert.strictEqual(result.stdout, '')
@@ -87,7 +91,9 @@ describe('attest-mirror stack readiness', function () {
         assert.strictEqual(result.stderr.split('\n').filter(Boolean).length, 1)
         assert.ok(!result.stderr.includes(credentialCanary))
     })
+}
 
+function registerReadyPathCases ({ runFixture, installFakeMariadb }) {
     it('adds no diagnostic output and follows the ready path when dependencies resolve', function () {
         installFakeMariadb()
         const result = runFixture({
@@ -107,7 +113,9 @@ describe('attest-mirror stack readiness', function () {
         assert.strictEqual(result.stdout, '')
         assert.strictEqual(result.stderr, 'missing stack readiness value dbPort\n')
     })
+}
 
+function registerStackReadyCases () {
     it('requires the issues schema, indexer status and every miner health endpoint', async function () {
         const calls = []
         const c = config({ fetchImpl: async (url, init) => { calls.push({ url, init }); return healthy() } })
@@ -141,7 +149,9 @@ describe('attest-mirror stack readiness', function () {
         assert.strictEqual(await ready.stackReady(c), false)
         assert.strictEqual(connections, 0)
     })
+}
 
+function registerFallbackAndWaitCases () {
     it('falls back to the pinned table set when /status has no schemaReady field', async function () {
         let connections = 0
         const c = config({
@@ -174,21 +184,31 @@ describe('attest-mirror stack readiness', function () {
         assert.deepStrictEqual(c.minerHealthUrls,
             ['http://127.0.0.1:62006/', 'http://127.0.0.1:62015/', 'http://127.0.0.1:62021/'])
     })
+}
+
+describe('attest-mirror stack readiness', function () {
+    const fx = useStackFixture()
+
+    registerMissingDependencyCase(fx)
+    registerReadyPathCases(fx)
+    registerStackReadyCases()
+    registerFallbackAndWaitCases()
 })
 
 function minerReply (body) {
     return async (url) => url.includes('miner') ? { ok: true, json: async () => body } : healthy()
 }
 
-describe('attest-mirror stack readiness: the miner health body', function () {
-    const notReady = [
+const NOT_READY_BODIES = [
         ['a JSON-RPC error from a miner older than health', { jsonrpc: '2.0', id: 1, error: { code: -32601, message: 'Method not found' } }],
         ['a truthy result.error', { result: { error: 'boom' } }],
         ['a reply with no result', { jsonrpc: '2.0', id: 1 }],
         ['a degraded verdict', { result: { status: 'degraded', reason: 'wallet_not_ready' } }],
         ['a cold-start verdict before the wallet is ready', { result: { status: 'success', reason: 'starting', wallet_ready: false, mining_started: false } }],
-    ]
-    for (const [name, body] of notReady) {
+]
+
+function registerNotReadyCases () {
+    for (const [name, body] of NOT_READY_BODIES) {
         it('is not ready on HTTP 200 carrying ' + name, async function () {
             assert.strictEqual(await ready.stackReady(config({ fetchImpl: minerReply(body) })), false)
         })
@@ -198,7 +218,9 @@ describe('attest-mirror stack readiness: the miner health body', function () {
         const fetchImpl = async (url) => url.includes('miner') ? { ok: true, json: async () => { throw new SyntaxError('bad') } } : healthy()
         assert.strictEqual(await ready.stackReady(config({ fetchImpl })), false)
     })
+}
 
+function registerReadyVerdictCases () {
     it('is ready on a cold-start verdict once the wallet is ready and mining started', async function () {
         const body = { result: { status: 'success', reason: 'starting', wallet_ready: true, mining_started: true } }
         assert.strictEqual(await ready.stackReady(config({ fetchImpl: minerReply(body) })), true)
@@ -208,7 +230,9 @@ describe('attest-mirror stack readiness: the miner health body', function () {
         const body = { result: { status: 'success', reason: 'paused', wallet_ready: true, mining_started: true } }
         assert.strictEqual(await ready.stackReady(config({ fetchImpl: minerReply(body) })), true)
     })
+}
 
+function registerTimeoutNamingCase () {
     it('names the miner and its reason when the wait times out', async function () {
         const fetchImpl = minerReply({ jsonrpc: '2.0', id: 1, error: { code: -32601, message: 'Method not found' } })
         await assert.rejects(ready.waitForStack(config({ fetchImpl })), (error) => {
@@ -217,22 +241,26 @@ describe('attest-mirror stack readiness: the miner health body', function () {
             return true
         })
     })
+}
+
+describe('attest-mirror stack readiness: the miner health body', function () {
+    registerNotReadyCases()
+    registerReadyVerdictCases()
+    registerTimeoutNamingCase()
 })
 
-describe('attest-mirror stack readiness: a probe that never answers', function () {
-    // A regression hangs until this short timeout rather than mocha's default ceiling.
-    this.timeout(3000)
-    const never = () => new Promise(() => {})
+const never = () => new Promise(() => {})
 
-    async function rejectsWithin (c, pattern) {
-        const started = Date.now()
-        await assert.rejects(ready.waitForStack(c), (error) => {
-            assert.match(error.message, pattern)
-            return true
-        })
-        assert.ok(Date.now() - started < 1000, 'the wait outlived its deadline: ' + (Date.now() - started) + ' ms')
-    }
+async function rejectsWithin (c, pattern) {
+    const started = Date.now()
+    await assert.rejects(ready.waitForStack(c), (error) => {
+        assert.match(error.message, pattern)
+        return true
+    })
+    assert.ok(Date.now() - started < 1000, 'the wait outlived its deadline: ' + (Date.now() - started) + ' ms')
+}
 
+function registerHangingProbeCases () {
     it('fails inside the deadline and names an indexer whose /status never answers', async function () {
         await rejectsWithin(config({ timeoutMs: 50, fetchImpl: never }), /last failure: BTC indexer \/status timed out after \d+ ms/)
     })
@@ -255,7 +283,9 @@ describe('attest-mirror stack readiness: a probe that never answers', function (
         })
         await rejectsWithin(c, /BTC indexer schema check timed out after \d+ ms/)
     })
+}
 
+function registerProbeLimitCases () {
     it('hands every fetch an abort signal so a real fetch releases its socket', async function () {
         const inits = []
         await ready.stackProblem(config({ fetchImpl: async (url, init) => { inits.push(init); return healthy() } }))
@@ -271,6 +301,14 @@ describe('attest-mirror stack readiness: a probe that never answers', function (
         assert.strictEqual(ready.probeTimeout(10 * ready.PROBE_TIMEOUT_MS), ready.PROBE_TIMEOUT_MS)
         assert.strictEqual(ready.probeTimeout(1234.7), 1234)
     })
+}
+
+describe('attest-mirror stack readiness: a probe that never answers', function () {
+    // A regression hangs until this short timeout rather than mocha's default ceiling.
+    this.timeout(3000)
+
+    registerHangingProbeCases()
+    registerProbeLimitCases()
 })
 
 const THREE_COIN_ENV = Object.freeze({
@@ -281,8 +319,7 @@ const THREE_COIN_ENV = Object.freeze({
 function envWith (overrides) {
     return ready.configFromEnv(Object.assign({}, THREE_COIN_ENV, overrides), { mariadb: fakeMariadb }, async () => healthy())
 }
-
-describe('attest-mirror stack readiness: every coin', function () {
+function registerCoinEnvCases () {
     it('builds one indexer per coin with its own database and status URL', function () {
         assert.deepStrictEqual(envWith({}).indexers, [
             { coin: 'BTC', dbName: 'XChain_BTC_Regtest_Indexer', statusUrl: 'http://127.0.0.1:62005/status' },
@@ -312,7 +349,9 @@ describe('attest-mirror stack readiness: every coin', function () {
     it('refuses an unknown coin in the coin list', function () {
         assert.throws(() => envWith({ ATTEST_MIRROR_READY_COINS: 'BTC,XYZ' }), /unknown stack readiness coin XYZ/)
     })
+}
 
+function registerSecondCoinFallbackCase () {
     it('uses the pinned-table fallback for a second coin whose status omits schemaReady', async function () {
         const fetched = []
         const c = config({
@@ -323,9 +362,14 @@ describe('attest-mirror stack readiness: every coin', function () {
         assert.strictEqual(await ready.stackProblem(c), 'LTC indexer schema')
         assert.deepStrictEqual(fetched, ['http://btc/status', 'http://ltc/status'])
     })
+}
+
+describe('attest-mirror stack readiness: every coin', function () {
+    registerCoinEnvCases()
+    registerSecondCoinFallbackCase()
 })
 
-describe('attest-mirror stack readiness: timing values', function () {
+function registerTimingRefusalCases () {
     for (const key of ['ATTEST_MIRROR_READY_TIMEOUT_MS', 'ATTEST_MIRROR_READY_INTERVAL_MS']) {
         for (const value of ['300s', 'abc', '0', '-5']) {
             it('refuses ' + key + '=' + value + ' instead of polling with NaN or zero', function () {
@@ -333,7 +377,9 @@ describe('attest-mirror stack readiness: timing values', function () {
             })
         }
     }
+}
 
+function registerTimingDefaultCases () {
     it('keeps the defaults when the timing values are unset', function () {
         const c = envWith({})
         assert.strictEqual(c.timeoutMs, 300000)
@@ -343,6 +389,11 @@ describe('attest-mirror stack readiness: timing values', function () {
     it('refuses a database port that is not a port', function () {
         assert.throws(() => envWith({ DB_HOST_PORT: 'db' }), /invalid stack readiness value dbPort: not a port/)
     })
+}
+
+describe('attest-mirror stack readiness: timing values', function () {
+    registerTimingRefusalCases()
+    registerTimingDefaultCases()
 })
 
 describe('attest-mirror stack readiness: pinned tables against the indexer schema', function () {
