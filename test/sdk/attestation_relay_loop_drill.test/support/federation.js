@@ -15,7 +15,7 @@
 'use strict';
 
 const assert = require('assert');
-const chainRail = require('../../helpers/chainRail');
+const chainRail = require('../../../helpers/chainRail');
 const { grindResponsibleKeys } = require('./codec');
 const { REDUNDANCY, ATTESTATION_MIN_STAKE, ACTIVATION_DELAY_BLOCKS } = require('./config');
 const { indexerRpc, capabilityWeights, waitForIndexedHeight } = require('./rail');

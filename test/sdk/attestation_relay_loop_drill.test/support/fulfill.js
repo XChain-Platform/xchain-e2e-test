@@ -16,8 +16,8 @@
 
 const assert = require('assert');
 const internalPath = require('path');
-const attestationHelper = require('../../helpers/attestationHelper');
-const chainRail = require('../../helpers/chainRail');
+const attestationHelper = require('../../../helpers/attestationHelper');
+const chainRail = require('../../../helpers/chainRail');
 const { HUB_BASE, ATTEST_URL } = require('./config');
 const { railQuery, resilientSend, pumpUntil } = require('./rail');
 

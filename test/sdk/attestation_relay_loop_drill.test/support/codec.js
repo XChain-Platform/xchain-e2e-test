@@ -16,7 +16,7 @@
 
 const crypto = require('crypto');
 const internalPath = require('path');
-const attestationHelper = require('../../helpers/attestationHelper');
+const attestationHelper = require('../../../helpers/attestationHelper');
 const { HUB_BASE } = require('./config');
 
 // ── production canonical/wire codec, borrowed from the hub ────────────────────

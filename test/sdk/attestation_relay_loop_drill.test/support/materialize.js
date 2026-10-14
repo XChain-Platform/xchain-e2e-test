@@ -15,8 +15,8 @@
 'use strict';
 
 const assert = require('assert');
-const transactionHelper = require('../../helpers/core/transactionHelper');
-const chainRail = require('../../helpers/chainRail');
+const transactionHelper = require('../../../helpers/core/transactionHelper');
+const chainRail = require('../../../helpers/chainRail');
 const { ATTEST_URL, REDUNDANCY, DEADLINE_BLOCKS } = require('./config');
 const { railQuery, resilientSend, pumpUntil } = require('./rail');
 

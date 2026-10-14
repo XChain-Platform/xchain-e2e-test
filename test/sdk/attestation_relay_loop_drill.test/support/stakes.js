@@ -15,9 +15,9 @@
 'use strict';
 
 const assert = require('assert');
-const transactionHelper = require('../../helpers/core/transactionHelper');
-const stakeTeardown     = require('../../helpers/stakeTeardown');
-const chainRail         = require('../../helpers/chainRail');
+const transactionHelper = require('../../../helpers/core/transactionHelper');
+const stakeTeardown     = require('../../../helpers/stakeTeardown');
+const chainRail         = require('../../../helpers/chainRail');
 const { railQuery, resilientSend, pumpUntil, capabilityWeights, waitForIndexedHeight } = require('./rail');
 
 // STAKE/UNSTAKE broadcast + a DB wait keyed on the SIGNING PUBKEY.

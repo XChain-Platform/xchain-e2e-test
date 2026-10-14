@@ -16,8 +16,8 @@
 
 const assert = require('assert');
 const crypto = require('crypto');
-const transactionHelper = require('../../helpers/core/transactionHelper');
-const chainRail = require('../../helpers/chainRail');
+const transactionHelper = require('../../../helpers/core/transactionHelper');
+const chainRail = require('../../../helpers/chainRail');
 const { railQuery, resilientSend, pumpUntil } = require('./rail');
 
 function v4Row(ctx) {

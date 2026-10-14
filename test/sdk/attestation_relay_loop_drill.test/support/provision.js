@@ -14,9 +14,9 @@
 
 'use strict';
 
-const cryptoHelper = require('../../helpers/core/cryptoHelper');
-const gasHelper    = require('../../helpers/gasHelper');
-const chainRail    = require('../../helpers/chainRail');
+const cryptoHelper = require('../../../helpers/core/cryptoHelper');
+const gasHelper    = require('../../../helpers/gasHelper');
+const chainRail    = require('../../../helpers/chainRail');
 const { RelaySigner } = require('./codec');
 const { REDUNDANCY, MINT_CHUNK } = require('./config');
 const { indexerRpc, capabilityWeights, resilientSend } = require('./rail');

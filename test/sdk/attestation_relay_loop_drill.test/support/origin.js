@@ -15,10 +15,10 @@
 'use strict';
 
 const assert = require('assert');
-const cryptoHelper = require('../../helpers/core/cryptoHelper');
-const gasHelper    = require('../../helpers/gasHelper');
-const vmHelper     = require('../../helpers/vmHelper');
-const chainRail    = require('../../helpers/chainRail');
+const cryptoHelper = require('../../../helpers/core/cryptoHelper');
+const gasHelper    = require('../../../helpers/gasHelper');
+const vmHelper     = require('../../../helpers/vmHelper');
+const chainRail    = require('../../../helpers/chainRail');
 const { ATTEST_URL, REDUNDANCY, ORIGIN_CONTRACT } = require('./config');
 const { resilientSend } = require('./rail');
 

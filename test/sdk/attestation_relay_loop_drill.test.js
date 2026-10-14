@@ -81,16 +81,16 @@ const assert = require('assert');
 
 const chainRail = require('../helpers/chainRail');
 
-const { ORIGIN_COIN, ATTEST_URL, REDUNDANCY } = require('./attestation_relay_loop_drill.test/config');
-const { relayCodec } = require('./attestation_relay_loop_drill.test/codec');
-const { startMiningPump } = require('./attestation_relay_loop_drill.test/rail');
-const { unwindRelayStake } = require('./attestation_relay_loop_drill.test/stakes');
-const { provisionHome } = require('./attestation_relay_loop_drill.test/provision');
-const { emitOriginRequest } = require('./attestation_relay_loop_drill.test/origin');
-const { stakeFederation } = require('./attestation_relay_loop_drill.test/federation');
-const { materializeRequest } = require('./attestation_relay_loop_drill.test/materialize');
-const { fulfillOnHome } = require('./attestation_relay_loop_drill.test/fulfill');
-const { relayResponseBack } = require('./attestation_relay_loop_drill.test/relayBack');
+const { ORIGIN_COIN, ATTEST_URL, REDUNDANCY } = require('./attestation_relay_loop_drill.test/support/config');
+const { relayCodec } = require('./attestation_relay_loop_drill.test/support/codec');
+const { startMiningPump } = require('./attestation_relay_loop_drill.test/support/rail');
+const { unwindRelayStake } = require('./attestation_relay_loop_drill.test/support/stakes');
+const { provisionHome } = require('./attestation_relay_loop_drill.test/support/provision');
+const { emitOriginRequest } = require('./attestation_relay_loop_drill.test/support/origin');
+const { stakeFederation } = require('./attestation_relay_loop_drill.test/support/federation');
+const { materializeRequest } = require('./attestation_relay_loop_drill.test/support/materialize');
+const { fulfillOnHome } = require('./attestation_relay_loop_drill.test/support/fulfill');
+const { relayResponseBack } = require('./attestation_relay_loop_drill.test/support/relayBack');
 
 // Everything the steps hand to each other lives on one context object.
 function newContext() {
