@@ -327,12 +327,23 @@ function greenVerdictRecord(out, head, venueSpec) {
 const ALREADY_LANDED_SKIP = /already contained in origin(?:\/|\s)(?:develop)?/i;
 
 function runDirectCiGate() {
-    const venue = os.hostname();
-    const res = run('npm', ['run', 'ci:full'], E2E_ROOT,
-        gateEnv({ CI_TIER: 'full', [ENCLOSING_CI_VENUE_ENV]: venue }));
+    // With CI_VENUES set the direct gate runs on the first reachable CI venue, not the drive host.
+    const target = loadRailGateContract.directGateTarget(process.env.CI_VENUES);
+    const venue = target.venue;
+    let res;
+    if (!target.remote) {
+        res = run('npm', ['run', 'ci:full'], E2E_ROOT,
+            gateEnv({ CI_TIER: 'full', [ENCLOSING_CI_VENUE_ENV]: venue }));
+    } else {
+        // Ship the graded head as a git archive and run the gate in a scratch dir on the venue.
+        const script = 'set -e; git -C "$1" archive HEAD | ssh -o BatchMode=yes "$2" ' +
+            '\'d=$(mktemp -d) && trap "rm -rf $d" EXIT && tar -x -C $d && cd $d && ' +
+            'CI_TIER=full ' + ENCLOSING_CI_VENUE_ENV + '=$(hostname) ' + CI_GATE_COMMAND + '\'';
+        res = run('bash', ['-c', script, 'at9-direct-gate', E2E_ROOT, venue], E2E_ROOT, gateEnv());
+    }
     const counts = tallies(res.out);
     at9.ordinaryCi = { command: CI_GATE_COMMAND, cwd: E2E_ROOT, venue,
-        transport: 'direct', exit: res.status, signal: res.signal, counts,
+        transport: target.remote ? 'ssh' : 'direct', directGateTarget: target, exit: res.status, signal: res.signal, counts,
         cachedVerdict: null, failureTail: res.status === 0 ? null : res.tail };
     assert.strictEqual(res.status, 0, 'the full CI gate is red on venue ' + venue + ' (exit ' + res.status +
         (res.signal ? ', signal ' + res.signal : '') + (res.error ? ', ' + res.error : '') + '):\n' + res.tail);

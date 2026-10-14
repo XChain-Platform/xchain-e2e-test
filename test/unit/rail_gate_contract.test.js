@@ -91,3 +91,24 @@ describe('rail gate contract loader', function () {
         });
     });
 });
+
+describe('directGateTarget', function () {
+    const { directGateTarget } = loadRailGateContract;
+
+    it('stays on the drive host when CI_VENUES is unset', function () {
+        const target = directGateTarget('', { hostname: 'drive' });
+        assert.deepStrictEqual(target, { venue: 'drive', transport: 'direct', remote: false, tried: [] });
+    });
+
+    it('picks the first reachable venue, skipping unreachable ones', function () {
+        const target = directGateTarget('a:1 b:2 c', { hostname: 'drive', probe: (h) => h !== 'a' });
+        assert.strictEqual(target.venue, 'b');
+        assert.strictEqual(target.remote, true);
+        assert.deepStrictEqual(target.tried, ['a', 'b']);
+    });
+
+    it('never falls back to the drive host when no venue is reachable', function () {
+        assert.throws(() => directGateTarget('a b', { hostname: 'drive', probe: () => false }),
+            /no CI venue is reachable.*a, b/);
+    });
+});
