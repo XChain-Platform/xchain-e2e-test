@@ -7,6 +7,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const FIXTURE_PATH = path.resolve(__dirname, '..', '..', 'fixtures', 'rail', 'ci_gate_contract.json');
 
@@ -74,7 +75,35 @@ function loadRailGateContract(options = {}) {
     return fixture;
 }
 
+// CI_VENUES entries are "host" or "host:detail"; the host part is what ssh dials.
+function venueHostList(spec) {
+    return String(spec || '').trim().split(/\s+/).filter(Boolean).map((entry) => entry.split(':')[0]);
+}
+
+// Pick where AT9 runs the direct full gate. With CI_VENUES set it is the first venue the
+// probe reaches, never the drive host; without it the gate stays on the drive host.
+function directGateTarget(ciVenues, options = {}) {
+    const hosts = venueHostList(ciVenues);
+    const driveHost = options.hostname || os.hostname();
+    if (!hosts.length) return { venue: driveHost, transport: 'direct', remote: false, tried: [] };
+    const probe = options.probe || function (host) {
+        const res = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', host, 'true'],
+            { encoding: 'utf8', timeout: 20000 });
+        return res.status === 0;
+    };
+    const tried = [];
+    for (const host of hosts) {
+        tried.push(host);
+        if (probe(host)) return { venue: host, transport: 'ssh', remote: true, tried };
+    }
+    const error = new Error('no CI venue is reachable from ' + driveHost + ' (tried ' + tried.join(', ') + ')');
+    error.tried = tried;
+    throw error;
+}
+
 module.exports = loadRailGateContract;
+module.exports.directGateTarget = directGateTarget;
+module.exports.venueHostList = venueHostList;
 module.exports.contractFromDispatcher = contractFromDispatcher;
 module.exports.dispatcherPath = dispatcherPath;
 module.exports.FIXTURE_PATH = FIXTURE_PATH;
