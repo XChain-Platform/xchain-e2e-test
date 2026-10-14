@@ -21,18 +21,26 @@
  ********************************************************************/
 
 const DatabaseCore = require('./core')
+const TokensPart = require('./tokens')
+const BroadcastListPart = require('./broadcast_list')
+const DispensersPart = require('./dispensers')
+const WaitPart = require('./wait')
+const MarketPart = require('./market')
+const OrdersPart = require('./orders')
+const ContractsPart = require('./contracts')
+const StakingPart = require('./staking')
 
 // Order matters where two parts define the same name: a later part wins,
 // as a later method did in the single class body.
 const PARTS = [
-    require('./tokens'),
-    require('./broadcast_list'),
-    require('./dispensers'),
-    require('./wait'),
-    require('./market'),
-    require('./orders'),
-    require('./contracts'),
-    require('./staking')
+    TokensPart,
+    BroadcastListPart,
+    DispensersPart,
+    WaitPart,
+    MarketPart,
+    OrdersPart,
+    ContractsPart,
+    StakingPart
 ]
 
 class Database extends DatabaseCore {}
