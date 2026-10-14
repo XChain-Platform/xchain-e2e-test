@@ -12,6 +12,12 @@ const HELPER = path.join(__dirname, '..', '..', '..', 'scripts', 'wait-attest-mi
 const PINNED_TABLE_COUNT = 8
 const HEALTHY_BODY = { jsonrpc: '2.0', id: 1, result: { status: 'success', reason: 'ok', wallet_ready: true, mining_started: true } }
 
+const MINER_API_ENV = Object.freeze({
+    DB_HOST_PORT: '62000', DB_PASSWORD: 'runtime-only', INDEXER_HOST_PORT: '62005',
+    MINER_HOST_PORT: '62006', LTC_REGTEST_MINER_API_PORT: '62015', DOGE_REGTEST_MINER_API_PORT: '62021',
+    LTC_INDEXER_HOST_PORT: '62014', DOGE_INDEXER_HOST_PORT: '62020',
+})
+
 function healthy () {
     return { ok: true, json: async () => HEALTHY_BODY }
 }
@@ -30,7 +36,7 @@ function config (overrides) {
         minerHealthUrls: ['http://miner-a/', 'http://miner-b/'],
         requiredIndexerTables: ready.REQUIRED_INDEXER_TABLES,
         timeoutMs: 20, intervalMs: 0, sleep: async () => {},
-        connect: async () => ({ query: async () => [{ n: PINNED_TABLE_COUNT }], end: async () => {} }),
+        connect: fakeMariadb.createConnection,
         fetchImpl: async () => healthy(),
     }, overrides || {})
 }
@@ -96,11 +102,7 @@ function registerMissingDependencyCase ({ runFixture, fixtureRoot }) {
 function registerReadyPathCases ({ runFixture, installFakeMariadb }) {
     it('adds no diagnostic output and follows the ready path when dependencies resolve', function () {
         installFakeMariadb()
-        const result = runFixture({
-            DB_HOST_PORT: '62000', DB_PASSWORD: 'runtime-only', INDEXER_HOST_PORT: '62005',
-            MINER_HOST_PORT: '62006', LTC_REGTEST_MINER_API_PORT: '62015', DOGE_REGTEST_MINER_API_PORT: '62021',
-            LTC_INDEXER_HOST_PORT: '62014', DOGE_INDEXER_HOST_PORT: '62020',
-        })
+        const result = runFixture(MINER_API_ENV)
         assert.strictEqual(result.status, 0)
         assert.strictEqual(result.stderr, '')
         assert.strictEqual(result.stdout, 'attest-mirror stack ready: indexer schema and 3 miner health endpoint(s)\n')
@@ -126,39 +128,24 @@ function registerStackReadyCases () {
         assert.match(calls[1].init.body, /"method":"health"/)
     })
 
-    it('trusts schemaReady without querying the pinned table fallback', async function () {
-        let connections = 0
-        const c = config({
-            connect: async () => { connections++; throw new Error('fallback should not run') },
-            fetchImpl: async (url) => url.includes('indexer')
-                ? { ok: true, json: async () => ({ schemaReady: true }) }
-                : healthy(),
+    for (const schemaReady of [true, false]) {
+        it('trusts schemaReady ' + schemaReady + ' without querying the pinned table fallback', async function () {
+            let connections = 0
+            const c = config({
+                connect: async () => { connections++; throw new Error('fallback should not run') },
+                fetchImpl: async (url) => url.includes('indexer') ? { ok: true, json: async () => ({ schemaReady }) } : healthy(),
+            })
+            assert.strictEqual(await ready.stackReady(c), schemaReady)
+            assert.strictEqual(connections, 0)
         })
-        assert.strictEqual(await ready.stackReady(c), true)
-        assert.strictEqual(connections, 0)
-    })
-
-    it('trusts schemaReady false without accepting a complete pinned table set', async function () {
-        let connections = 0
-        const c = config({
-            connect: async () => { connections++; return { query: async () => [{ n: PINNED_TABLE_COUNT }], end: async () => {} } },
-            fetchImpl: async (url) => url.includes('indexer')
-                ? { ok: true, json: async () => ({ schemaReady: false }) }
-                : healthy(),
-        })
-        assert.strictEqual(await ready.stackReady(c), false)
-        assert.strictEqual(connections, 0)
-    })
+    }
 }
 
 function registerFallbackAndWaitCases () {
     it('falls back to the pinned table set when /status has no schemaReady field', async function () {
         let connections = 0
         const c = config({
-            connect: async () => {
-                connections++
-                return { query: async () => [{ n: PINNED_TABLE_COUNT }], end: async () => {} }
-            },
+            connect: async () => { connections++; return fakeMariadb.createConnection() },
         })
         assert.strictEqual(await ready.stackReady(c), true)
         assert.strictEqual(connections, 1)
@@ -175,11 +162,7 @@ function registerFallbackAndWaitCases () {
     })
 
     it('reads all three miner ports from a three-coin stack environment', function () {
-        const c = ready.configFromEnv({
-            DB_HOST_PORT: '62000', DB_PASSWORD: 'secret', INDEXER_HOST_PORT: '62005',
-            MINER_HOST_PORT: '62006', LTC_REGTEST_MINER_API_PORT: '62015', DOGE_REGTEST_MINER_API_PORT: '62021',
-            LTC_INDEXER_HOST_PORT: '62014', DOGE_INDEXER_HOST_PORT: '62020',
-        }, { mariadb: fakeMariadb }, async () => ({ ok: true }))
+        const c = ready.configFromEnv(MINER_API_ENV, { mariadb: fakeMariadb }, async () => healthy())
         assert.strictEqual(c.indexers[0].statusUrl, 'http://127.0.0.1:62005/status')
         assert.deepStrictEqual(c.minerHealthUrls,
             ['http://127.0.0.1:62006/', 'http://127.0.0.1:62015/', 'http://127.0.0.1:62021/'])
@@ -221,15 +204,13 @@ function registerNotReadyCases () {
 }
 
 function registerReadyVerdictCases () {
-    it('is ready on a cold-start verdict once the wallet is ready and mining started', async function () {
-        const body = { result: { status: 'success', reason: 'starting', wallet_ready: true, mining_started: true } }
-        assert.strictEqual(await ready.stackReady(config({ fetchImpl: minerReply(body) })), true)
-    })
+    for (const reason of ['starting', 'paused']) {
+        it('is ready on a ' + reason + ' verdict once the wallet is ready and mining started', async function () {
+            const body = { result: { status: 'success', reason, wallet_ready: true, mining_started: true } }
+            assert.strictEqual(await ready.stackReady(config({ fetchImpl: minerReply(body) })), true)
+        })
+    }
 
-    it('is ready while an operator has paused mining', async function () {
-        const body = { result: { status: 'success', reason: 'paused', wallet_ready: true, mining_started: true } }
-        assert.strictEqual(await ready.stackReady(config({ fetchImpl: minerReply(body) })), true)
-    })
 }
 
 function registerTimeoutNamingCase () {
