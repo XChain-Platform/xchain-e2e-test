@@ -178,64 +178,72 @@ function registerHopCompletionTests() {
     });
 }
 
+async function stakeRelayValidator() {
+    const hubPubkey = process.env.XCALL_HUB_PUBKEY;
+    expect(hubPubkey, 'XCALL_HUB_PUBKEY env (the relay hub\'s Ed25519 pubkey)').to.match(/^[0-9a-f]{64}$/);
+    try {
+        const res = await submit(sdk,
+            // stake-teardown-ok: seats the fixed relay hub key this venue keeps seated; a release would block its re-stake for the cooldown while the already-in-use branch reads it as seated.
+            { action: 'STAKE', params: { amount: '5000.00000000', signingPubkey: hubPubkey } },
+            { pubkey: deployer.address, change: deployer.address },
+            submitOpts({ wif: deployer.wif })
+        );
+        expect(res.indexed.status).to.equal('valid');
+    } catch (e) {
+        if (!/SIGNING_PUBKEY \(already in use\)/.test(String(e.message))) throw e;
+        console.log('    [xcall-hop] hub pubkey already staked; reusing the active stake');
+    }
+    await mine(8);
+}
+
+async function deployOrigin() {
+    const res = await submit(sdk,
+        { action: 'DEPLOY', params: { code: CONTRACT_A, gasLimit: 200000 } },
+        { pubkey: deployer.address, change: deployer.address },
+        submitOpts({ wif: deployer.wif })
+    );
+    expect(res.indexed.status).to.equal('valid');
+    indexA = contractIndexOf(res.indexed);
+    console.log('    [xcall-hop] A=' + indexA);
+}
+
+async function fireOutboundCall() {
+    const res = await submit(sdk,
+        { action: 'EXECUTE', params: { contractActionIndex: indexA, method: 'callOut', params: [String(bouncerContract), String(indexA)] } },
+        { pubkey: deployer.address, change: deployer.address },
+        submitOpts({ wif: deployer.wif })
+    );
+    expect(res.indexed.status).to.equal('valid');
+    await mine(1);
+
+    callId = String(await readState(sdk, indexA, 'lastCall'));
+    expect(callId).to.match(/^[0-9a-f]{64}$/);
+    console.log('    [xcall-hop] outbound call_id=' + callId.substring(0, 16) + '...');
+
+    const req = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: callId });
+    expect(req.exists).to.equal(true);
+    expect(req.call.cross_hops).to.equal(1);
+    expect(req.call.target_chain).to.equal('DOGE');
+}
+
+function registerSetupTests() {
+    it('STAKE the relay validator for the cross_chain capability (idempotent top-up)', stakeRelayValidator);
+    it('DEPLOY the BTC-side contract (A) with a crossCallable return method', deployOrigin);
+    it('fires the outbound BTC→DOGE call (hops=1)', fireOutboundCall);
+}
+
+async function prepareHopRun() {
+    bouncerContract = parseInt(process.env.XCALL_BOUNCER_CONTRACT || '', 10);
+    expect(bouncerContract, 'XCALL_BOUNCER_CONTRACT env (DOGE bouncer action_index from xcallDogeSetup.js)').to.be.a('number').and.to.be.greaterThan(0);
+    sdk = makeSdk();
+    deployer = await fundedGasAddress(sdk, 1);
+    console.log('    [xcall-hop] deployer=' + deployer.address + ' bouncer=' + bouncerContract);
+}
+
 describe('[sdk] cross-chain call hop round trip (BTC→DOGE→BTC)', function () {
     this.timeout(0);
-    before(async function () {
-        bouncerContract = parseInt(process.env.XCALL_BOUNCER_CONTRACT || '', 10);
-        expect(bouncerContract, 'XCALL_BOUNCER_CONTRACT env (DOGE bouncer action_index from xcallDogeSetup.js)').to.be.a('number').and.to.be.greaterThan(0);
-        sdk = makeSdk();
-        deployer = await fundedGasAddress(sdk, 1);
-        console.log('    [xcall-hop] deployer=' + deployer.address + ' bouncer=' + bouncerContract);
-    });
-
-    it('STAKE the relay validator for the cross_chain capability (idempotent top-up)', async function () {
-        const hubPubkey = process.env.XCALL_HUB_PUBKEY;
-        expect(hubPubkey, 'XCALL_HUB_PUBKEY env (the relay hub\'s Ed25519 pubkey)').to.match(/^[0-9a-f]{64}$/);
-        try {
-            const res = await submit(sdk,
-                // stake-teardown-ok: seats the fixed relay hub key this venue keeps seated; a release would block its re-stake for the cooldown while the already-in-use branch reads it as seated.
-                { action: 'STAKE', params: { amount: '5000.00000000', signingPubkey: hubPubkey } },
-                { pubkey: deployer.address, change: deployer.address },
-                submitOpts({ wif: deployer.wif })
-            );
-            expect(res.indexed.status).to.equal('valid');
-        } catch (e) {
-            if (!/SIGNING_PUBKEY \(already in use\)/.test(String(e.message))) throw e;
-            console.log('    [xcall-hop] hub pubkey already staked; reusing the active stake');
-        }
-        await mine(8);
-    });
-
-    it('DEPLOY the BTC-side contract (A) with a crossCallable return method', async function () {
-        const res = await submit(sdk,
-            { action: 'DEPLOY', params: { code: CONTRACT_A, gasLimit: 200000 } },
-            { pubkey: deployer.address, change: deployer.address },
-            submitOpts({ wif: deployer.wif })
-        );
-        expect(res.indexed.status).to.equal('valid');
-        indexA = contractIndexOf(res.indexed);
-        console.log('    [xcall-hop] A=' + indexA);
-    });
-
-    it('fires the outbound BTC→DOGE call (hops=1)', async function () {
-        const res = await submit(sdk,
-            { action: 'EXECUTE', params: { contractActionIndex: indexA, method: 'callOut', params: [String(bouncerContract), String(indexA)] } },
-            { pubkey: deployer.address, change: deployer.address },
-            submitOpts({ wif: deployer.wif })
-        );
-        expect(res.indexed.status).to.equal('valid');
-        await mine(1);
-
-        callId = String(await readState(sdk, indexA, 'lastCall'));
-        expect(callId).to.match(/^[0-9a-f]{64}$/);
-        console.log('    [xcall-hop] outbound call_id=' + callId.substring(0, 16) + '...');
-
-        const req = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: callId });
-        expect(req.exists).to.equal(true);
-        expect(req.call.cross_hops).to.equal(1);
-        expect(req.call.target_chain).to.equal('DOGE');
-    });
-
+    before(prepareHopRun);
+    registerSetupTests();
     registerBounceTest();
     registerHopCompletionTests();
 });
