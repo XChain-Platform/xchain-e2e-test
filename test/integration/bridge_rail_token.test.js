@@ -93,7 +93,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const { journalCase } = require('../helpers/bridgeRailVenue');
 const loadRailGateContract = require('./lib/rail_gate_contract');
-const { captureDriveHeads, judgeDriveHeads } = require('../helpers/rail_preflight/drive_heads');
+const { captureDriveHeads, judgeDriveHeads, rootDiff } = require('../helpers/rail_preflight/drive_heads');
 const { runReplayPin } = require('../helpers/rail_preflight/token_replay_pin_run');
 const {
     assert,
@@ -492,8 +492,9 @@ describe('token AT9: the gates, and the dated acceptance record', function () {
     it('prints the dated acceptance record', function () {
         assert.ok(at9.record, 'AT9 took no record header');
         const heads = judgeDriveHeads(state.evidence.driveHeads,
-            captureDriveHeads(state.evidence.driveHeadRoots));
+            captureDriveHeads(state.evidence.driveHeadRoots), rootDiff(state.evidence.driveHeadRoots));
         at9.record.headsMoved = heads.moved;
+        at9.record.headsLedgerOnly = heads.ledgerOnly;
         assert.ok(heads.ok, 'a live head moved since drive start, so the record does not describe the tree that ran:\n' +
             heads.problems.join('\n'));
         const record = Object.assign({ rail: 'BTC/DOGE regtest', drive: at9.drive,
