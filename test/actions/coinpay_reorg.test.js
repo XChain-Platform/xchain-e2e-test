@@ -67,6 +67,98 @@ async function tip() { const r = await q(`SELECT MAX(block_index) h FROM blocks`
 async function mine(n) { try { await regtestMinerConnector.generateBlocks(n) } catch (e) {} }
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
+// Seller ISSUEs and lists 100 tokens for 0.001 coin; buyer posts the matching coin
+// order. The match opens the pending_coinpay obligation (escrows the seller's 100
+// tokens). Returns the parties, tick and obligation index.
+async function openObligation() {
+    const seller = await cryptoHelper.getNewFundedAddress('cpr-seller', COIN, NETWORK, null, 'legacy', 0, 1)
+    const buyer  = await cryptoHelper.getNewFundedAddress('cpr-buyer',  COIN, NETWORK, null, 'legacy', 0, 2)
+    const tick = 'CPR' + seller.address.substring(5, 11).toUpperCase()
+
+    await issueHelper.sendIssueV0(seller, tick, '1000', '1000', '8', 'coinpay-reorg token', '1000')
+    const expiration = Math.floor(Date.now() / 1000) + 86400
+    const sellerOrder = await orderHelper.sendOrderV0(seller, COIN_CODE, tick, '100.00000000',
+        COIN_CODE, '', '0.00100000', seller.address, expiration, '', '', 'cpr sell')
+    const buyerOrder = await orderHelper.sendOrderV0(buyer, COIN_CODE, '', '0.00100000',
+        COIN_CODE, tick, '100.00000000', buyer.address, expiration, '', '', 'cpr buy')
+
+    const orderMatch = await indexerDatabase.waitForOrderMatch({
+        giveActionIndex: Number(sellerOrder.order.action_index),
+        getActionIndex:  Number(buyerOrder.order.action_index),
+        status: 'pending_coinpay',
+    }, 30000)
+    assert(orderMatch, 'ORDER_MATCH pending_coinpay exists')
+    const obligationIndex = Number(orderMatch.action_index)
+    assert.strictEqual(await balanceOf(buyer.address, tick), '0', 'buyer holds no tokens pre-settlement')
+    await mine(2)   // bury the match/obligation so the COINPAY is isolatable in a later block
+    return { seller, buyer, tick, obligationIndex }
+}
+
+// Buyer COINPAY (native-coin payment) ALONE in block H, fulfilling the obligation.
+// Returns block H once the buyer actually holds the tokens (settlement applied).
+async function settleCoinpay({ seller, buyer, tick, obligationIndex }) {
+    const cp = await coinpayHelper.sendCoinpayV0(buyer, obligationIndex, seller.address, 100000)
+    const coinpayActionIndex = cp.coinpay.action_index
+    let bal = '0'
+    for (let i = 0; i < 30 && bal !== '100'; i++) { bal = await balanceOf(buyer.address, tick); if (bal !== '100') await sleep(2000) }
+    assert.strictEqual(bal, '100', 'buyer credited 100 tokens by the COINPAY settlement pre-reorg')
+    assert.strictEqual(await coinpayRowCount(obligationIndex), 1, 'one coinpays row pre-reorg')
+    const coinpayBlock = await blockOfAction(coinpayActionIndex)
+    assert(coinpayBlock, 'resolved the COINPAY block')
+    console.log('   COINPAY', coinpayActionIndex, 'settled at block', coinpayBlock, ': buyer credited 100', tick)
+    return coinpayBlock
+}
+
+// Gate on the indexer catching up to the node tip before reorging.
+async function waitIndexerAtNodeTip() {
+    let settle = 0
+    while ((await tip()) < (await nodeConnector.getBlockCount()) && settle++ < 60) { await sleep(1000) }
+    console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
+}
+
+// Invalidate the COINPAY block and mine an empty competing chain that overtakes it.
+async function orphanCoinpayBlock(coinpayBlock) {
+    const tipBefore = await nodeConnector.getBlockCount()
+    const coinpayHash = await nodeConnector.getBlockHash(coinpayBlock)
+    const miner = (await cryptoHelper.getNewAddress('cpr-miner', COIN, NETWORK, null, 'legacy', 0)).address
+
+    await nodeConnector.invalidateBlock(coinpayHash)
+    assert.strictEqual(await nodeConnector.getBlockCount(), coinpayBlock - 1, 'rolled back to before the COINPAY')
+
+    const need = tipBefore - (coinpayBlock - 1) + 2
+    for (let i = 0; i < need; i++) await nodeConnector.generateBlock(miner, [])
+    assert(await nodeConnector.getBlockCount() > tipBefore, 'competing chain overtakes the original')
+}
+
+// Wait for rollback.js to delete the coinpays row and un-credit the buyer.
+async function waitForSettlementRollback({ buyer, tick, obligationIndex }) {
+    let gone = false, bbal = '100'
+    const deadline = Date.now() + 180000
+    while (Date.now() < deadline) {
+        gone = (await coinpayRowCount(obligationIndex)) === 0
+        bbal = await balanceOf(buyer.address, tick)
+        if (gone && bbal === '0') break
+        await sleep(2000)
+    }
+    console.log('   indexer tip after reorg', await tip(), 'node tip', await nodeConnector.getBlockCount())
+    assert.strictEqual(gone, true, 'coinpays row rolled back (settlement undone)')
+    assert.strictEqual(bbal, '0', 'buyer token credit reverted (tokens returned to obligation escrow)')
+}
+
+async function reorgOutCoinpay(ctx, coinpayBlock) {
+    await regtestMinerConnector.pauseMining()
+    try {
+        await orphanCoinpayBlock(coinpayBlock)
+        await waitForSettlementRollback(ctx)
+        // The ORDER_MATCH and obligation (earlier surviving blocks) must remain: only
+        // the settlement rolled back, so the obligation is open again (pending_coinpay).
+        assert.strictEqual(await obligationExists(ctx.obligationIndex), true, 'the obligation (earlier block) survives, open again')
+        console.log('   COINPAY settlement rolled back; obligation survives (pending again). Isolation OK')
+    } finally {
+        await regtestMinerConnector.resumeMining()
+    }
+}
+
 describe('COINPAY Reorg: a native-coin settlement rolls back across an on-chain reorg', function () {
     this.timeout(0)
 
@@ -75,79 +167,9 @@ describe('COINPAY Reorg: a native-coin settlement rolls back across an on-chain 
     })
 
     it('orphaning the COINPAY block rolls back the settlement (coinpays + buyer credit)', async function () {
-        const seller = await cryptoHelper.getNewFundedAddress('cpr-seller', COIN, NETWORK, null, 'legacy', 0, 1)
-        const buyer  = await cryptoHelper.getNewFundedAddress('cpr-buyer',  COIN, NETWORK, null, 'legacy', 0, 2)
-        const tick = 'CPR' + seller.address.substring(5, 11).toUpperCase()
-
-        // Seller ISSUEs and lists 100 tokens for 0.001 coin; buyer posts the matching coin order.
-        await issueHelper.sendIssueV0(seller, tick, '1000', '1000', '8', 'coinpay-reorg token', '1000')
-        const expiration = Math.floor(Date.now() / 1000) + 86400
-        const sellerOrder = await orderHelper.sendOrderV0(seller, COIN_CODE, tick, '100.00000000',
-            COIN_CODE, '', '0.00100000', seller.address, expiration, '', '', 'cpr sell')
-        const buyerOrder = await orderHelper.sendOrderV0(buyer, COIN_CODE, '', '0.00100000',
-            COIN_CODE, tick, '100.00000000', buyer.address, expiration, '', '', 'cpr buy')
-
-        // Match opens the pending_coinpay obligation (escrows the seller's 100 tokens).
-        const orderMatch = await indexerDatabase.waitForOrderMatch({
-            giveActionIndex: Number(sellerOrder.order.action_index),
-            getActionIndex:  Number(buyerOrder.order.action_index),
-            status: 'pending_coinpay',
-        }, 30000)
-        assert(orderMatch, 'ORDER_MATCH pending_coinpay exists')
-        const obligationIndex = Number(orderMatch.action_index)
-        assert.strictEqual(await balanceOf(buyer.address, tick), '0', 'buyer holds no tokens pre-settlement')
-        await mine(2)   // bury the match/obligation so the COINPAY is isolatable in a later block
-
-        // Buyer COINPAY (native-coin payment) ALONE in block H, fulfilling the obligation.
-        const cp = await coinpayHelper.sendCoinpayV0(buyer, obligationIndex, seller.address, 100000)
-        const coinpayActionIndex = cp.coinpay.action_index
-        // Wait for the buyer to actually receive the tokens (settlement applied).
-        let bal = '0'
-        for (let i = 0; i < 30 && bal !== '100'; i++) { bal = await balanceOf(buyer.address, tick); if (bal !== '100') await sleep(2000) }
-        assert.strictEqual(bal, '100', 'buyer credited 100 tokens by the COINPAY settlement pre-reorg')
-        assert.strictEqual(await coinpayRowCount(obligationIndex), 1, 'one coinpays row pre-reorg')
-        const coinpayBlock = await blockOfAction(coinpayActionIndex)
-        assert(coinpayBlock, 'resolved the COINPAY block')
-        console.log('   COINPAY', coinpayActionIndex, 'settled at block', coinpayBlock, ': buyer credited 100', tick)
-
-        // Gate on the indexer catching up to the node tip before reorging.
-        let settle = 0
-        while ((await tip()) < (await nodeConnector.getBlockCount()) && settle++ < 60) { await sleep(1000) }
-        console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
-
-        // Reorg out the COINPAY block.
-        await regtestMinerConnector.pauseMining()
-        try {
-            const tipBefore = await nodeConnector.getBlockCount()
-            const coinpayHash = await nodeConnector.getBlockHash(coinpayBlock)
-            const miner = (await cryptoHelper.getNewAddress('cpr-miner', COIN, NETWORK, null, 'legacy', 0)).address
-
-            await nodeConnector.invalidateBlock(coinpayHash)
-            assert.strictEqual(await nodeConnector.getBlockCount(), coinpayBlock - 1, 'rolled back to before the COINPAY')
-
-            const need = tipBefore - (coinpayBlock - 1) + 2
-            for (let i = 0; i < need; i++) await nodeConnector.generateBlock(miner, [])
-            assert(await nodeConnector.getBlockCount() > tipBefore, 'competing chain overtakes the original')
-
-            // Wait for rollback.js to delete the coinpays row and un-credit the buyer.
-            let gone = false, bbal = '100'
-            const deadline = Date.now() + 180000
-            while (Date.now() < deadline) {
-                gone = (await coinpayRowCount(obligationIndex)) === 0
-                bbal = await balanceOf(buyer.address, tick)
-                if (gone && bbal === '0') break
-                await sleep(2000)
-            }
-            console.log('   indexer tip after reorg', await tip(), 'node tip', await nodeConnector.getBlockCount())
-            assert.strictEqual(gone, true, 'coinpays row rolled back (settlement undone)')
-            assert.strictEqual(bbal, '0', 'buyer token credit reverted (tokens returned to obligation escrow)')
-
-            // The ORDER_MATCH and obligation (earlier surviving blocks) must remain: only
-            // the settlement rolled back, so the obligation is open again (pending_coinpay).
-            assert.strictEqual(await obligationExists(obligationIndex), true, 'the obligation (earlier block) survives, open again')
-            console.log('   COINPAY settlement rolled back; obligation survives (pending again). Isolation OK')
-        } finally {
-            await regtestMinerConnector.resumeMining()
-        }
+        const ctx = await openObligation()
+        const coinpayBlock = await settleCoinpay(ctx)
+        await waitIndexerAtNodeTip()
+        await reorgOutCoinpay(ctx, coinpayBlock)
     })
 })
