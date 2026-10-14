@@ -17,12 +17,7 @@
 const assert = require('assert');
 const { priceBatch, REASON_SIZE, REASON_RATIO } = require('./helpers/constants');
 
-module.exports = function register(S) {
-    // -----------------------------------------------------------------------
-    // Clause 2: a ratio/size breach, rejected identically on two nodes,
-    //           and never absorbed
-    // -----------------------------------------------------------------------
-
+function registerCase1(S) {
     it('a SIZE-cap breach is rejected with the identical status on both nodes', function () {
         const txid = S.breachSize.landed.txid;
         assert.strictEqual(S.breachSize.reason, REASON_SIZE);
@@ -38,7 +33,9 @@ module.exports = function register(S) {
         assert.strictEqual(live.validation_status, 'invalid');
         assert.strictEqual(replay.validation_status, 'invalid');
     });
+}
 
+function registerCase2(S) {
     it('a RATIO-cap breach is rejected with the identical status on both nodes', function () {
         const txid = S.breachRatio.landed.txid;
         assert.strictEqual(S.breachRatio.reason, REASON_RATIO);
@@ -64,7 +61,9 @@ module.exports = function register(S) {
         assert.strictEqual(live.validation_status, 'invalid');
         assert.strictEqual(replay.validation_status, 'invalid');
     });
+}
 
+function registerCase3(S) {
     it('nothing from a breached wire is absorbed: no structural fields, no snapshots, on either node', function () {
         // A wire refused at decompression must never record structure. `parseV0`
         // reaches its storage step with `firstRound` undefined and `roundsWire`
@@ -98,4 +97,14 @@ module.exports = function register(S) {
         assert.deepStrictEqual(S.liveGhostActions, [],
             'the live node recorded ' + S.liveGhostActions.length + ' prices row(s) claiming a ghost round');
     });
+}
+
+module.exports = function register(S) {
+    // -----------------------------------------------------------------------
+    // Clause 2: a ratio/size breach, rejected identically on two nodes,
+    //           and never absorbed
+    // -----------------------------------------------------------------------
+    registerCase1(S);
+    registerCase2(S);
+    registerCase3(S);
 };

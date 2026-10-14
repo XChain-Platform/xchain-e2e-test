@@ -17,11 +17,7 @@
 const assert = require('assert');
 const { STATUS_BASE64 } = require('./helpers/constants');
 
-module.exports = function register(S) {
-    // -----------------------------------------------------------------------
-    // Clause 3: non-canonical base64 rejected, not silently normalized
-    // -----------------------------------------------------------------------
-
+function registerCase1(S) {
     it('every non-canonical base64 spelling decodes to the SAME bytes under a lenient reader', function () {
         // The premise of the clause, established before the verdicts are read. A
         // spelling a lenient reader would REJECT anyway proves nothing about
@@ -37,7 +33,9 @@ module.exports = function register(S) {
             assert.notStrictEqual(s.field, s.canonicalField);
         }
     });
+}
 
+function registerCase2(S) {
     it('every non-canonical base64 spelling is rejected ON CHAIN, on both nodes, with the base64 status', function () {
         for (const s of S.spellings) {
             const live = S.liveRows[s.landed.txid], replay = S.replayRows[s.landed.txid];
@@ -61,4 +59,12 @@ module.exports = function register(S) {
                 'the replay node stored round bodies for a "' + s.name + '" wire');
         }
     });
+}
+
+module.exports = function register(S) {
+    // -----------------------------------------------------------------------
+    // Clause 3: non-canonical base64 rejected, not silently normalized
+    // -----------------------------------------------------------------------
+    registerCase1(S);
+    registerCase2(S);
 };

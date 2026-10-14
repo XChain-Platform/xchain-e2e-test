@@ -17,11 +17,7 @@
 const assert = require('assert');
 const { priceBatch, WINDOW_ROUNDS, MIN_SIGNATURES, BATCH_WIRE_VERSION } = require('./helpers/constants');
 
-module.exports = function register(S) {
-    // -----------------------------------------------------------------------
-    // Clause 1: a REAL six-round batch round-trips, with the ratio recorded
-    // -----------------------------------------------------------------------
-
+function registerCase1(S) {
     it('the federation finalized six real rounds and published them as ONE compressed batch', function () {
         assert.strictEqual(S.rounds.length, WINDOW_ROUNDS,
             'expected ' + WINDOW_ROUNDS + ' finalized rounds, got ' + S.rounds.length + S.railState);
@@ -41,7 +37,9 @@ module.exports = function register(S) {
             S.parsedBody.rounds.length + ' rounds the packed form should have won; read the ' +
             'emit-smaller measurement in the run evidence above.');
     });
+}
 
+function registerCase2(S) {
     it('body -> deflate -> base64 -> parse returns the IDENTICAL body, and the ratio is recorded', function () {
         // The wire the publisher emitted is itself strictly canonical base64.
         assert.notStrictEqual(priceBatch.decodeCanonicalBase64(S.parsedWire.field), null,
@@ -78,7 +76,9 @@ module.exports = function register(S) {
         assert.ok(S.parsedWire.wireBytes <= priceBatch.PRICE_WIRE_MAX_BYTES,
             'the emitted wire is ' + S.parsedWire.wireBytes + ' B, past the encoder limit');
     });
+}
 
+function registerCase3(S) {
     it('both nodes stored the compressed batch as the same six-round batch', function () {
         for (const [label, rows] of [['live', S.liveRows], ['replay', S.replayRows]]) {
             const row = rows[S.landedTxid];
@@ -102,4 +102,13 @@ module.exports = function register(S) {
             '" vs replay "' + S.replayRows[S.landedTxid].status + '". A compressed wire that means two ' +
             'things is a fork.');
     });
+}
+
+module.exports = function register(S) {
+    // -----------------------------------------------------------------------
+    // Clause 1: a REAL six-round batch round-trips, with the ratio recorded
+    // -----------------------------------------------------------------------
+    registerCase1(S);
+    registerCase2(S);
+    registerCase3(S);
 };

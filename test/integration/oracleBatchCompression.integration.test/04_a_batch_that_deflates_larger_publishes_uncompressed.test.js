@@ -17,11 +17,7 @@
 const assert = require('assert');
 const { priceBatch, WINDOW_ROUNDS, BATCH_WIRE_VERSION, KNOWN_CAPABILITY_GAP_STATUS } = require('./helpers/constants');
 
-module.exports = function register(S) {
-    // -----------------------------------------------------------------------
-    // Clause 4: a batch that deflates larger publishes uncompressed
-    // -----------------------------------------------------------------------
-
+function registerCase1(S) {
     it('the publisher\'s emit-smaller decision is content-driven, not a constant', function () {
         assert.strictEqual(S.emitReal.compressed, true,
             'OraclePublisher.emitWire declined to compress the real six-round batch, whose body is ' +
@@ -44,7 +40,9 @@ module.exports = function register(S) {
             'the emitted wire carries the compression marker in the FIRST_ROUND slot even though ' +
             'emitWire reported the uncompressed form; the two halves of the decision disagree');
     });
+}
 
+function registerCase2(S) {
     it('the uncompressed wire form is a first-class wire: the plain twin lands the identical batch', function () {
         // The same signed body, in the other form, on the same chain. If the two
         // forms could diverge in validity, this is where it would show: the
@@ -78,4 +76,12 @@ module.exports = function register(S) {
             (original.status === KNOWN_CAPABILITY_GAP_STATUS
                 ? ' (Both carry the known price-capability verdict, which AT9 does not judge.)' : ''));
     });
+}
+
+module.exports = function register(S) {
+    // -----------------------------------------------------------------------
+    // Clause 4: a batch that deflates larger publishes uncompressed
+    // -----------------------------------------------------------------------
+    registerCase1(S);
+    registerCase2(S);
 };
