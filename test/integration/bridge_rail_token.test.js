@@ -323,6 +323,9 @@ function greenVerdictRecord(out, head, venueSpec) {
     return { accepted: true, commit: fields.sha, venue: fields.venue };
 }
 
+// The dispatcher's skip line for a commit already contained in origin develop.
+const ALREADY_LANDED_SKIP = /already contained in origin(?:\/|\s)(?:develop)?/i;
+
 function runDirectCiGate() {
     const venue = os.hostname();
     const res = run('npm', ['run', 'ci:full'], E2E_ROOT,
@@ -431,6 +434,9 @@ describe('token AT9: the gates, and the dated acceptance record', function () {
         const venues = process.env.CI_VENUES ? { CI_VENUES: process.env.CI_VENUES } : {};
         const res = run(dispatcher, ['--repo', 'xchain-e2e-test', '--src', E2E_ROOT,
             '--cmd', CI_GATE_COMMAND], E2E_ROOT, gateEnv(Object.assign({ CI_TIER: 'full' }, venues)), prePush);
+        // The dispatcher refuses to ship a commit that origin develop already contains, so it
+        // runs no gate at all; the landed head still has to be graded, so run the gate directly.
+        if (ALREADY_LANDED_SKIP.test(res.out)) return runDirectCiGate();
         const counts = tallies(res.out);
         const freshGreen = /CI gate GREEN on\s+([^;\s]+)/.exec(res.out);
         const cachedGreen = greenVerdictRecord(res.out, head, venueSpec);
