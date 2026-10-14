@@ -47,13 +47,16 @@ const {
 
 const GROUP = 'policy AT6: the origin sleep reaches the copy';
 const WAKE_SENDS = 3;
+// RESUME_BLOCK is composed this many blocks past the tip read just before the send, so a
+// broadcast slower than one BTC cadence block still lands before the wake block and grades fresh.
+const WAKE_RESUME_MARGIN = 3;
 const STALE_RESUME_BLOCK = 'invalid: RESUME_BLOCK (block_index)';
 
 async function sendWakeAtFreshTip(M) {
     const attempts = [];
     let wake = null;
     for (let send = 0; send < WAKE_SENDS; send++) {
-        const resumeBlock = Number(await nodeConnector.getBlockCount()) + 1;
+        const resumeBlock = Number(await nodeConnector.getBlockCount()) + WAKE_RESUME_MARGIN;
         wake = await btcAction(M.issuer, sleepTickWire(M.tick, resumeBlock, 'policy AT6 wake'), 'sleeps');
         attempts.push({ tx: wake.tx, resumeBlock, status: wake.status });
         if (wake.status !== STALE_RESUME_BLOCK) break;
