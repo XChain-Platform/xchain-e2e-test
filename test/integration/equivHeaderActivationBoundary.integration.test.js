@@ -163,11 +163,112 @@ function verifyingCount(row, canonical) {
     return ok.size;
 }
 
+async function startBoundaryMesh(blockIndex, basePort, label, ctx) {
+    ctx.db = await startDisposableHubDb();
+    if (!ctx.db) { console.log('Skipping EQUIV boundary (' + label + '): no env DB and Docker unavailable'); return false; }
+    ctx.mvh = new MultiValidatorHub({ count: 4, basePort: basePort, startCrossChain: true, startAttestation: false });
+    await ctx.mvh.start();
+    await waitForMesh(ctx.mvh, { timeoutMs: PEER_WAIT_MS });
+    ctx.seed = seedWeightSnapshot(ctx.mvh, {
+        blockIndex: blockIndex,
+        validators: ctx.mvh.identities.map((id, i) => ({ pubkey: id.pubkeyHex, source: 's' + i, weight: WEIGHTS[i] })),
+    });
+    wireCheckpointEngine(ctx.mvh);
+    return true;
+}
+
+async function stopBoundaryMesh(ctx) {
+    if (ctx.seed) ctx.seed.restore();
+    if (ctx.mvh) { await ctx.mvh.stop(); await ctx.mvh.dropDatabases(); }
+    if (ctx.db)  { await ctx.db.stop(); }
+}
+
+// Every stored sig must verify against `want` and none against `other`, whatever the
+// quorum count turned out to be.
+function assertSigSides(rows, want, other, side) {
+    for (let i = 0; i < rows.length; i++) {
+        const total = JSON.parse(rows[i].validator_signatures).length;
+        assert.strictEqual(rows[i].ledger_hash, TIP.ledger_hash, 'hub ' + i + ' diverged on ledger_hash');
+        assert.ok(total >= 1, 'hub ' + i + ' must carry at least one quorum signature');
+        assert.strictEqual(verifyingCount(rows[i], want), total,
+            'hub ' + i + ': EVERY ' + side.have + ' sig must verify against ' + side.wantName);
+        assert.strictEqual(verifyingCount(rows[i], other), 0,
+            'hub ' + i + ' ' + side.have + ' sigs must NOT verify against ' + side.otherName);
+    }
+}
+
+function describeBelowBoundary(captured) {
+    describe('BELOW the height every hub signs the bare headerless canonical', function () {
+        const ctx = {};
+        before(async function () {
+            if (!await startBoundaryMesh(ACT - 1, 34200, 'below', ctx)) this.skip();
+        });
+        after(() => stopBoundaryMesh(ctx));
+
+        it('the gate is OFF, sigs verify against RAW only, and the canonical carries NO equivocation key', async function () {
+            assert.ok(!eq.isEquivHeaderActive(ACT - 1, 'regtest'),
+                'block ' + (ACT - 1) + ' should be BELOW the EQUIV activation height');
+
+            const rows = await finalizeOnEveryHub(ctx.mvh);
+            const raw     = rawCanonical(rows[0], ACT - 1);
+            const wrapped = eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT, v0RoundId(rows[0]), 0, raw);
+
+            // Count-INDEPENDENT invariant: the weighted quorum can finalize with as few as
+            // 2 of the 4 signers (4000+3000 > 2·S/3), so assert that EVERY stored sig (not
+            // some fixed count) verifies against the raw form and none against the wrapped.
+            assertSigSides(rows, raw, wrapped, {
+                have: 'below-gate',
+                wantName: 'the bare raw canonical',
+                otherName: 'the wrapped canonical (no header was signed)',
+            });
+
+            // SLASH-proof negative: a headerless canonical carries no EQUIV key, so a
+            // SLASH verifier (which matches the literal `EQUIV|<key>||` prefix) can
+            // never accept it as one of the two proof messages.
+            assert.ok(!raw.startsWith('EQUIV|'),
+                'a pre-gate canonical must not begin with the EQUIV header');
+            assert.ok(!raw.startsWith(eq.equivPrefix(eq.equivKey(eq.ENGINE_TAGS.CHECKPOINT, v0RoundId(rows[0]), 0))),
+                'a pre-gate canonical must not carry the equivocation prefix');
+
+            captured.below = raw;
+        });
+    });
+}
+
+function describeAboveBoundary(captured) {
+    describe('ABOVE the height every hub signs the EQUIV-wrapped canonical', function () {
+        const ctx = {};
+        before(async function () {
+            if (!await startBoundaryMesh(ACT + 1, 34300, 'above', ctx)) this.skip();
+        });
+        after(() => stopBoundaryMesh(ctx));
+
+        it('the gate is ON, sigs verify against the WRAPPED canonical only, and the header prefix is exact', async function () {
+            assert.ok(eq.isEquivHeaderActive(ACT + 1, 'regtest'),
+                'block ' + (ACT + 1) + ' should be AT/ABOVE the EQUIV activation height');
+
+            const rows = await finalizeOnEveryHub(ctx.mvh);
+            const raw     = rawCanonical(rows[0], ACT + 1);
+            const wrapped = eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT, v0RoundId(rows[0]), 0, raw);
+            const prefix  = eq.equivPrefix(eq.equivKey(eq.ENGINE_TAGS.CHECKPOINT, v0RoundId(rows[0]), 0));
+
+            assert.ok(wrapped.startsWith(prefix), 'wrapped canonical must begin with the exact equivocation prefix');
+
+            assertSigSides(rows, wrapped, raw, {
+                have: 'above-gate',
+                wantName: 'the EQUIV-wrapped canonical',
+                otherName: 'the bare raw canonical (the header IS signed)',
+            });
+
+            captured.above = raw;
+        });
+    });
+}
+
 describe('MultiValidatorHub: EQUIV_HEADER activation boundary (WI-2 bump 2 / A4, L2)', function () {
     this.timeout(300_000);
 
-    let rawBelow = null;
-    let rawAbove = null;
+    const captured = { below: null, above: null };
 
     before(function () {
         if (!Number.isFinite(ACT) || ACT < 2) {
@@ -180,122 +281,27 @@ describe('MultiValidatorHub: EQUIV_HEADER activation boundary (WI-2 bump 2 / A4,
         }
     });
 
-    describe('BELOW the height every hub signs the bare headerless canonical', function () {
-        let db, mvh, seed;
-        before(async function () {
-            db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping EQUIV boundary (below): no env DB and Docker unavailable'); this.skip(); }
-            mvh = new MultiValidatorHub({ count: 4, basePort: 34200, startCrossChain: true, startAttestation: false });
-            await mvh.start();
-            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
-            seed = seedWeightSnapshot(mvh, {
-                blockIndex: ACT - 1,
-                validators: mvh.identities.map((id, i) => ({ pubkey: id.pubkeyHex, source: 's' + i, weight: WEIGHTS[i] })),
-            });
-            wireCheckpointEngine(mvh);
-        });
-        after(async function () {
-            if (seed) seed.restore();
-            if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
-            if (db)  { await db.stop(); }
-        });
-
-        it('the gate is OFF, sigs verify against RAW only, and the canonical carries NO equivocation key', async function () {
-            assert.ok(!eq.isEquivHeaderActive(ACT - 1, 'regtest'),
-                'block ' + (ACT - 1) + ' should be BELOW the EQUIV activation height');
-
-            const rows = await finalizeOnEveryHub(mvh);
-            const raw     = rawCanonical(rows[0], ACT - 1);
-            const wrapped = eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT, v0RoundId(rows[0]), 0, raw);
-
-            // Count-INDEPENDENT invariant: the weighted quorum can finalize with as few as
-            // 2 of the 4 signers (4000+3000 > 2·S/3), so assert that EVERY stored sig (not
-            // some fixed count) verifies against the raw form and none against the wrapped.
-            for (let i = 0; i < rows.length; i++) {
-                const total = JSON.parse(rows[i].validator_signatures).length;
-                assert.strictEqual(rows[i].ledger_hash, TIP.ledger_hash, 'hub ' + i + ' diverged on ledger_hash');
-                assert.ok(total >= 1, 'hub ' + i + ' must carry at least one quorum signature');
-                assert.strictEqual(verifyingCount(rows[i], raw), total,
-                    'hub ' + i + ': EVERY below-gate sig must verify against the bare raw canonical');
-                assert.strictEqual(verifyingCount(rows[i], wrapped), 0,
-                    'hub ' + i + ' below-gate sigs must NOT verify against the wrapped canonical (no header was signed)');
-            }
-
-            // SLASH-proof negative: a headerless canonical carries no EQUIV key, so a
-            // SLASH verifier (which matches the literal `EQUIV|<key>||` prefix) can
-            // never accept it as one of the two proof messages.
-            assert.ok(!raw.startsWith('EQUIV|'),
-                'a pre-gate canonical must not begin with the EQUIV header');
-            assert.ok(!raw.startsWith(eq.equivPrefix(eq.equivKey(eq.ENGINE_TAGS.CHECKPOINT, v0RoundId(rows[0]), 0))),
-                'a pre-gate canonical must not carry the equivocation prefix');
-
-            rawBelow = raw;
-        });
-    });
-
-    describe('ABOVE the height every hub signs the EQUIV-wrapped canonical', function () {
-        let db, mvh, seed;
-        before(async function () {
-            db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping EQUIV boundary (above): no env DB and Docker unavailable'); this.skip(); }
-            mvh = new MultiValidatorHub({ count: 4, basePort: 34300, startCrossChain: true, startAttestation: false });
-            await mvh.start();
-            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
-            seed = seedWeightSnapshot(mvh, {
-                blockIndex: ACT + 1,
-                validators: mvh.identities.map((id, i) => ({ pubkey: id.pubkeyHex, source: 's' + i, weight: WEIGHTS[i] })),
-            });
-            wireCheckpointEngine(mvh);
-        });
-        after(async function () {
-            if (seed) seed.restore();
-            if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
-            if (db)  { await db.stop(); }
-        });
-
-        it('the gate is ON, sigs verify against the WRAPPED canonical only, and the header prefix is exact', async function () {
-            assert.ok(eq.isEquivHeaderActive(ACT + 1, 'regtest'),
-                'block ' + (ACT + 1) + ' should be AT/ABOVE the EQUIV activation height');
-
-            const rows = await finalizeOnEveryHub(mvh);
-            const raw     = rawCanonical(rows[0], ACT + 1);
-            const wrapped = eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT, v0RoundId(rows[0]), 0, raw);
-            const prefix  = eq.equivPrefix(eq.equivKey(eq.ENGINE_TAGS.CHECKPOINT, v0RoundId(rows[0]), 0));
-
-            assert.ok(wrapped.startsWith(prefix), 'wrapped canonical must begin with the exact equivocation prefix');
-
-            for (let i = 0; i < rows.length; i++) {
-                const total = JSON.parse(rows[i].validator_signatures).length;
-                assert.strictEqual(rows[i].ledger_hash, TIP.ledger_hash, 'hub ' + i + ' diverged on ledger_hash');
-                assert.ok(total >= 1, 'hub ' + i + ' must carry at least one quorum signature');
-                assert.strictEqual(verifyingCount(rows[i], wrapped), total,
-                    'hub ' + i + ': EVERY above-gate sig must verify against the EQUIV-wrapped canonical');
-                assert.strictEqual(verifyingCount(rows[i], raw), 0,
-                    'hub ' + i + ' above-gate sigs must NOT verify against the bare raw canonical (the header IS signed)');
-            }
-
-            rawAbove = raw;
-        });
-    });
+    describeBelowBoundary(captured)
+    describeAboveBoundary(captured)
 
     describe('the flag-day is fork-free: identical ledger, header is the only delta', function () {
         it('the raw ledger bytes are byte-identical across the boundary; only the EQUIV header differs', function () {
-            if (rawBelow === null || rawAbove === null) {
+            if (captured.below === null || captured.above === null) {
                 console.log('Skipping EQUIV boundary synthesis: one side did not capture (DB/Docker unavailable)');
                 this.skip();
             }
             // snapshot_block is the LAST field of the raw canonical and is the only
             // thing that differs (ACT-1 vs ACT+1); strip it to compare the ledger.
             const ledgerOf = (raw) => raw.slice(0, raw.lastIndexOf('|'));
-            assert.strictEqual(ledgerOf(rawBelow), ledgerOf(rawAbove),
+            assert.strictEqual(ledgerOf(captured.below), ledgerOf(captured.above),
                 'the checkpointed ledger must be byte-identical across the activation boundary');
 
             // Below carries no header; above's signed preimage is exactly the wrapped
             // form of the same ledger content, so the transition adds the header and
             // nothing else (no ledger-hash divergence, no fork).
-            assert.ok(!rawBelow.startsWith('EQUIV|'), 'below-gate canonical must be headerless');
+            assert.ok(!captured.below.startsWith('EQUIV|'), 'below-gate canonical must be headerless');
             const wrappedAbove = eq.buildEquivCanonical(
-                eq.ENGINE_TAGS.CHECKPOINT, 'BTC|regtest|' + TIP.block_index + '|1', 0, rawAbove);
+                eq.ENGINE_TAGS.CHECKPOINT, 'BTC|regtest|' + TIP.block_index + '|1', 0, captured.above);
             assert.ok(wrappedAbove.startsWith('EQUIV|XCHECKPOINT|'),
                 'above-gate signed preimage must be the EQUIV-wrapped form of the same ledger');
         });

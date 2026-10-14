@@ -44,6 +44,7 @@ const { HUB_SCHEMA_VERSION } = require('../attestMirror/helpers/hubSchemaVersion
 // HubDbSync must find every mirrored local table before startup and bootstrap.
 // Omitting even an unasserted table leaves the bootstrap barrier closed, which prevents
 // watermark advancement and heartbeat delivery without a direct table assertion failing.
+const SRC = 'HubWsMirror_src', REP = 'HubWsMirror_replica';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function waitFor(fn, timeoutMs = 10000, stepMs = 150) {
     const end = Date.now() + timeoutMs;
@@ -52,88 +53,98 @@ async function waitFor(fn, timeoutMs = 10000, stepMs = 150) {
 }
 const count = (pool, table, where = '1') => pool.query('SELECT COUNT(*) c FROM ' + table + ' WHERE ' + where).then(r => Number(r[0].c)).catch(() => 0);
 
-describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration', function () {
-    // 300s: the disposable MariaDB alone takes ~40s on a loaded host (tmpfs
-    // datadir; was 60s+ on disk) before the broadcaster<->sync bootstrap runs.
-    this.timeout(300000);
-    const SRC = 'HubWsMirror_src', REP = 'HubWsMirror_replica';
-    let db, srcPool, repPool, server, wss, broadcaster, sync, port;
+async function startMirrorRig(rig) {
+    const db = rig.db = await startDisposableHubDb();
+    if (!db) { console.log('Skipping hub-DB WS mirror: no env DB and Docker unavailable'); return false; }
+    const base = { host: db.host, port: Number(db.port), user: db.user, password: db.pass, bigIntAsNumber: true, connectionLimit: 4 };
+    const admin = mariadb.createPool(base);
+    for (const d of [SRC, REP]) { await admin.query('DROP DATABASE IF EXISTS ' + d); await admin.query('CREATE DATABASE ' + d); }
+    await admin.end();
+    rig.srcPool = mariadb.createPool({ ...base, database: SRC });
+    rig.repPool = mariadb.createPool({ ...base, database: REP });
+    await applyMirrorSchema(rig);
+    await seedBootstrapRows(rig.srcPool);
+    rig.broadcaster = new HubDbBroadcaster({}, { doQuery: (sql, p) => rig.srcPool.query(sql, p) });
+    await startHubStub(rig);
+    rig.sync = new HubDbSync({ doQuery: (sql, p) => rig.repPool.query(sql, p) }, { hubUrl: 'http://127.0.0.1:' + rig.port });
+    assert.strictEqual(rig.sync.enabled, true, 'sync must be enabled (hubUrl + hubDb present)');
+    await rig.sync.start();
+    // The subscriber registering IS observable on the broadcaster, and the
+    // SUBSCRIBE case below asserts exactly that count, so wait on it rather
+    // than betting 300ms that the WS handshake finished.
+    assert.ok(await waitFor(() => rig.broadcaster.getSubscriberCount() >= 1, 10000),
+        'the WS subscriber never registered on the broadcaster after sync.start()');
+    return true;
+}
 
-    before(async function () {
-        db = await startDisposableHubDb();
-        if (!db) { console.log('Skipping hub-DB WS mirror: no env DB and Docker unavailable'); this.skip(); }
-        const base = { host: db.host, port: Number(db.port), user: db.user, password: db.pass, bigIntAsNumber: true, connectionLimit: 4 };
-        const admin = mariadb.createPool(base);
-        for (const d of [SRC, REP]) { await admin.query('DROP DATABASE IF EXISTS ' + d); await admin.query('CREATE DATABASE ' + d); }
-        await admin.end();
-        srcPool = mariadb.createPool({ ...base, database: SRC });
-        repPool = mariadb.createPool({ ...base, database: REP });
-        // Some shipped DDLs (cross_chain_calls) carry separate CREATE INDEX statements after the
-        // CREATE TABLE; the pools don't enable multipleStatements, so split and run each in order.
-        for (const t of Object.keys(MIRROR_SQL)) {
-            const stmts = readDDL(MIRROR_SQL[t]).split(';').map(s => s.trim()).filter(Boolean);
-            for (const s of stmts) { await srcPool.query(s); await repPool.query(s); }
-        }
+async function applyMirrorSchema(rig) {
+    // Some shipped DDLs (cross_chain_calls) carry separate CREATE INDEX statements after the
+    // CREATE TABLE; the pools don't enable multipleStatements, so split and run each in order.
+    for (const t of Object.keys(MIRROR_SQL)) {
+        const stmts = readDDL(MIRROR_SQL[t]).split(';').map(s => s.trim()).filter(Boolean);
+        for (const s of stmts) { await rig.srcPool.query(s); await rig.repPool.query(s); }
+    }
+}
 
-        // Pre-existing rows must arrive via REST snapshot (not WS) on HubDbSync.start().
-        await srcPool.query(
-            "INSERT INTO price_snapshots (id,round_number,coin_pair,price,reference_block,validator_count,consensus_proof,status) " +
-            "VALUES (1,100,'BTC/USD','61000.00000000',100,4,'proof-boot','finalized')");
-        await srcPool.query(
-            "INSERT INTO capability_snapshots (id,snapshot_block,capability,signing_pubkey,amount) VALUES (1,100,'cross_chain','" + 'a'.repeat(64) + "','6000')");
+async function seedBootstrapRows(srcPool) {
+    // Pre-existing rows must arrive via REST snapshot (not WS) on HubDbSync.start().
+    await srcPool.query(
+        "INSERT INTO price_snapshots (id,round_number,coin_pair,price,reference_block,validator_count,consensus_proof,status) " +
+        "VALUES (1,100,'BTC/USD','61000.00000000',100,4,'proof-boot','finalized')");
+    await srcPool.query(
+        "INSERT INTO capability_snapshots (id,snapshot_block,capability,signing_pubkey,amount) VALUES (1,100,'cross_chain','" + 'a'.repeat(64) + "','6000')");
+}
 
-        broadcaster = new HubDbBroadcaster({}, { doQuery: (sql, p) => srcPool.query(sql, p) });
-
-        // Minimal hub HTTP surface: mirrors xchain-hub api.js REST snapshot + WS subscribe.
-        server = http.createServer(async (req, res) => {
-            const u = urlMod.parse(req.url, true);
-            const m = u.pathname.match(/^\/hub-db\/snapshot\/([a-z_]+)$/);
-            if (m) {
-                try {
-                    const rows = await srcPool.query('SELECT * FROM ' + m[1] + ' WHERE id > ? ORDER BY id ASC LIMIT ?',
-                        [Number(u.query.since_id || 0), Number(u.query.limit || 10000)]);
-                    res.writeHead(200, { 'content-type': 'application/json' });
-                    res.end(JSON.stringify({ table: m[1], rows, count: rows.length, schema_version: HUB_SCHEMA_VERSION }));
-                } catch (e) {
-                    // Explicit JSON content-type: an unset one on an error body can get
-                    // content-type-sniffed as HTML, letting e.message render as markup.
-                    res.writeHead(500, { 'content-type': 'application/json' });
-                    res.end(JSON.stringify({ error: e.message }));
-                }
-                return;
+// Minimal hub HTTP surface: mirrors xchain-hub api.js REST snapshot + WS subscribe.
+async function startHubStub(rig) {
+    const server = rig.server = http.createServer(async (req, res) => {
+        const u = urlMod.parse(req.url, true);
+        const m = u.pathname.match(/^\/hub-db\/snapshot\/([a-z_]+)$/);
+        if (m) {
+            try {
+                const rows = await rig.srcPool.query('SELECT * FROM ' + m[1] + ' WHERE id > ? ORDER BY id ASC LIMIT ?',
+                    [Number(u.query.since_id || 0), Number(u.query.limit || 10000)]);
+                res.writeHead(200, { 'content-type': 'application/json' });
+                res.end(JSON.stringify({ table: m[1], rows, count: rows.length, schema_version: HUB_SCHEMA_VERSION }));
+            } catch (e) {
+                // Explicit JSON content-type: an unset one on an error body can get
+                // content-type-sniffed as HTML, letting e.message render as markup.
+                res.writeHead(500, { 'content-type': 'application/json' });
+                res.end(JSON.stringify({ error: e.message }));
             }
-            res.writeHead(404); res.end();
-        });
-        wss = new WebSocketServer({ server, path: '/hub-db/subscribe' });
-        wss.on('connection', ws => broadcaster.addSubscriber(ws));
-        await new Promise(r => server.listen(0, '127.0.0.1', r));
-        port = server.address().port;
-
-        sync = new HubDbSync({ doQuery: (sql, p) => repPool.query(sql, p) }, { hubUrl: 'http://127.0.0.1:' + port });
-        assert.strictEqual(sync.enabled, true, 'sync must be enabled (hubUrl + hubDb present)');
-        await sync.start();
-        // The subscriber registering IS observable on the broadcaster, and the
-        // SUBSCRIBE case below asserts exactly that count, so wait on it rather
-        // than betting 300ms that the WS handshake finished.
-        assert.ok(await waitFor(() => broadcaster.getSubscriberCount() >= 1, 10000),
-            'the WS subscriber never registered on the broadcaster after sync.start()');
+            return;
+        }
+        res.writeHead(404); res.end();
     });
+    rig.wss = new WebSocketServer({ server, path: '/hub-db/subscribe' });
+    rig.wss.on('connection', ws => rig.broadcaster.addSubscriber(ws));
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    rig.port = server.address().port;
+}
 
-    after(async function () {
-        try { if (sync) sync.stop(); } catch (internal) {}
-        try { if (wss) wss.close(); } catch (internal) {}
-        try { if (server) await new Promise(r => server.close(r)); } catch (internal) {}
-        try { if (srcPool) await srcPool.end(); } catch (internal) {}
-        try { if (repPool) await repPool.end(); } catch (internal) {}
-        try {
-            const a = mariadb.createPool({ host: db.host, port: Number(db.port), user: db.user, password: db.pass });
-            for (const d of [SRC, REP]) await a.query('DROP DATABASE IF EXISTS ' + d);
-            await a.end();
-        } catch (internal) {}
-        try { if (db) await db.stop(); } catch (internal) {}
-    });
+async function stopMirrorRig(rig) {
+    const { db, sync, wss, server, srcPool, repPool } = rig;
+    try { if (sync) sync.stop(); } catch (internal) {}
+    try { if (wss) wss.close(); } catch (internal) {}
+    try { if (server) await new Promise(r => server.close(r)); } catch (internal) {}
+    try { if (srcPool) await srcPool.end(); } catch (internal) {}
+    try { if (repPool) await repPool.end(); } catch (internal) {}
+    try {
+        const a = mariadb.createPool({ host: db.host, port: Number(db.port), user: db.user, password: db.pass });
+        for (const d of [SRC, REP]) await a.query('DROP DATABASE IF EXISTS ' + d);
+        await a.end();
+    } catch (internal) {}
+    try { if (db) await db.stop(); } catch (internal) {}
+}
 
+const bcastWait = async (rig, rows, table, whereSurvive) => {
+    for (const r of rows) rig.broadcaster.broadcastRow({ table, row: r });
+    return waitFor(async () => (await count(rig.repPool, table, whereSurvive)) === rows.length);
+};
+
+function registerBootstrapCases(rig) {
     it('BOOTSTRAP: pulls pre-existing SRC rows into REP via the REST snapshot', async function () {
+        const { repPool } = rig;
         assert.strictEqual(await count(repPool, 'price_snapshots', 'id=1'), 1, 'price_snapshots bootstrap row missing');
         // Keyed on the NATURAL key, never on id: applyRow strips id for
         // capability_snapshots so local AUTO_INCREMENT assigns it (the hub's
@@ -148,10 +159,15 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
     });
 
     it('SUBSCRIBE: start() registers a live subscriber on the broadcaster', function () {
+        const { broadcaster } = rig;
         assert.strictEqual(broadcaster.getSubscriberCount(), 1, 'expected exactly one live WS subscriber');
     });
 
+}
+
+function registerLiveStreamCases(rig) {
     it('LIVE STREAM: a row inserted + broadcast after start arrives over the WS (price_snapshots)', async function () {
+        const { srcPool, repPool, broadcaster } = rig;
         const row = { id: 2, round_number: 101, coin_pair: 'LTC/USD', price: '76.00000000', reference_block: 101,
             validator_count: 4, consensus_proof: 'proof-live', status: 'finalized' };
         await srcPool.query(
@@ -166,6 +182,7 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
     });
 
     it('LIVE STREAM: the same channel carries cross_chain_matches + capability_snapshots', async function () {
+        const { srcPool, repPool, broadcaster } = rig;
         const match = { id: 50, match_id: 'wsmirror-match-1', snapshot_block: 100, network: 'regtest',
             a_chain: 'BTC', a_action_index: 7, a_kind: 'order', a_tick: 'WSA', a_amount: '40', a_filled_before: '0', a_ownership: 0, a_payout_addr: 'addrA',
             b_chain: 'LTC', b_action_index: 9, b_kind: 'order', b_tick: 'WSB', b_amount: '40', b_filled_before: '0', b_ownership: 0, b_payout_addr: 'addrB',
@@ -189,8 +206,11 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
             "snapshot_block=200 AND capability='cross_chain'")) === 1),
             'live capability_snapshots row never arrived');
     });
+}
 
+function registerIdempotentCase(rig) {
     it('IDEMPOTENT: a re-broadcast of an already-applied row is a no-op (INSERT IGNORE)', async function () {
+        const { repPool, broadcaster } = rig;
         const row = { id: 2, round_number: 101, coin_pair: 'LTC/USD', price: '76.00000000', reference_block: 101,
             validator_count: 4, consensus_proof: 'proof-live', status: 'finalized' };
         broadcaster.broadcastRow({ table: 'price_snapshots', row });
@@ -208,11 +228,14 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
             'the sentinel behind the re-broadcast never arrived, so the duplicate was never observed');
         assert.strictEqual(await count(repPool, 'price_snapshots', "round_number=101 AND coin_pair='LTC/USD'"), 1, 're-broadcast must not duplicate');
     });
+}
 
+function registerRetractionCases(rig) {
     // A DEFERRED retraction (hub-blip path) replays a CLOSED range [from,last]. If the new
     // canonical chain re-published a row at A' > last before the deferred drain fires, the bounded
     // delete must NOT wipe it. Proven end-to-end over the real WS mirror.
     it('CLOSED-RANGE RETRACTION: a bounded retraction over the WS leaves a re-published row above the ceiling intact', async function () {
+        const { srcPool, repPool, broadcaster } = rig;
         const ins = (id, sai, round, pair) => srcPool.query(
             "INSERT INTO price_snapshots (id,round_number,coin_pair,price,reference_block,validator_count,consensus_proof,status,source_chain,source_action_index) " +
             "VALUES (?,?,?,'1.00000000',1,4,'proof-retr','finalized','BTC',?)", [id, round, pair, sai]);
@@ -235,29 +258,27 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
         assert.strictEqual(await count(repPool, 'price_snapshots', "round_number=301 AND coin_pair='RETR-B/USD'"), 1, 're-published row A\'=80 must survive a [50,75] retraction');
         assert.strictEqual(await count(repPool, 'price_snapshots', "round_number=300 AND coin_pair='RETR-A/USD'"), 0, 'orphan row in [50,75] must stay deleted');
     });
+}
 
-    // Push-generation reorg fence over the WS mirror.
-    // The HARD case the closed-range bound alone cannot solve: action_index RECYCLES after a
-    // rollback (MAX+1 restarts from `first`), so the new canonical chain re-publishes a DISTINCT row
-    // at the SAME action_index that is inside the deferred retraction's [first,last]. A range-only
-    // delete wipes both the orphan AND the re-publish. The fence stamps each row with the source
-    // chain's push_generation and carries the rollback's PRE-bump generation on the retraction, so
-    // only rows with push_generation <= it are deleted. The re-published row (higher generation)
-    // survives even at the recycled index. Each case below would FAIL on pre-fence code (the
-    // re-published row would be deleted); it passes only because applyRetraction fences by
-    // generation. Mirrors the same row:deleted{retraction_generation} the hub broadcasts live.
-    const bcastWait = async (rows, table, whereSurvive) => {
-        for (const r of rows) broadcaster.broadcastRow({ table, row: r });
-        return waitFor(async () => (await count(repPool, table, whereSurvive)) === rows.length);
-    };
-
+// Push-generation reorg fence over the WS mirror.
+// The HARD case the closed-range bound alone cannot solve: action_index RECYCLES after a
+// rollback (MAX+1 restarts from `first`), so the new canonical chain re-publishes a DISTINCT row
+// at the SAME action_index that is inside the deferred retraction's [first,last]. A range-only
+// delete wipes both the orphan AND the re-publish. The fence stamps each row with the source
+// chain's push_generation and carries the rollback's PRE-bump generation on the retraction, so
+// only rows with push_generation <= it are deleted. The re-published row (higher generation)
+// survives even at the recycled index. Each case below would FAIL on pre-fence code (the
+// re-published row would be deleted); it passes only because applyRetraction fences by
+// generation. Mirrors the same row:deleted{retraction_generation} the hub broadcasts live.
+function registerGenFencePriceCases(rig) {
     it('GEN FENCE (price_snapshots): a re-published row at a RECYCLED action_index survives a gen-fenced retraction', async function () {
+        const { repPool, broadcaster } = rig;
         // Orphan (gen 5) and re-publish (gen 6) at the SAME source_action_index = 50. Distinct
         // round_number keeps the (round_number, coin_pair) unique key happy; only the generation
         // distinguishes stale from fresh.
         const orphan = { id: 600, round_number: 600, coin_pair: 'GENP/USD', source_chain: 'BTC', source_action_index: 50, push_generation: 5 };
         const repub  = { id: 601, round_number: 601, coin_pair: 'GENP/USD', source_chain: 'BTC', source_action_index: 50, push_generation: 6 };
-        assert.ok(await bcastWait([orphan, repub], 'price_snapshots', "round_number IN (600,601) AND coin_pair='GENP/USD'"), 'recycle rows never mirrored');
+        assert.ok(await bcastWait(rig, [orphan, repub], 'price_snapshots', "round_number IN (600,601) AND coin_pair='GENP/USD'"), 'recycle rows never mirrored');
 
         broadcaster.broadcastDeletion({ table: 'price_snapshots', source_chain: 'BTC', from_action_index: 50, to_action_index: 75, retraction_generation: 5 });
         assert.ok(await waitFor(async () => (await count(repPool, 'price_snapshots', "round_number=600 AND coin_pair='GENP/USD'")) === 0), 'gen-5 orphan at recycled index never removed');
@@ -267,12 +288,13 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
     });
 
     it('GEN FENCE (oracle_prices): a higher-gen row at a recycled index survives; a stale in-range row still deletes', async function () {
+        const { repPool, broadcaster } = rig;
         // oracle_prices carries UNIQUE (source_chain, action_index), so two rows can't share index 50;
         // the recycled-index row REPLACES the orphan. Survivor = the gen-6 row now at index 50; the
         // gen-5 orphan at index 60 (also inside [50,75]) proves deletion still fires under the fence.
         const survivor = { id: 610, source_address: 'oGenNew', source_chain: 'BTC', coin: 'BTC', tick: 'T', fiat: 'USD', value: '1', block_time: 1, effective_at: 1, action_index: 50, push_generation: 6 };
         const orphan   = { id: 611, source_address: 'oGenOld', source_chain: 'BTC', coin: 'BTC', tick: 'T', fiat: 'USD', value: '1', block_time: 1, effective_at: 1, action_index: 60, push_generation: 5 };
-        assert.ok(await bcastWait([survivor, orphan], 'oracle_prices', "source_chain='BTC' AND action_index IN (50,60)"), 'oracle recycle rows never mirrored');
+        assert.ok(await bcastWait(rig, [survivor, orphan], 'oracle_prices', "source_chain='BTC' AND action_index IN (50,60)"), 'oracle recycle rows never mirrored');
 
         broadcaster.broadcastDeletion({ table: 'oracle_prices', source_chain: 'BTC', from_action_index: 50, to_action_index: 75, retraction_generation: 5 });
         assert.ok(await waitFor(async () => (await count(repPool, 'oracle_prices', "source_chain='BTC' AND action_index=60")) === 0), 'gen-5 oracle orphan never removed');
@@ -280,14 +302,17 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
         assert.strictEqual(await count(repPool, 'oracle_prices', "source_chain='BTC' AND action_index=50"), 1, 'gen-6 oracle row at recycled index must survive a gen-5 retraction');
         assert.strictEqual(await count(repPool, 'oracle_prices', "source_chain='BTC' AND action_index=60"), 0, 'gen-5 oracle orphan must stay deleted');
     });
+}
 
+function registerGenFenceRelayCases(rig) {
     it('GEN FENCE (cross_chain_calls, single column): a re-finalized relay row at a recycled source index survives', async function () {
+        const { repPool, broadcaster } = rig;
         // XCALL relay rows fence on the single push_generation column (source-keyed retraction).
         // Orphan + re-finalize at the SAME source_action_index = 50, distinct call_id (unique key).
         const base = { phase: 'dispatch', snapshot_block: 100, network: 'regtest', source_chain: 'BTC', source_contract_index: 1, target_chain: 'LTC', target_contract_index: 1, method: 'm', params_json: '[]', gas_limit: 1000, cross_hops: 0, effective_time: 1, validator_signatures: '[]', status: 'finalized' };
         const orphan = { ...base, id: 620, call_id: 'gen-call-orphan', source_action_index: 50, push_generation: 5 };
         const repub  = { ...base, id: 621, call_id: 'gen-call-repub',  source_action_index: 50, push_generation: 6 };
-        assert.ok(await bcastWait([orphan, repub], 'cross_chain_calls', "call_id IN ('gen-call-orphan','gen-call-repub')"), 'call recycle rows never mirrored');
+        assert.ok(await bcastWait(rig, [orphan, repub], 'cross_chain_calls', "call_id IN ('gen-call-orphan','gen-call-repub')"), 'call recycle rows never mirrored');
 
         broadcaster.broadcastDeletion({ table: 'cross_chain_calls', source_chain: 'BTC', from_action_index: 50, to_action_index: 75, retraction_generation: 5 });
         assert.ok(await waitFor(async () => (await count(repPool, 'cross_chain_calls', "call_id='gen-call-orphan'")) === 0), 'gen-5 call orphan never removed');
@@ -297,13 +322,14 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
     });
 
     it('GEN FENCE (cross_chain_matches, PER-LEG): the reorged leg fences by its own generation', async function () {
+        const { repPool, broadcaster } = rig;
         // A match has two legs on different chains, each with its own a_/b_push_generation. A BTC
         // source reorg fences ONLY the a-leg (here on BTC) by a_push_generation. Orphan + re-publish
         // share a_action_index = 50 on BTC; only a_push_generation distinguishes them.
         const base = { snapshot_block: 100, network: 'regtest', a_chain: 'BTC', a_kind: 'order', a_tick: 'A', a_amount: '1', a_filled_before: '0', a_ownership: 0, a_payout_addr: 'x', b_chain: 'LTC', b_action_index: 9, b_kind: 'order', b_tick: 'B', b_amount: '1', b_filled_before: '0', b_ownership: 0, b_payout_addr: 'y', effective_time: 1, validator_signatures: '[]', status: 'finalized', b_push_generation: 0 };
         const orphan = { ...base, id: 630, match_id: 'gen-match-orphan', a_action_index: 50, a_push_generation: 5 };
         const repub  = { ...base, id: 631, match_id: 'gen-match-repub',  a_action_index: 50, a_push_generation: 6 };
-        assert.ok(await bcastWait([orphan, repub], 'cross_chain_matches', "match_id IN ('gen-match-orphan','gen-match-repub')"), 'match recycle rows never mirrored');
+        assert.ok(await bcastWait(rig, [orphan, repub], 'cross_chain_matches', "match_id IN ('gen-match-orphan','gen-match-repub')"), 'match recycle rows never mirrored');
 
         broadcaster.broadcastDeletion({ table: 'cross_chain_matches', source_chain: 'BTC', from_action_index: 50, to_action_index: 75, retraction_generation: 5 });
         assert.ok(await waitFor(async () => (await count(repPool, 'cross_chain_matches', "match_id='gen-match-orphan'")) === 0), 'gen-5 match orphan (a-leg) never removed');
@@ -311,4 +337,24 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
         assert.strictEqual(await count(repPool, 'cross_chain_matches', "match_id='gen-match-repub'"), 1, 'gen-6 a-leg match at the recycled index must survive a gen-5 retraction');
         assert.strictEqual(await count(repPool, 'cross_chain_matches', "match_id='gen-match-orphan'"), 0, 'gen-5 match orphan must stay deleted');
     });
+}
+
+describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration', function () {
+    // 300s: the disposable MariaDB alone takes ~40s on a loaded host (tmpfs
+    // datadir; was 60s+ on disk) before the broadcaster<->sync bootstrap runs.
+    this.timeout(300000);
+    const rig = {};
+
+    before(async function () {
+        if (!await startMirrorRig(rig)) this.skip();
+    });
+
+    after(() => stopMirrorRig(rig));
+
+    registerBootstrapCases(rig);
+    registerLiveStreamCases(rig);
+    registerIdempotentCase(rig);
+    registerRetractionCases(rig);
+    registerGenFencePriceCases(rig);
+    registerGenFenceRelayCases(rig);
 });
