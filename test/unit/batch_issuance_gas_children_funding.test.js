@@ -63,12 +63,12 @@ describe('batch issuance gas-child funding', function () {
         global.context = (name, register) => register()
         global.it = (name, test) => { runCase = test }
 
-        const register = proxyquire('../actions/batch_issuance_limits/gas_children', {
+        const register = proxyquire('../actions/batch_issuance_limits/gas_children.test', {
             '../../helpers/core/cryptoHelper': { getNewFundedAddress },
             '../../helpers/gasHelper': { ensureGasBalance },
             '../../helpers/mintHelper': { sendMintV0 },
             '../../helpers/batchHelper': { sendBatch },
-            './shared': {
+            './lib/shared': {
                 GAS_TICK: 'XCHAIN',
                 XCHAIN_PER_ISSUE: 1,
                 XCHAIN_PER_CHILD_ISSUE: 0.5,
