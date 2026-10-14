@@ -21,6 +21,17 @@ const {
     HUB, SETTLE, BS, NETWORK, SNAPSHOT, CP_HEIGHT, BLOCK, BLOCK_TIME, DUE_TIME, DEST_ADDR, SRC_ADDR, makeFixture
 } = require('./lib/shared');
 
+const TOKEN_AMOUNT = '5.0000';
+
+function tokenInLeg(identities, overrides){
+    const row = HUB.buildTransferRow(Object.assign({
+        snapshotBlock: SNAPSHOT, srcChain: 'BTC', srcActionIndex: 9001, srcAddress: SRC_ADDR,
+        destChain: 'DOGE', destAddress: DEST_ADDR, tick: 'FUFU', decimals: 4,
+        amount: TOKEN_AMOUNT, effectiveTime: DUE_TIME, network: NETWORK
+    }, overrides || {}));
+    return HUB.signRecord(row, identities);
+}
+
 describe('XBRIDGE transfer: token AT1, AT2 and AT5: a general token leg', function(){
     this.timeout(240_000);
 
@@ -29,17 +40,6 @@ describe('XBRIDGE transfer: token AT1, AT2 and AT5: a general token leg', functi
     before(function(){
         ({ ids, validators } = makeFixture());
     });
-
-    const TOKEN_AMOUNT = '5.0000';
-
-    function tokenInLeg(identities, overrides){
-        const row = HUB.buildTransferRow(Object.assign({
-            snapshotBlock: SNAPSHOT, srcChain: 'BTC', srcActionIndex: 9001, srcAddress: SRC_ADDR,
-            destChain: 'DOGE', destAddress: DEST_ADDR, tick: 'FUFU', decimals: 4,
-            amount: TOKEN_AMOUNT, effectiveTime: DUE_TIME, network: NETWORK
-        }, overrides || {}));
-        return HUB.signRecord(row, identities);
-    }
 
     it('creates the BTC root and the BTC.FUFU child owned by the bridge role address, then credits the child', async function(){
         const row = tokenInLeg(ids);
