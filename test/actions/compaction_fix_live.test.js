@@ -69,67 +69,77 @@ async function mintStatus(txHash){
     } finally { conn.release() }
 }
 
+// Scenario state shared by the steps below (set up in the before hook).
+const st = { src: null, dest: null, destId: null, tick: null }
+
+// Funded source (native + seeded gas). Fresh dest address (no funding
+// needed; it gets indexed the moment it receives the control MINT).
+async function setUpActors() {
+    st.src  = await cryptoHelper.getNewFundedAddress('COMPACTFIX.SRC', COIN, NETWORK, null, 'legacy', 0, 1)
+    st.dest = await cryptoHelper.getNewAddress('COMPACTFIX.DEST', COIN, NETWORK, null, 'legacy', 1)
+    // Open minting, no MINT_SUPPLY: only the MINTs below ever credit it.
+    st.tick = 'CFX' + st.src.address.substring(st.src.address.length - 8).toUpperCase().replace(/[^A-Z0-9]/g, 'X')
+    await issueHelper.sendIssueV0(st.src, st.tick, 1000000, 1000, 0, 'compaction fix drill token', 0)
+    console.log('    [live] src=' + st.src.address + ' dest=' + st.dest.address)
+}
+
+// Broadcast a raw MINT wire string from the source and mine it.
+async function broadcastMint(msg) {
+    const txHash = await transactionHelper.createAndSendTransaction(st.src, msg)
+    try { await global.regtestMinerConnector.generateBlocks(1) } catch (e) { void e }
+    return txHash
+}
+
+async function controlMintToFullAddress() {
+    const txHash = await broadcastMint('MINT|0|' + st.tick + '|7|' + st.dest.address + '|')
+
+    const mint = await global.indexerDatabase.waitForMint({ txHash, tick: st.tick, destination: st.dest.address, status: 'valid' })
+    assert.ok(mint, 'control MINT should be indexed valid with destination=dest')
+    const credit = await global.indexerDatabase.waitForCredit({ txHash, tick: st.tick, address: st.dest.address })
+    assert.ok(credit, 'control MINT should credit dest')
+
+    st.destId = await addressId(st.dest.address)
+    console.log('    [live] dest index id N=' + st.destId)
+    assert.ok(st.destId && /^[0-9]+$/.test(st.destId), 'dest must now have a numeric index id')
+}
+
+async function mintToCompactedRef() {
+    const ref = '^' + st.destId
+    console.log('    [live] minting to compacted ref ' + ref)
+    const txHash = await broadcastMint('MINT|0|' + st.tick + '|11|' + ref + '|')
+
+    // destination joins index_addresses by the stored id; a match on dest.address
+    // proves ^N resolved to dest (pre-fix this row would be invalid format).
+    const mint = await global.indexerDatabase.waitForMint({ txHash, tick: st.tick, destination: st.dest.address, status: 'valid' })
+    assert.ok(mint, '^N MINT must be indexed VALID with destination resolved to dest (the fix)')
+
+    const credit = await global.indexerDatabase.waitForCredit({ txHash, tick: st.tick, address: st.dest.address })
+    assert.ok(credit, 'the ^N MINT credit must land on the resolved address dest')
+    console.log('    [live] ^N resolved + credited dest, amount=' + (credit.amount))
+}
+
+async function danglingRefIsRejected() {
+    const txHash = await broadcastMint('MINT|0|' + st.tick + '|3|^999999999|')
+
+    // Poll the action status directly until the tx is indexed.
+    let status = null
+    for (let i = 0; i < 60 && status == null; i++) {
+        status = await mintStatus(txHash)
+        if (status == null) await new Promise(r => setTimeout(r, 1000))
+    }
+    console.log('    [live] dangling-ref MINT status=' + status)
+    assert.ok(status && /^invalid/.test(status), 'dangling ^<id> MINT must be invalid, got: ' + status)
+    assert.ok(/DESTINATION/.test(status), 'the dangling ^<id> MINT must be rejected for its DESTINATION, got: ' + status)
+}
+
 describe('[live] indexer ^<id> address resolution fix (resolveAddressRef)', function () {
     this.timeout(0)
 
-    let src, dest, destId, tick
+    before(setUpActors)
 
-    before(async function () {
-        // Funded source (native + seeded gas). Fresh dest address (no funding
-        // needed; it gets indexed the moment it receives the control MINT).
-        src  = await cryptoHelper.getNewFundedAddress('COMPACTFIX.SRC', COIN, NETWORK, null, 'legacy', 0, 1)
-        dest = await cryptoHelper.getNewAddress('COMPACTFIX.DEST', COIN, NETWORK, null, 'legacy', 1)
-        // Open minting, no MINT_SUPPLY: only the MINTs below ever credit it.
-        tick = 'CFX' + src.address.substring(src.address.length - 8).toUpperCase().replace(/[^A-Z0-9]/g, 'X')
-        await issueHelper.sendIssueV0(src, tick, 1000000, 1000, 0, 'compaction fix drill token', 0)
-        console.log('    [live] src=' + src.address + ' dest=' + dest.address)
-    })
+    it('control: MINT to the FULL destination address is valid and credits it (indexes dest)', controlMintToFullAddress)
 
-    it('control: MINT to the FULL destination address is valid and credits it (indexes dest)', async function () {
-        const msg = 'MINT|0|' + tick + '|7|' + dest.address + '|'
-        const txHash = await transactionHelper.createAndSendTransaction(src, msg)
-        try { await global.regtestMinerConnector.generateBlocks(1) } catch (e) {}
+    it('FIX: MINT to ^N is valid and the credit lands on the RESOLVED address (dest)', mintToCompactedRef)
 
-        const mint = await global.indexerDatabase.waitForMint({ txHash, tick: tick, destination: dest.address, status: 'valid' })
-        assert.ok(mint, 'control MINT should be indexed valid with destination=dest')
-        const credit = await global.indexerDatabase.waitForCredit({ txHash, tick: tick, address: dest.address })
-        assert.ok(credit, 'control MINT should credit dest')
-
-        destId = await addressId(dest.address)
-        console.log('    [live] dest index id N=' + destId)
-        assert.ok(destId && /^[0-9]+$/.test(destId), 'dest must now have a numeric index id')
-    })
-
-    it('FIX: MINT to ^N is valid and the credit lands on the RESOLVED address (dest)', async function () {
-        const ref = '^' + destId
-        const msg = 'MINT|0|' + tick + '|11|' + ref + '|'
-        console.log('    [live] minting to compacted ref ' + ref)
-        const txHash = await transactionHelper.createAndSendTransaction(src, msg)
-        try { await global.regtestMinerConnector.generateBlocks(1) } catch (e) {}
-
-        // destination joins index_addresses by the stored id; a match on dest.address
-        // proves ^N resolved to dest (pre-fix this row would be invalid format).
-        const mint = await global.indexerDatabase.waitForMint({ txHash, tick: tick, destination: dest.address, status: 'valid' })
-        assert.ok(mint, '^N MINT must be indexed VALID with destination resolved to dest (the fix)')
-
-        const credit = await global.indexerDatabase.waitForCredit({ txHash, tick: tick, address: dest.address })
-        assert.ok(credit, 'the ^N MINT credit must land on the resolved address dest')
-        console.log('    [live] ^N resolved + credited dest, amount=' + (credit.amount))
-    })
-
-    it('dangling ^<id> (no such row) is rejected as invalid format (no silent drop)', async function () {
-        const msg = 'MINT|0|' + tick + '|3|^999999999|'
-        const txHash = await transactionHelper.createAndSendTransaction(src, msg)
-        try { await global.regtestMinerConnector.generateBlocks(1) } catch (e) {}
-
-        // Poll the action status directly until the tx is indexed.
-        let status = null
-        for (let i = 0; i < 60 && status == null; i++) {
-            status = await mintStatus(txHash)
-            if (status == null) await new Promise(r => setTimeout(r, 1000))
-        }
-        console.log('    [live] dangling-ref MINT status=' + status)
-        assert.ok(status && /^invalid/.test(status), 'dangling ^<id> MINT must be invalid, got: ' + status)
-        assert.ok(/DESTINATION/.test(status), 'the dangling ^<id> MINT must be rejected for its DESTINATION, got: ' + status)
-    })
+    it('dangling ^<id> (no such row) is rejected as invalid format (no silent drop)', danglingRefIsRejected)
 })
