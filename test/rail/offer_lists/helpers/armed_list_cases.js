@@ -212,6 +212,45 @@ function armedListAction(memberAddress){
     return { action: 'LIST', params: { type: ADDRESS_LIST_TYPE, item: memberAddress } };
 }
 
+function parseActionIndex(value){
+    const n = typeof value === 'string' && /^[0-9]+$/.test(value) ? Number(value) : value;
+    if(!Number.isSafeInteger(n) || n <= 0)
+        throw new Error('indexed action_index must be a positive safe integer');
+    return n;
+}
+
+// Reads the first indexed action's index from an sdk submit reply that waited for
+// the indexer.
+function indexedActionIndex(res){
+    const indexed = res && res.indexed;
+    const actions = indexed && indexed.actions;
+    if(!Array.isArray(actions) || actions.length === 0) throw new Error('no indexed actions');
+    if(indexed.status !== 'valid') throw new Error('indexed status is ' + indexed.status);
+    return parseActionIndex(actions[0].action_index);
+}
+
+function requireSeatParty(seat, party){
+    if(!party || typeof party !== 'object' || !party.sdk)
+        throw new Error(seat + ' party must have an sdk');
+    requireText(seat + ' address', party.address);
+    requireText(seat + ' wif', party.wif);
+}
+
+// Adapts the sdk submit to the (seat, action) io.submit that runArmedCase takes.
+function seatSubmitter(parties, { submit, submitOpts } = {}){
+    if(typeof submit !== 'function') throw new Error('submit must be a function');
+    if(typeof submitOpts !== 'function') throw new Error('submitOpts must be a function');
+    const seats = parties || {};
+    requireSeatParty('maker', seats.maker);
+    requireSeatParty('taker', seats.taker);
+    return async function submitSeat(seat, action){
+        if(seat !== 'maker' && seat !== 'taker') throw new Error('seat must be maker or taker');
+        const party = seats[seat];
+        const to = { pubkey: party.address, change: party.address };
+        return indexedActionIndex(await submit(party.sdk, action, to, submitOpts({ wif: party.wif })));
+    };
+}
+
 function checkArmedOutcome(testCase, mode, outcome){
     if(mode !== 'armed' && mode !== 'inert')
         throw new Error('mode must be armed or inert');
@@ -265,10 +304,12 @@ module.exports = {
     armedOrderActions,
     checkArmedOutcome,
     expectMode,
+    indexedActionIndex,
     observedOutcome,
     pairMatchQuery,
     planArmedCase,
     requireArmingVariables,
     runArmedCase,
+    seatSubmitter,
     settlePairOutcome
 };
