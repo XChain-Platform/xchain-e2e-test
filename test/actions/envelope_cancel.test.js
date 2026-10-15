@@ -171,7 +171,9 @@ describe('Envelope Cancel: recovering an unrevealed commit from persisted state 
 
         // And no action ever existed.
         // An assertion that something was NOT indexed is vacuous until the indexer
-        // has reached the blocks in question, so this wait throws on timeout.
+        // has reached the blocks in question: a lagging indexer makes "no action here"
+        // true for the wrong reason. Under a full-suite run the indexer has been
+        // observed six blocks behind, so this wait throws on timeout.
         await waitForIndexerAtTip({ nodeTip: () => nodeConnector.getBlockCount(), timeoutMs: 180000 })
         assert.strictEqual(await fileCountByName(fileName), 0,
             'an unrevealed commit produces no action, cancelled or not (§3.7)')

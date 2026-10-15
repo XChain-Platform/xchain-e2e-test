@@ -115,7 +115,8 @@ describe('Contract Staking Reorg: a STAKE v3 row rolls back when its block is or
         console.log('   staked 400; rowBlock', rowBlock, 'txBlock', txBlock, '-> invalidate', stakeBlock, '(deploy', deployBlock + ')')
 
         // The INDEXER must reach the node tip before we reorg, so the stake block is
-        // definitely processed and the rollback has something to undo.
+        // definitely processed and the rollback has something to undo. The shared wait
+        // throws on timeout rather than letting the reorg run against a lagging indexer.
         await waitForIndexerAtTip({ nodeTip: () => nodeConnector.getBlockCount() })
         console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
 
