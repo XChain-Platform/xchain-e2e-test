@@ -320,10 +320,42 @@ function connectionQuery(getConnection) {
     };
 }
 
+// The 30 second match wait of the allow and block rail tests: 15 reads, 2 seconds apart.
+const ARMED_SETTLE = Object.freeze({ attempts: 15, intervalMs: 2000 });
+
+function timerSleep(ms){
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Assembles the io object runArmedCase takes from the parties, the sdk submit and a
+// connection getter, so the rail test hands over only real calls and addresses.
+function armedCaseIo({
+    parties, submit, submitOpts, getConnection, sleep, memberAddress, outsiderAddress, order,
+    attempts = ARMED_SETTLE.attempts, intervalMs = ARMED_SETTLE.intervalMs
+} = {}){
+    if(typeof getConnection !== 'function') throw new TypeError('getConnection must be a function');
+    requireText('memberAddress', memberAddress);
+    requireText('outsiderAddress', outsiderAddress);
+    if(memberAddress === outsiderAddress)
+        throw new Error('memberAddress and outsiderAddress must differ');
+    return {
+        submit: seatSubmitter(parties, { submit, submitOpts }),
+        query: connectionQuery(getConnection),
+        sleep: sleep === undefined ? timerSleep : sleep,
+        memberAddress,
+        outsiderAddress,
+        order,
+        attempts,
+        intervalMs
+    };
+}
+
 module.exports = {
     ADDRESS_LIST_TYPE,
+    ARMED_SETTLE,
     ARMING_VARIABLES,
     OFFER_LIST_ARMED_CASES,
+    armedCaseIo,
     armedListAction,
     armedOrderActions,
     armedSuiteMode,
