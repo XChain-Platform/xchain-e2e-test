@@ -81,7 +81,10 @@ function crossingPair({ ltcIdx, dogeIdx, ltcGive = '90', dogeGive = '40' }) {
 
 // Inline mock indexer context. Pure stake-weighted-quorum math runs through a
 // real IndexerUtility prototype; impure DB/ledger calls are stubbed and counted.
-function makeCtx(coin, pubkeys) {
+// The local offer rows give what the match's a leg names (tick, ownership, amount), as
+// the real rows do: the indexer settles a leg only against its own offer's give side.
+function makeCtx(coin, pubkeys, matchRow) {
+    const give = { GIVE_TICK: matchRow.a_tick, GIVE_OWNERSHIP: Number(matchRow.a_ownership || 0), GIVE_AMOUNT: String(matchRow.a_amount) };
     const calls = { getOrderInfo: 0, getSwapInfo: 0, createOrderStatus: 0, createSwapStatus: 0, recordSettlement: 0 };
     const util = Object.create(IndexerUtility.prototype);
     util.processTransactionLedgerChanges = async () => {};
@@ -92,8 +95,8 @@ function makeCtx(coin, pubkeys) {
     const indexerDb = {
         getStakeWeightsByCapability: async () => validators,
         getValidatorsByCapability:   async () => pubkeys.map((pk) => ({ pubkey: pk })),
-        getOrderInfo: async () => { calls.getOrderInfo++; return { ORDER_STATUS: 'open', SOURCE: 'srcaddr' }; },
-        getSwapInfo:  async () => { calls.getSwapInfo++;  return { SWAP_STATUS:  'open', SOURCE: 'srcaddr' }; },
+        getOrderInfo: async () => { calls.getOrderInfo++; return { ORDER_STATUS: 'open', SOURCE: 'srcaddr', ...give }; },
+        getSwapInfo:  async () => { calls.getSwapInfo++;  return { SWAP_STATUS:  'open', SOURCE: 'srcaddr', ...give }; },
         createActionIndex: async () => 9001,
         recordCrossChainOrderFill: async () => {},
         getOrderAmountsRemaining: async () => ['0'],
@@ -173,7 +176,7 @@ async function assertTamperedBundleRejected(matchRow, pubkeys) {
     }));
     tampered.validator_signatures = JSON.stringify(sigs);
 
-    const { ctx, calls } = makeCtx(tampered.a_chain, pubkeys);
+    const { ctx, calls } = makeCtx(tampered.a_chain, pubkeys, tampered);
     const handler = new CrossSettle(ctx);
     const data = { MATCH: tampered, BLOCK_INDEX: 200 };
 
@@ -185,7 +188,7 @@ async function assertTamperedBundleRejected(matchRow, pubkeys) {
 
 async function assertFederatedMatchSettles(matchRow, pubkeys) {
     assert.ok(matchRow, 'no finalized match row from before()');
-    const { ctx, calls } = makeCtx(matchRow.a_chain, pubkeys);
+    const { ctx, calls } = makeCtx(matchRow.a_chain, pubkeys, matchRow);
     const handler = new CrossSettle(ctx);
     const data = { MATCH: matchRow, BLOCK_INDEX: 200 };
 
