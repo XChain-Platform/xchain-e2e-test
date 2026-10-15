@@ -35,6 +35,7 @@ const assert            = require('assert')
 const crypto            = require('crypto')
 const cryptoHelper      = require('../helpers/core/cryptoHelper')
 const issueHelper       = require('../helpers/issueHelper')
+const { waitForIndexerAtTip } = require('../helpers/indexerWait')
 const transactionHelper = require('../helpers/core/transactionHelper')
 
 function makeGatedCiphertext(plaintext) {
@@ -92,16 +93,14 @@ async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
 // The indexer trails the node, so any assertion about what IS or IS NOT indexed has to
 // be made from a position where the two agree, or it is a race against venue load
-// (mirrors envelopeReorg.test.js). Pass an explicit targetHeight when the auto-miner is
+// (mirrors envelopeReorg.test.js). Pass an explicit target height when the auto-miner is
 // running: the live node tip is a moving target and the wait may never see equality.
-async function waitForIndexerToCatchUp(targetHeight = null, timeoutMs = 180000) {
-    const deadline = Date.now() + timeoutMs
-    while (Date.now() < deadline) {
-        const target = targetHeight === null ? await nodeConnector.getBlockCount() : targetHeight
-        if ((await tip()) >= target) return true
-        await sleep(2000)
-    }
-    return false
+// Throws on the deadline rather than returning false.
+async function waitForIndexerToTarget(targetHeight = null, timeoutMs = 180000) {
+    const opts = { timeoutMs, intervalMs: 2000 }
+    if (targetHeight === null) opts.nodeTip = () => nodeConnector.getBlockCount()
+    else opts.target = targetHeight
+    return await waitForIndexerAtTip(opts)
 }
 function randTick(p) { let s = p; for (let i = 0; i < 6; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 
@@ -140,7 +139,7 @@ async function prepareBareBeforeReorg(issuer, recipient, tick) {
     const recvBefore = await balanceOf(recipient.address, tick)
     const bareTxHash = await transactionHelper.createAndSendTransaction(issuer, `SEND|0|${tick}|5|${recipient.address}|bare-pre`)
     await mine(1)
-    await waitForIndexerToCatchUp(null, 60000)
+    await waitForIndexerToTarget(null, 60000)
     return { recvBefore, bareTxHash }
 }
 
@@ -241,7 +240,7 @@ describe('Gated Content Reorg: a gated FILE (and its SEND-gating) rolls back acr
             // way, which is why it survived the load that made this one fail).
             // The auto-miner is running again, so pin the target to the SEND's block: the
             // live node tip keeps moving and an equality wait against it need never settle.
-            assert(await waitForIndexerToCatchUp(sendTip),
+            assert((await waitForIndexerToTarget(sendTip)) >= sendTip,
                 `indexer caught up to block ${sendTip} before the post-reorg balance poll`)
             const credited = await waitForCredit(recipient, tick, recvBefore2)
             assert(credited - recvBefore2 >= 7,
