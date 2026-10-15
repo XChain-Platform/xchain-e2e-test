@@ -40,6 +40,7 @@ const bitcoin = require('bitcoinjs-lib')
 const ecc = require('tiny-secp256k1')
 const cryptoHelper = require('../helpers/core/cryptoHelper')
 const envelopeHelper = require('../helpers/envelopeHelper')
+const { waitForIndexerAtTip } = require('../helpers/indexerWait')
 
 bitcoin.initEccLib(ecc)
 
@@ -67,21 +68,6 @@ async function q(sql, params) {
 async function fileCountByName(name) {
     const rows = await q(`SELECT COUNT(*) c FROM files WHERE name = ?`, [name])
     return Number(rows[0].c)
-}
-async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
-
-// An assertion that something was NOT indexed is worthless until the indexer has
-// actually reached the blocks in question: a lagging indexer makes "no action here"
-// true for the wrong reason, and the assertion passes vacuously. Under a full-suite
-// run the indexer has been observed six blocks behind, so this is not hypothetical.
-async function waitForIndexerToCatchUp(timeoutMs = 180000) {
-    const deadline = Date.now() + timeoutMs
-    while (Date.now() < deadline) {
-        const rows = await q(`SELECT MAX(block_index) h FROM blocks`, [])
-        if (Number(rows[0].h) >= await nodeConnector.getBlockCount()) return true
-        await sleep(2000)
-    }
-    return false
 }
 
 async function buildRecoveryState() {
@@ -184,8 +170,11 @@ describe('Envelope Cancel: recovering an unrevealed commit from persisted state 
             'the reveal must be unbroadcastable once the commit is spent; both outstanding would mean the wallet could publish an action it believed it had cancelled')
 
         // And no action ever existed.
-        assert(await waitForIndexerToCatchUp(),
-            'the indexer must reach the commit and cancel blocks before their emptiness means anything')
+        // An assertion that something was NOT indexed is vacuous until the indexer
+        // has reached the blocks in question: a lagging indexer makes "no action here"
+        // true for the wrong reason. Under a full-suite run the indexer has been
+        // observed six blocks behind, so this wait throws on timeout.
+        await waitForIndexerAtTip({ nodeTip: () => nodeConnector.getBlockCount(), timeoutMs: 180000 })
         assert.strictEqual(await fileCountByName(fileName), 0,
             'an unrevealed commit produces no action, cancelled or not (§3.7)')
         console.log('   commit cancelled to', recovery, '- no action, reveal dead')

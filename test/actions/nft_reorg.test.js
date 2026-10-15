@@ -34,6 +34,7 @@ const assert            = require('assert')
 const cryptoHelper      = require('../helpers/core/cryptoHelper')
 const issueHelper       = require('../helpers/issueHelper')
 const transactionHelper = require('../helpers/core/transactionHelper')
+const { waitForIndexerAtTip } = require('../helpers/indexerWait')
 
 async function q(sql, params) {
     const conn = await indexerDatabase.getConnection()
@@ -76,11 +77,6 @@ async function findChildBlock(child) {
     return blockOfAction(childActionIndex)
 }
 
-async function waitForIndexedTip() {
-    let settle = 0
-    while ((await tip()) < (await nodeConnector.getBlockCount()) && settle++ < 60) { await sleep(1000) }
-}
-
 async function prepareChildReorg(childBlock) {
     const tipBefore = await nodeConnector.getBlockCount()
     const childHash = await nodeConnector.getBlockHash(childBlock)
@@ -115,7 +111,7 @@ describe('NFT Reorg: a collection child issuance rolls back across an on-chain r
         console.log('   child', child, 'issued at block', childBlock, '(parent', parentBlock + ')')
 
         // Gate on the indexer catching up to the node tip before reorging.
-        await waitForIndexedTip()
+        await waitForIndexerAtTip({ nodeTip: () => nodeConnector.getBlockCount() })
         console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
 
         // Reorg out the CHILD block.
