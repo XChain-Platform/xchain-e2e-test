@@ -42,6 +42,7 @@
 const assert = require('assert')
 const cryptoHelper = require('../helpers/core/cryptoHelper')
 const envelopeHelper = require('../helpers/envelopeHelper')
+const { waitForIndexerAtTip } = require('../helpers/indexerWait')
 
 const BODY = Buffer.from(
     ('An envelope reveal, orphaned and re-mined. The payload must survive both. ').repeat(40)
@@ -59,19 +60,12 @@ async function fileRowsByName(name) {
         JOIN transactions t ON t.tx_index = a.tx_index
         WHERE f.name = ?`, [name])
 }
-async function indexerTip() { const r = await q(`SELECT MAX(block_index) h FROM blocks`, []); return Number(r[0].h) }
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
 // The indexer trails the node; every assertion about what IS or IS NOT indexed has
 // to be made from a position where the two agree, or it is just a race.
-async function waitForIndexerToCatchUp(timeoutMs = 180000) {
-    const deadline = Date.now() + timeoutMs
-    while (Date.now() < deadline) {
-        const [nodeTip, idxTip] = [await nodeConnector.getBlockCount(), await indexerTip()]
-        if (idxTip >= nodeTip) return true
-        await sleep(2000)
-    }
-    return false
+async function waitForIndexerToNode(timeoutMs = 180000) {
+    return await waitForIndexerAtTip({ nodeTip: () => nodeConnector.getBlockCount(), timeoutMs, intervalMs: 2000 })
 }
 
 async function buildReorgFixture() {
@@ -183,7 +177,7 @@ describe('Taproot Envelope Reorg: a split pair, and a reveal orphaned off a live
         await regtestMinerConnector.pauseMining()
         try {
             const { miner, commitBlock } = await confirmCommit(pair)
-            assert(await waitForIndexerToCatchUp(), 'indexer caught up to the commit block')
+            await waitForIndexerToNode()
             assert.strictEqual((await fileRowsByName(fileName)).length, 0,
                 'a confirmed commit with no reveal must produce NO action: it is only a P2TR output')
             console.log('   commit confirmed alone at', commitBlock, '- no action, as §3.7 requires')
