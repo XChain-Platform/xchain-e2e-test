@@ -180,7 +180,13 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
             const status = await tracker.quiesce({ timeoutMs: 20, pollMs: 1 });
             assert.strictEqual(status.ready, false);
         });
+    });
+});
 
+describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
+    beforeEach(setupTracker);
+    afterEach(teardownTracker);
+    describe('quiesce probe accounting', function () {
         it('returns the last answered status when a later probe gives no answer', async function () {
             const probe = sinon.stub(tracker, 'getQuiescentStatus');
             probe.onCall(0).resolves({ ready: false, mempool_size: 2, tracker_height: 5 });
