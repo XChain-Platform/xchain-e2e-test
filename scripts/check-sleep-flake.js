@@ -36,7 +36,7 @@
  * gate counts only the fixed-settle shape, freezes it at a committed baseline,
  * and fails when the count rises. It does NOT remediate the existing ones; it
  * stops the pile growing while they are paid down onto the wait helpers that
- * already exist (src/db/wait.js `_waitFor` and its `waitForX` wrappers,
+ * already exist (src/db.js `_waitFor` and its `waitForX` wrappers,
  * test/helpers/stakeHelper.js).
  *
  * Usage:  node scripts/check-sleep-flake.js [--list] [--write-baseline]
@@ -437,7 +437,7 @@ function main() {
         console.error(`sleep-flake: ${hits.length} fixed-settle sleep call sites, baseline ${baseline}.`)
         console.error('A fixed `await sleep(n)` or `await new Promise(r => setTimeout(r, n))` before an')
         console.error('assertion passes or fails on how busy the venue is.')
-        console.error('Wait on the condition instead: src/db/wait.js `_waitFor` and its `waitForX` wrappers, or')
+        console.error('Wait on the condition instead: src/db.js `_waitFor` and its `waitForX` wrappers, or')
         console.error('the poll helpers in test/helpers/stakeHelper.js. Poll-interval sleeps inside a loop')
         console.error('that re-checks a condition are not counted and need no change.')
         // Which site is new cannot be told from a list of every site, so print
