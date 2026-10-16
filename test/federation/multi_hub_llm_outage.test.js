@@ -1,63 +1,25 @@
-/*********************************************************************
- *
- * Copyright © 2025–2026 Dankest, LLC
- * Based on XChain Platform by Dankest, LLC – https://dankest.llc
- *
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * This file is part of XChain Platform. Licensed under the GNU Affero
- * General Public License v3.0 or later; see LICENSE.md. A commercial
- * license (without AGPL source-disclosure terms) is available -
- * contact legal@dankest.llc.
- *
- * Phase 4 drill: LLM attestation outage resilience (regtest, 3 hubs).
- *
- * Exercises the 2026-07-09 outage-resilience slice end to end against a
- * LIVE regtest stack, with three real in-process hubs (MultiValidatorHub):
- *
- *   1. OUTAGE: Anthropic creds broken on every hub (present-but-invalid
- *      API key, the realistic vendor-outage shape: credential RESOLUTION
- *      succeeds so the capability self-test keeps the validators in the
- *      round, while the actual call 401s). A redundancy=3 llm request must
- *      produce EXACTLY ONE on-chain status='provider_error' ATTEST v1
- *      (throttle: once per request_id+status, federation-wide), leave the
- *      request pending, and finally expire + fire the callback with
- *      status='expired' (escrow refund path).
- *   2. RECOVERY: a second request sees the provider_error record, then the
- *      creds are restored mid-window and the SAME request is fulfilled
- *      (status='ok', 3 verified sigs, callback fires with the answer).
- *   3. LEADER ROTATION (wedged leader): slot-0's judge is broken (its
- *      agree() throws; fetch + signing still work, i.e. the hub is alive
- *      but cannot lead). The round publishes ONE no_quorum ATTEST v1,
- *      then the escalation ladder rotates the leader slot with chain
- *      height and a rotated leader's working judge fulfills the request.
- *   4. MODEL-FALLBACK LADDER (governance): an ATTESTATION_PROVIDER:llm
- *      governance change (block-anchored activation) sets approved_models
- *      ['claude-sonnet-4-6','gpt-5-mini'] + judge_fallback_models
- *      ['gpt-5-mini']. With Anthropic down in segment 1 the request logs
- *      provider_error; past the span midpoint every hub deterministically
- *      pins gpt-5-mini (openai vendor). With NO OpenAI key provisioned the
- *      request must KEEP FAILING even after Anthropic creds are restored
- *      (negative proof the ladder advanced + vendor routing engaged),
- *      while a fresh control request (its own segment 1 = sonnet)
- *      fulfills immediately.
- *   5. HARD-KILL (protocol backstop): slot-0 hub stopped outright. The
- *      indexer requires a signature from EVERY responsible validator
- *      (validSigs >= redundancy), so no v1 of any status can land; the
- *      request must simply expire + refund. Documents the economic
- *      backstop (missed_count) rather than a liveness rescue.
- *
- * Venue: a BTC regtest stack, freshly reset (clean validator set). Needs
- * HUB_CLAUDE_CONFIG_DIR (a `claude login`-populated dir) + the claude CLI
- * on PATH; the drill breaks/restores creds by manipulating process.env
- * (all three hubs run in this process and resolve creds per call).
- ********************************************************************/
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
+// Live three-hub regtest coverage for LLM attestation outage resilience:
+// provider-error throttling and expiry, mid-window credential recovery,
+// leader rotation after a judge wedges, governance-controlled cross-vendor
+// model fallback, and expiry when one responsible validator is hard-stopped.
+// The venue must begin with a clean validator set and a usable Claude config.
+// All hubs run in this process, so the credential helpers can switch the whole
+// federation between outage and recovery states at call time.
 
 const dotenv = require('dotenv')
 dotenv.config()
 
 const assert = require('assert')
-const crypto = require('crypto')
 
 const cryptoHelper = require('../helpers/core/cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
@@ -67,131 +29,17 @@ const transactionHelper = require('../helpers/core/transactionHelper')
 const { MultiValidatorHub } = require('../helpers/multiValidatorHubHelper')
 const { requireFederationEnv, assertCleanValidatorSet } = require('../helpers/federationGuards')
 const { assertHoldsThroughout } = require('../helpers/consensusWait')
+const {
+    ENVELOPE, CONTRACT_CODE,
+    internalSettleStack, breakAnthropicCreds, restoreAnthropicCreds,
+    countV1Rows, slot0HubIndex, applyLlmGovernance
+} = require('./multi_hub_llm_outage.test/support.test')
 
-async function internalSettleStack() {
-    await utxoTrackerConnector.quiesce({ timeoutMs: 30000, pollMs: 250, regtestMiner: regtestMinerConnector })
-}
+let mvh = null
+let contractIndex = null
+let owner = null
 
-// ---------------------------------------------------------------------------
-// Credential control. All hubs share this process's env; the llm provider
-// resolves creds AT CALL TIME (lib/hub_credentials.js), so flipping env vars is an
-// immediate, fleet-wide outage/recovery switch.
-// ---------------------------------------------------------------------------
-const CRED_KEYS = ['HUB_CLAUDE_CONFIG_DIR', 'CLAUDE_CONFIG_DIR',
-                   'HUB_CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN',
-                   'ANTHROPIC_API_KEY']
-let savedCreds = null
-
-function breakAnthropicCreds(){
-    if (!savedCreds){
-        savedCreds = {}
-        for (const k of CRED_KEYS) savedCreds[k] = process.env[k]
-    }
-    for (const k of CRED_KEYS) delete process.env[k]
-    // Present-but-invalid key: resolution succeeds (self-test keeps the hubs
-    // in rounds; resolveHubLlmAuth stops at ANTHROPIC_API_KEY before the
-    // default config-dir fallback) but the API call 401s -> fetch throws ->
-    // the round proposes status='provider_error'.
-    process.env.ANTHROPIC_API_KEY = 'sk-ant-api03-drill-invalid-0000000000000000'
-}
-
-function restoreAnthropicCreds(){
-    if (!savedCreds) return
-    for (const k of CRED_KEYS) delete process.env[k]
-    for (const k of CRED_KEYS) if (savedCreds[k] !== undefined) process.env[k] = savedCreds[k]
-}
-
-// ---------------------------------------------------------------------------
-// On-chain row counting (the throttle assertions). Counts ATTEST v1 rows for
-// a request directly in the indexer DB; `valid` restricts to rows the indexer
-// accepted (validSigs >= redundancy).
-// ---------------------------------------------------------------------------
-async function countV1Rows(requestId, responseStatus, onlyValid){
-    const conn = await indexerDatabase.getConnection()
-    try {
-        let q = `SELECT COUNT(*) AS n FROM attests ar
-                 LEFT JOIN index_statuses ist ON ist.id = ar.status_id
-                 WHERE ar.version = 1 AND ar.request_id = ?`
-        const v = [String(requestId).toLowerCase()]
-        if (responseStatus){ q += ' AND ar.response_status = ?'; v.push(responseStatus) }
-        if (onlyValid){ q += " AND ist.status = 'valid'" }
-        const rows = await conn.query(q, v)
-        return Number(rows[0].n)
-    } finally { await conn.release() }
-}
-
-// Hash-rank the harness pubkeys for a request (same rule as the hub's
-// AttestationRound / indexer's computeResponsibleSet: SHA256(rid || pubkey)
-// ascending) and return the mvh hub index sitting at slot 0.
-function slot0HubIndex(mvh, requestId){
-    const rid = String(requestId).toLowerCase()
-    const ranked = mvh.getPubkeys().map((pk, i) => {
-        const lower = String(pk).toLowerCase()
-        const h = crypto.createHash('sha256').update(rid, 'utf8').update(lower, 'utf8').digest('hex')
-        return { i, hash: h }
-    }).sort((a, b) => (a.hash < b.hash) ? -1 : 1)
-    return ranked[0].i
-}
-
-// Apply a finalized ATTESTATION_PROVIDER:llm governance change to every hub,
-// through the same entry point the real governance finalizer uses
-// (block-anchored history), plus the live def mirror for the non-anchored
-// readers (judge fallback chain).
-async function applyLlmGovernance(mvh, activationBlock, additionalConfig){
-    for (const hub of mvh.hubs){
-        await hub.applyProviderGovernanceChange({
-            parameter:       'ATTESTATION_PROVIDER:llm',
-            activationBlock: activationBlock,
-            newValue:        JSON.stringify({ additional_config: additionalConfig })
-        })
-        const reg = hub.providerRegistry
-        const def = Object.assign({}, reg.getDef('llm'), { additional_config: additionalConfig })
-        reg.providers.set('llm', def)
-        const mod = reg.getModule('llm')
-        if (mod && typeof mod['_setConfig'] === 'function') mod['_setConfig'](def)
-    }
-}
-
-describe('Phase 4 drill: LLM attestation outage resilience (redundancy=3)', function () {
-    this.timeout(45 * 60 * 1000)
-
-    let mvh           = null
-    let contractIndex = null
-    let owner         = null
-
-    const ENVELOPE = JSON.stringify({
-        prompt: 'What is 2 plus 2? Reply with only the number, nothing else.',
-        max_tokens: 16
-    })
-
-    // Callback state is keyed per request so sequential drills don't clobber
-    // each other's assertions.
-    const CONTRACT_CODE = `
-module.exports = {
-    meta: { name: 'LLM Outage Asker', description: 'Requests an LLM attestation while one hub is offline.', version: '1.0.0' },
-    askLlm: function(xchain) {
-        var envelope = xchain.getInputParam(0);
-        var requestId = xchain.attestation.request(
-            'llm',
-            envelope,
-            'handleResponse',
-            ['ctx-outage-drill'],
-            { redundancy: 3, deadlineBlocks: 20 }
-        );
-        xchain.state.set('last_request_id', requestId);
-        return requestId;
-    },
-    handleResponse: function(xchain) {
-        var rid = String(xchain.getInputParam(0));
-        var key = 'cb_' + rid.substring(0, 24);
-        xchain.state.set(key + '_status',  xchain.getInputParam(2));
-        xchain.state.set(key + '_payload', xchain.getInputParam(3));
-    }
-};
-`
-
-    // Submit one llm request through the contract and wait for its pending row.
-    async function submitRequest(){
+async function submitRequest(){
         const exec = await vmHelper.sendExecuteV0(owner, contractIndex, 'askLlm', [ENVELOPE])
         assert.strictEqual(exec.execution.status, 'valid', 'execute should be valid')
         const request = await indexerDatabase.waitForAttestationRequest({
@@ -203,12 +51,12 @@ module.exports = {
         return request
     }
 
-    async function callbackState(requestId, field){
+async function callbackState(requestId, field){
         const key = 'cb_' + String(requestId).toLowerCase().substring(0, 24) + '_' + field
         return indexerDatabase.getContractState(contractIndex, key)
     }
 
-    async function mineToPastDeadline(request){
+async function mineToPastDeadline(request){
         const tip = Number(await nodeConnector.getBlockCount())
         const deadline = Number(request.deadline_block)
         assert(Number.isFinite(deadline) && deadline > 0, 'request row should carry deadline_block')
@@ -216,56 +64,47 @@ module.exports = {
         if (need > 0) await regtestMinerConnector.generateBlocks(need)
     }
 
-    before(async function () {
-        if (!requireFederationEnv(this, { needsClaudeConfig: true })) return
+async function stakeOutageValidators(pubkeys) {
+    for (let index = 0; index < pubkeys.length; index++) {
+        const address = await cryptoHelper.getNewFundedAddress(
+            'outage-staker-' + index, COIN, NETWORK, null, 'legacy', 0, 0.02)
+        await internalSettleStack()
+        await gasHelper.ensureGasBalance(address, '35000')
+        await internalSettleStack()
+        const result = await stakeHelper.sendStakeV1(address, '30000.00000000', pubkeys[index])
+        assert.strictEqual(result.stake.status, 'valid', 'stake ' + index + ' should be valid')
+    }
+    await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
+    await internalSettleStack()
+}
+
+async function deployOutageContract() {
+    owner = await cryptoHelper.getNewFundedAddress(
+        'outage-owner', COIN, NETWORK, null, 'legacy', 0, 0.02)
+    await regtestMinerConnector.generateBlocks(2)
+    await internalSettleStack()
+    await gasHelper.ensureGasBalance(owner, '20000')
+    const deploy = await vmHelper.sendDeployV0(owner, CONTRACT_CODE, 500000)
+    assert.strictEqual(deploy.contract.status, 'valid', 'deploy should be valid')
+    contractIndex = deploy.contract.action_index
+}
+
+async function startOutageFederation(mochaContext) {
+        if (!requireFederationEnv(mochaContext, { needsClaudeConfig: true })) return
         await assertCleanValidatorSet(indexerDatabase)
 
-        // Hubs start with creds ALREADY broken: drill 1 needs the outage in
-        // place before the first poll, and resolution still succeeds so the
-        // attestation capability self-test passes at startup.
         breakAnthropicCreds()
 
         mvh = new MultiValidatorHub({
             count: 3,
             extraP2pConfig: {
-                // Tight drill cadence: 5s polls; 60s round timeout still
-                // comfortably covers claude_spawn fetch + judge latency.
                 ATTESTATION_POLL_MS:          5000,
                 ATTESTATION_ROUND_TIMEOUT_MS: 60000
             }
         })
         await mvh.start()
-        const pubkeys = mvh.getPubkeys()
-
-        for (let i = 0; i < pubkeys.length; i++) {
-            const addr = await cryptoHelper.getNewFundedAddress(
-                'outage-staker-' + i, COIN, NETWORK, null, 'legacy', 0, 0.02
-            )
-            await internalSettleStack()
-            // 30000 clears BOTH the attestation capability min_stake (1000) and the llm
-            // PROVIDER floor (25000, higher than http_get's 10000), enforced on
-            // the responsible set at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
-            await gasHelper.ensureGasBalance(addr, '35000')
-            await internalSettleStack()
-            const result = await stakeHelper.sendStakeV1(addr, '30000.00000000', pubkeys[i])
-            assert.strictEqual(result.stake.status, 'valid', 'stake ' + i + ' should be valid')
-        }
-
-        // Activation delay AND snapshot burial: the responsible set resolves at the
-        // request's block minus CANONICAL_REORG_BUFFER, so the delay alone is 6 short.
-        await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
-        await internalSettleStack()
-
-        owner = await cryptoHelper.getNewFundedAddress(
-            'outage-owner', COIN, NETWORK, null, 'legacy', 0, 0.02
-        )
-        await regtestMinerConnector.generateBlocks(2)
-        await internalSettleStack()
-        await gasHelper.ensureGasBalance(owner, '20000')
-
-        const deploy = await vmHelper.sendDeployV0(owner, CONTRACT_CODE, 500000)
-        assert.strictEqual(deploy.contract.status, 'valid', 'deploy should be valid')
-        contractIndex = deploy.contract.action_index
+        await stakeOutageValidators(mvh.getPubkeys())
+        await deployOutageContract()
 
         const publisherAddr = await cryptoHelper.getNewFundedAddress(
             'outage-publisher', COIN, NETWORK, null, 'legacy', 0, 0.02
@@ -276,17 +115,17 @@ module.exports = {
             const txHash = await transactionHelper.createAndSendTransaction(publisherAddr, wirePayload)
             return { txid: txHash }
         })
-    })
+}
 
-    after(async function () {
+async function stopOutageFederation() {
         restoreAnthropicCreds()
         if (mvh) {
             await mvh.stop()
             await mvh.dropDatabases()
         }
-    })
+}
 
-    it('1. vendor outage: exactly one on-chain provider_error, request stays pending, expiry refunds via callback', async function () {
+async function proveVendorOutage() {
         // Creds are broken (before()). Submit and cross the confirmation gate.
         const request = await submitRequest()
         const rid = request.request_id
@@ -331,9 +170,9 @@ module.exports = {
         const cbStatus = await callbackState(rid, 'status')
         assert(cbStatus, 'expiry callback should have fired')
         assert.strictEqual(JSON.parse(cbStatus.state_value), 'expired')
-    })
+}
 
-    it('2. recovery mid-window: provider_error recorded, creds restored, same request fulfilled', async function () {
+async function proveRecovery() {
         const request = await submitRequest()
         const rid = request.request_id
         await regtestMinerConnector.generateBlocks(4)
@@ -368,9 +207,9 @@ module.exports = {
         assert.strictEqual(JSON.parse(cbStatus.state_value), 'ok')
         assert(/4/.test(JSON.parse(cbPayload.state_value)),
             'payload should contain "4", got: ' + cbPayload.state_value)
-    })
+}
 
-    it('3. leader rotation: wedged slot-0 judge publishes one no_quorum, a rotated leader then fulfills', async function () {
+async function proveLeaderRotation() {
         // Creds valid (restored in drill 2). Submit, identify slot-0, and wedge
         // ONLY its judge: fetch and proposal signing keep working, so the hub is
         // alive-but-not-leading, the exact failure rotation exists for. (A hard
@@ -425,20 +264,11 @@ module.exports = {
         } finally {
             reg.modules.set('llm', realMod)
         }
-    })
+}
 
-    it('4. governance model ladder: segment 2 pins the cross-vendor model deterministically', async function () {
-        // Governance change (block-anchored activation): add gpt-5-mini as the
-        // fallback fetch model + judge fallback. No OpenAI key is provisioned in
-        // this venue, so the drill's proof is a negative + control pair:
-        // once the span midpoint passes, the request is pinned to the openai
-        // vendor and must keep failing EVEN THOUGH Anthropic creds come back,
-        // while a fresh control request (its own segment 1 = sonnet) fulfills.
-        breakAnthropicCreds()
-
-        const tip = Number(await nodeConnector.getBlockCount())
-        const activation = tip + 2
-        await applyLlmGovernance(mvh, activation, {
+async function activateModelLadder() {
+    const activation = Number(await nodeConnector.getBlockCount()) + 2
+    await applyLlmGovernance(mvh, activation, {
             approved_models:             ['claude-sonnet-4-6', 'gpt-5-mini'],
             judge_model:                 'claude-haiku-4-5',
             judge_fallback_models:       ['gpt-5-mini'],
@@ -448,73 +278,60 @@ module.exports = {
             max_completion_tokens:       1024,
             default_temperature:         0,
             prompt_envelope_version:     1
-        })
-        await regtestMinerConnector.generateBlocks(3)
+    })
+    await regtestMinerConnector.generateBlocks(3)
+    return activation
+}
 
+async function provePinnedFailure(request) {
+    const rid = request.request_id
+    restoreAnthropicCreds()
+    const target = Number(request.block_index) + 12
+    const tip = Number(await nodeConnector.getBlockCount())
+    if (target > tip) await regtestMinerConnector.generateBlocks(target - tip)
+    await assertHoldsThroughout(async () => {
+        const okRows = await countV1Rows(rid, 'ok', false)
+        const pending = await indexerDatabase.checkAttestationRequest({ requestId: rid, requestStatus: 'pending' })
+        return { ok: okRows === 0 && !!pending, saw: { okRows, pending: !!pending } }
+    }, { windowMs: 90000, intervalMs: 1000, what: 'the pinned request staying unfulfilled and pending' })
+    assert.strictEqual(await countV1Rows(rid, 'ok', false), 0,
+        'segment-2 request must NOT fulfill: fetch is pinned to the openai model')
+    assert(await indexerDatabase.checkAttestationRequest({ requestId: rid, requestStatus: 'pending' }),
+        'ladder request should still be pending on the unprovisioned vendor')
+}
+
+async function proveModelLadderControl() {
+    const control = await submitRequest()
+    await regtestMinerConnector.generateBlocks(4)
+    const okRow = await indexerDatabase.waitForAttestationResponse({
+        requestId: control.request_id, responseStatus: 'ok', status: 'valid'
+    }, 300000)
+    assert(okRow, 'control request must fulfill under the new governance config')
+    if (okRow.meta) assert(/claude-sonnet-4-6/.test(String(okRow.meta)),
+        'control fetch should have served from the segment-1 model; meta=' + okRow.meta)
+}
+
+async function proveGovernanceModelLadder() {
+        breakAnthropicCreds()
+        const activation = await activateModelLadder()
         const request = await submitRequest()
-        const rid = request.request_id
-        const reqBlock = Number(request.block_index)
-        assert(reqBlock >= activation, 'request must land at/after the governance activation block')
-
-        // Segment 1 (sonnet, anthropic broken): outage recorded once.
+        assert(Number(request.block_index) >= activation,
+            'request must land at/after the governance activation block')
         await regtestMinerConnector.generateBlocks(4)
         const errRow = await indexerDatabase.waitForAttestationResponse({
-            requestId:      rid,
-            responseStatus: 'provider_error',
-            status:         'valid'
+            requestId: request.request_id, responseStatus: 'provider_error', status: 'valid'
         }, 240000)
         assert(errRow, 'segment-1 outage should be recorded')
-
-        // Restore Anthropic AND cross into segment 2. Span is
-        // [reqBlock+confirmations(3), deadline]; with 2 models the pin flips at
-        // the midpoint; +12 blocks elapsed is safely inside segment 2.
-        restoreAnthropicCreds()
-        const tip2 = Number(await nodeConnector.getBlockCount())
-        const target = reqBlock + 12
-        if (target > tip2) await regtestMinerConnector.generateBlocks(target - tip2)
-
-        // Ladder proof (negative): pinned model is now gpt-5-mini -> openai
-        // vendor -> no credential -> fetch keeps failing, so the request must
-        // NOT be fulfilled despite working Anthropic creds. (provider_error is
-        // already throttled for this rid, so no new rows land either.)
-        // Same 90s window, polled, so a fulfillment or a status change fails at that instant.
-        await assertHoldsThroughout(async () => {
-            const okRows = await countV1Rows(rid, 'ok', false)
-            const pending = await indexerDatabase.checkAttestationRequest({ requestId: rid, requestStatus: 'pending' })
-            return { ok: okRows === 0 && !!pending, saw: { okRows: okRows, pending: !!pending } }
-        }, { windowMs: 90000, intervalMs: 1000, what: 'the pinned request staying unfulfilled and pending' })
-        assert.strictEqual(await countV1Rows(rid, 'ok', false), 0,
-            'segment-2 request must NOT fulfill: fetch is pinned to the openai model')
-        const stillPending = await indexerDatabase.checkAttestationRequest({
-            requestId: rid, requestStatus: 'pending'
-        })
-        assert(stillPending, 'ladder request should still be pending on the unprovisioned vendor')
-
-        // Ladder proof (control): a fresh request starts its own span in
-        // segment 1 (sonnet) and fulfills normally under the SAME governance
-        // config, so the failure above is the pin, not the config.
-        const control = await submitRequest()
-        await regtestMinerConnector.generateBlocks(4)
-        const okRow = await indexerDatabase.waitForAttestationResponse({
-            requestId:      control.request_id,
-            responseStatus: 'ok',
-            status:         'valid'
-        }, 300000)
-        assert(okRow, 'control request must fulfill under the new governance config')
-        if (okRow.meta) {
-            assert(/claude-sonnet-4-6/.test(String(okRow.meta)),
-                'control fetch should have served from the segment-1 model; meta=' + okRow.meta)
-        }
-
-        // Leave a clean chain: run the pinned request to its expiry refund.
+        await provePinnedFailure(request)
+        await proveModelLadderControl()
         await mineToPastDeadline(request)
         const expired = await indexerDatabase.waitForAttestationRequest({
-            requestId: rid, requestStatus: 'expired'
+            requestId: request.request_id, requestStatus: 'expired'
         }, 90000)
         assert(expired, 'ladder request should expire once the whole ladder window lapses')
-    })
+}
 
-    it('5. hard-kill slot-0: no v1 can quorum without every responsible sig; expiry backstop refunds', async function () {
+async function proveHardKill() {
         // Creds valid. Kill the slot-0 hub outright BEFORE the round becomes
         // serviceable. Every responsible validator must sign a valid v1
         // (indexer: validSigs >= redundancy), so nothing can land on-chain;
@@ -554,5 +371,21 @@ module.exports = {
         const cbStatus = await callbackState(rid, 'status')
         assert(cbStatus, 'expiry callback should have fired')
         assert.strictEqual(JSON.parse(cbStatus.state_value), 'expired')
-    })
-})
+}
+
+function registerOutageSuite() {
+    this.timeout(45 * 60 * 1000)
+    before(function () { return startOutageFederation(this) })
+    after(stopOutageFederation)
+    it('1. vendor outage: exactly one on-chain provider_error, request stays pending, expiry refunds via callback',
+        proveVendorOutage)
+    it('2. recovery mid-window: provider_error recorded, creds restored, same request fulfilled', proveRecovery)
+    it('3. leader rotation: wedged slot-0 judge publishes one no_quorum, a rotated leader then fulfills',
+        proveLeaderRotation)
+    it('4. governance model ladder: segment 2 pins the cross-vendor model deterministically',
+        proveGovernanceModelLadder)
+    it('5. hard-kill slot-0: no v1 can quorum without every responsible sig; expiry backstop refunds',
+        proveHardKill)
+}
+
+describe('Phase 4 drill: LLM attestation outage resilience (redundancy=3)', registerOutageSuite)

@@ -42,16 +42,13 @@ let SNAPSHOT_BLOCK = null;
 const FOLD_ENV = 'XC_ANCHOR_FOLD_REGTEST_ACTIVATION';
 const FOLD_OFF_HEIGHT = '999999999';
 
-describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
-    this.timeout(20 * 60 * 1000);
-
-    let hubDb = null;
-    let mvh = null;
-    let weightSeed = null;
-    let identities = [];
-    let signerDir = null;
-    let signerHooks = null;
-    let preparedPayload = null;
+let hubDb = null;
+let mvh = null;
+let weightSeed = null;
+let identities = [];
+let signerDir = null;
+let signerHooks = null;
+let preparedPayload = null;
 
     async function indexerQuery(sql, params){
         const conn = await indexerDatabase.getConnection();
@@ -285,6 +282,9 @@ describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
         for(const row of rows) assert.match(String(row.status), expected, label + ' status');
     }
 
+function registerBundleOrderSuite() {
+    this.timeout(20 * 60 * 1000);
+
     before(async function () {
         await bootFederation();
         await prepareCanonicalBundle();
@@ -326,4 +326,6 @@ describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
         const rows = await publishPrepared(reverseSectionPairs(preparedPayload, 1));
         assertVerdict(rows, /^invalid: SECTION \d+ SIGS \(order\)$/, 'reversed section pairs');
     });
-});
+}
+
+describe('ANCHOR v0 bundle ordering on DOGE regtest', registerBundleOrderSuite);
