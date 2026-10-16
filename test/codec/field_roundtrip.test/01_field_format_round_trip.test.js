@@ -156,139 +156,141 @@ function buildVector(action, version, format, seed, sparse) {
     return { string: action + '|' + values.join('|'), expected };
 }
 
-(HAVE_INDEXER ? describe : describe.skip)('Codec field-format round-trip (P1a) @regression @tier1', function () {
+let util, actions, aliases;
 
-    let util, actions, aliases;
+function loadFormats() {
+    process.env.INDEXER_COIN = process.env.INDEXER_COIN || 'BTC';
+    process.env.INDEXER_NETWORK = process.env.INDEXER_NETWORK || 'regtest';
+    const Utility = require(path.join(INDEXER_PATH, 'src/utility.js'));
+    util = new Utility();
+    actions = discoverActions();
+    aliases = discoverAliases();
+}
 
-    before(function () {
-        process.env.INDEXER_COIN    = process.env.INDEXER_COIN    || 'BTC';
-        process.env.INDEXER_NETWORK = process.env.INDEXER_NETWORK || 'regtest';
-        const Utility = require(path.join(INDEXER_PATH, 'src/utility.js'));
-        util = new Utility();
-        actions = discoverActions();
-        aliases = discoverAliases();
-    });
+function proveFormatTable() {
+    const count = Object.values(actions).reduce((n, f) => n + Object.keys(f).length, 0);
+    assert.ok(Object.keys(actions).length >= 30, `only ${Object.keys(actions).length} actions discovered`);
+    assert.ok(count >= 68, `only ${count} action×version formats discovered`);
+    for (const [action, formats] of Object.entries(actions))
+        for (const [version, format] of Object.entries(formats))
+            assert.ok(format.startsWith('VERSION'), `${action} v${version} format must start with VERSION`);
+}
 
-    it('discovers a sane format table from the indexer source', function () {
-        // 31 wire actions / 70 action×version formats at origin/master 2026-06-12;
-        // thresholds sit just below so removals scream but additions don't.
-        const count = Object.values(actions).reduce((n, f) => n + Object.keys(f).length, 0);
-        assert.ok(Object.keys(actions).length >= 30, `only ${Object.keys(actions).length} actions discovered`);
-        assert.ok(count >= 68, `only ${count} action×version formats discovered`);
-        for (const [action, formats] of Object.entries(actions))
-            for (const [v, fmt] of Object.entries(formats))
-                assert.ok(fmt.startsWith('VERSION'), `${action} v${v} format must start with VERSION`);
-    });
-
-    it('every ACTION×VERSION round-trips dense and sparse seeded corpora exactly', function () {
-        for (const [action, formats] of Object.entries(actions)) {
-            for (const [v, format] of Object.entries(formats)) {
-                const version = Number(v);
-                for (let run = 0; run < 5; run++) {
-                    for (const sparse of [false, true]) {
-                        const seed = (version + 1) * 100000 + run * 13 + (sparse ? 7 : 0);
-                        const vec = buildVector(action, version, format, seed, sparse);
-                        const out = ingest(util, vec.string, actions, aliases);
-                        assert.ok(!out.error,
-                            `${action} v${version} seed=${seed}: ${out.error} for ${vec.string}`);
-                        for (const [field, want] of Object.entries(vec.expected)) {
-                            assert.strictEqual(out.data[field], want,
-                                `${action} v${version} seed=${seed} field ${field}: ` +
-                                `${JSON.stringify(out.data[field])} !== ${JSON.stringify(want)}`);
-                        }
-                    }
+function proveSeededCorpora() {
+    for (const [action, formats] of Object.entries(actions)) {
+        for (const [rawVersion, format] of Object.entries(formats)) {
+            const version = Number(rawVersion);
+            for (let run = 0; run < 5; run++) {
+                for (const sparse of [false, true]) {
+                    const seed = (version + 1) * 100000 + run * 13 + (sparse ? 7 : 0);
+                    const vector = buildVector(action, version, format, seed, sparse);
+                    const output = ingest(util, vector.string, actions, aliases);
+                    assert.ok(!output.error, `${action} v${version} seed=${seed}: ${output.error} for ${vector.string}`);
+                    for (const [field, wanted] of Object.entries(vector.expected))
+                        assert.strictEqual(output.data[field], wanted,
+                            `${action} v${version} seed=${seed} field ${field}: ` +
+                            `${JSON.stringify(output.data[field])} !== ${JSON.stringify(wanted)}`);
                 }
             }
         }
-    });
+    }
+}
 
-    it('matches the committed golden vectors (field-level wire-format tripwire)', function () {
-        if (GEN) {
-            const golden = [];
-            for (const [action, formats] of Object.entries(actions)) {
-                for (const v of Object.keys(formats).map(Number).sort((a, b) => a - b)) {
-                    const vec = buildVector(action, v, formats[v], (v + 1) * 1000, false);
-                    golden.push({ action, version: v, format: formats[v],
-                                  string: vec.string, fields: vec.expected });
-                }
-            }
-            fs.mkdirSync(path.dirname(GOLDEN_PATH), { recursive: true });
-            fs.writeFileSync(GOLDEN_PATH, JSON.stringify(golden, null, 2) + '\n');
-            console.log(`[field-roundtrip] wrote ${golden.length} golden vectors: ${GOLDEN_PATH}`);
-        } else if (!fs.existsSync(GOLDEN_PATH)) {
-            assert.fail(
-                `committed golden vectors missing at ${GOLDEN_PATH}; a lost golden file must not pass tautologically. ` +
-                `Regenerate deliberately with GEN_FIELD_GOLDEN=1 and review the diff before committing it.`
-            );
+function generateGoldenVectors() {
+    const golden = [];
+    for (const [action, formats] of Object.entries(actions)) {
+        for (const version of Object.keys(formats).map(Number).sort((a, b) => a - b)) {
+            const vector = buildVector(action, version, formats[version], (version + 1) * 1000, false);
+            golden.push({ action, version, format: formats[version], string: vector.string, fields: vector.expected });
         }
+    }
+    fs.mkdirSync(path.dirname(GOLDEN_PATH), { recursive: true });
+    fs.writeFileSync(GOLDEN_PATH, JSON.stringify(golden, null, 2) + '\n');
+    console.log(`[field-roundtrip] wrote ${golden.length} golden vectors: ${GOLDEN_PATH}`);
+}
 
-        const golden = JSON.parse(fs.readFileSync(GOLDEN_PATH, 'utf8'));
-        for (const g of golden) {
-            const formats = actions[g.action];
-            assert.ok(formats, `golden action ${g.action} no longer exists in the indexer`);
-            assert.strictEqual(formats[g.version], g.format,
-                `${g.action} v${g.version}: committed format string changed. If intended, ` +
-                'regenerate with GEN_FIELD_GOLDEN=1 and review the fixture diff like a consensus change');
-            const out = ingest(util, g.string, actions, aliases);
-            assert.ok(!out.error, `${g.action} v${g.version}: ${out.error}`);
-            assert.deepStrictEqual(out.data, Object.assign({}, out.data, g.fields),
-                `${g.action} v${g.version}: golden string no longer parses to its pinned fields`);
-        }
-    });
+function proveGoldenVectors() {
+    if (GEN) generateGoldenVectors();
+    else if (!fs.existsSync(GOLDEN_PATH))
+        assert.fail(`committed golden vectors missing at ${GOLDEN_PATH}; a lost golden file must not pass tautologically. ` +
+            'Regenerate deliberately with GEN_FIELD_GOLDEN=1 and review the diff before committing it.');
+    const golden = JSON.parse(fs.readFileSync(GOLDEN_PATH, 'utf8'));
+    for (const item of golden) {
+        const formats = actions[item.action];
+        assert.ok(formats, `golden action ${item.action} no longer exists in the indexer`);
+        assert.strictEqual(formats[item.version], item.format,
+            `${item.action} v${item.version}: committed format string changed. If intended, ` +
+            'regenerate with GEN_FIELD_GOLDEN=1 and review the fixture diff like a consensus change');
+        const output = ingest(util, item.string, actions, aliases);
+        assert.ok(!output.error, `${item.action} v${item.version}: ${output.error}`);
+        assert.deepStrictEqual(output.data, Object.assign({}, output.data, item.fields),
+            `${item.action} v${item.version}: golden string no longer parses to its pinned fields`);
+    }
+}
 
-    it('every discovered ACTION×VERSION is pinned by a golden vector', function () {
-        const golden = JSON.parse(fs.readFileSync(GOLDEN_PATH, 'utf8'));
-        const pinned = new Set(golden.map(g => `${g.action}|${g.version}`));
-        const missing = [];
-        for (const [action, formats] of Object.entries(actions))
-            for (const v of Object.keys(formats))
-                if (!pinned.has(`${action}|${v}`)) missing.push(`${action} v${v}`);
-        assert.deepStrictEqual(missing, [],
-            'wire formats with no golden vector (new/uncommitted action formats?): ' +
-            missing.join(', ') + '. Pin intended additions with GEN_FIELD_GOLDEN=1');
-    });
+function proveGoldenCoverage() {
+    const golden = JSON.parse(fs.readFileSync(GOLDEN_PATH, 'utf8'));
+    const pinned = new Set(golden.map((item) => `${item.action}|${item.version}`));
+    const missing = [];
+    for (const [action, formats] of Object.entries(actions))
+        for (const version of Object.keys(formats))
+            if (!pinned.has(`${action}|${version}`)) missing.push(`${action} v${version}`);
+    assert.deepStrictEqual(missing, [], 'wire formats with no golden vector (new/uncommitted action formats?): ' +
+        missing.join(', ') + '. Pin intended additions with GEN_FIELD_GOLDEN=1');
+}
 
-    it('trailing holes and missing params both canonicalize to null', function () {
-        const out = ingest(util, 'MINT|0|FLDTOK|600||', actions, aliases);
-        assert.ok(!out.error);
-        assert.strictEqual(out.data['TICK'], 'FLDTOK');
-        assert.strictEqual(out.data['AMOUNT'], '600');
-        const fields = actions['MINT'][0].split('|');
-        for (const f of fields.slice(3)) assert.strictEqual(out.data[f], null, f);
-    });
+function proveTrailingHoles() {
+    const output = ingest(util, 'MINT|0|FLDTOK|600||', actions, aliases);
+    assert.ok(!output.error);
+    assert.strictEqual(output.data.TICK, 'FLDTOK');
+    assert.strictEqual(output.data.AMOUNT, '600');
+    for (const field of actions.MINT[0].split('|').slice(3)) assert.strictEqual(output.data[field], null, field);
+}
 
-    it('whitespace around params is trimmed before parsing', function () {
-        const out = ingest(util, ' MINT | 0 | FLDTOK | 600 ', actions, aliases);
-        assert.ok(!out.error);
-        assert.strictEqual(out.data['TICK'], 'FLDTOK');
-        assert.strictEqual(out.data['AMOUNT'], '600');
-    });
+function proveWhitespaceTrimming() {
+    const output = ingest(util, ' MINT | 0 | FLDTOK | 600 ', actions, aliases);
+    assert.ok(!output.error);
+    assert.strictEqual(output.data.TICK, 'FLDTOK');
+    assert.strictEqual(output.data.AMOUNT, '600');
+}
 
-    it('params beyond the format are ignored (forward-tolerant parse)', function () {
-        const vec   = buildVector('MINT', 0, actions['MINT'][0], 4242, false);
-        const base  = ingest(util, vec.string, actions, aliases);
-        const extra = ingest(util, vec.string + '|surplus|fields', actions, aliases);
-        assert.ok(!base.error && !extra.error);
-        assert.deepStrictEqual(extra.data, base.data);
-    });
+function proveForwardTolerance() {
+    const vector = buildVector('MINT', 0, actions.MINT[0], 4242, false);
+    const base = ingest(util, vector.string, actions, aliases);
+    const extra = ingest(util, vector.string + '|surplus|fields', actions, aliases);
+    assert.ok(!base.error && !extra.error);
+    assert.deepStrictEqual(extra.data, base.data);
+}
 
-    it('action aliases resolve to the canonical parser (TRANSFER -> SEND, ...)', function () {
-        assert.ok(Object.keys(aliases).length >= 4, 'alias table went missing');
-        for (const [alias, canonical] of Object.entries(aliases)) {
-            assert.ok(actions[canonical], `alias ${alias} -> ${canonical} which has no formats`);
-            const fmtFields = actions[canonical][0].split('|');
-            const values = fmtFields.map(f => valueFor(mulberry32(42), f, 0));
-            const out = ingest(util, alias + '|' + values.join('|'), actions, aliases);
-            assert.strictEqual(out.action, canonical);
-            assert.ok(!out.error, `${alias}: ${out.error}`);
-        }
-    });
+function proveAliases() {
+    assert.ok(Object.keys(aliases).length >= 4, 'alias table went missing');
+    for (const [alias, canonical] of Object.entries(aliases)) {
+        assert.ok(actions[canonical], `alias ${alias} -> ${canonical} which has no formats`);
+        const values = actions[canonical][0].split('|').map((field) => valueFor(mulberry32(42), field, 0));
+        const output = ingest(util, alias + '|' + values.join('|'), actions, aliases);
+        assert.strictEqual(output.action, canonical);
+        assert.ok(!output.error, `${alias}: ${output.error}`);
+    }
+}
 
-    it('a pipe inside free text corrupts the parse (pinned as a known wire property)', function () {
-        // The wire has no escaping: '|' is ALWAYS a delimiter. Builders (sdk,
-        // e2e helpers, wallet) must reject or strip it from free-text fields.
-        const out = ingest(util, 'ISSUE|0|FLDTOK|1000|100|0|memo with | pipe', actions, aliases);
-        assert.ok(!out.error);
-        assert.strictEqual(out.data['DESCRIPTION'], 'memo with');   // truncated at the pipe
-    });
-});
+function provePipeBehavior() {
+    const output = ingest(util, 'ISSUE|0|FLDTOK|1000|100|0|memo with | pipe', actions, aliases);
+    assert.ok(!output.error);
+    assert.strictEqual(output.data.DESCRIPTION, 'memo with');
+}
+
+function registerFieldRoundTripSuite() {
+    before(loadFormats);
+    it('discovers a sane format table from the indexer source', proveFormatTable);
+    it('every ACTION×VERSION round-trips dense and sparse seeded corpora exactly', proveSeededCorpora);
+    it('matches the committed golden vectors (field-level wire-format tripwire)', proveGoldenVectors);
+    it('every discovered ACTION×VERSION is pinned by a golden vector', proveGoldenCoverage);
+    it('trailing holes and missing params both canonicalize to null', proveTrailingHoles);
+    it('whitespace around params is trimmed before parsing', proveWhitespaceTrimming);
+    it('params beyond the format are ignored (forward-tolerant parse)', proveForwardTolerance);
+    it('action aliases resolve to the canonical parser (TRANSFER -> SEND, ...)', proveAliases);
+    it('a pipe inside free text corrupts the parse (pinned as a known wire property)', provePipeBehavior);
+}
+
+(HAVE_INDEXER ? describe : describe.skip)(
+    'Codec field-format round-trip (P1a) @regression @tier1', registerFieldRoundTripSuite);

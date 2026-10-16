@@ -170,197 +170,213 @@ function roleObservations(observations, victims) {
     return observations.map((o) => Object.assign({}, o, { role: faulty.has(o.id) ? 'byzantine' : 'honest' }));
 }
 
-function drillScale(spec) {
-    const hostsRaw = process.env.XCHAIN_DRILL_HOSTS;
-    const APPLY_WAIT_MS = parseInt(process.env.XCHAIN_DRILL_APPLY_WAIT_MS, 10) || 20000;
-    const STALL_WAIT_MS = parseInt(process.env.XCHAIN_DRILL_STALL_WAIT_MS, 10) || 20000;
-    const PEER_WAIT_MS  = parseInt(process.env.XCHAIN_DRILL_PEER_WAIT_MS, 10)  || 20000;
-
-    describe('PHYSICAL byzantine drill N=' + spec.count + ' f=' + spec.faults, function () {
-        this.timeout(30 * 60 * 1000);
-
-        let plan, mesh, verdicts, logStream, logPath, dropFailures = [];
-
-        before(async function () {
-            if (!hostsRaw) {
-                console.log('Skipping physical drill N=' + spec.count + ': set XCHAIN_DRILL_HOSTS (see test/drills/README.md)');
-                this.skip();
-            }
-            verdicts = [];
-            plan = planDrill({
-                count:           spec.count,
-                faults:          spec.faults,
-                hosts:           parseHosts(hostsRaw),
-                basePort:        spec.basePort,
-                runId:           's' + spec.count + '_' + process.pid,
-                allowSingleHost: process.env.XCHAIN_DRILL_ALLOW_SINGLE_HOST === '1'
-            });
-            console.log('\n' + describePlan(plan) + '\n');
-
-            logPath   = path.join(process.env.XCHAIN_DRILL_LOG_DIR || require('os').tmpdir(),
-                                  'xchain-drill-N' + spec.count + '-' + process.pid + '.log');
-            logStream = fs.createWriteStream(logPath);
-            console.log('validator output: ' + logPath);
-
-            mesh = await startMesh(plan, {
-                identities:   loadIdentities(spec.count),
-                logStream:    logStream,
-                snapshotBlock: 100
-            });
-            await waitUntil(async () => {
-                const seen = await Promise.all(mesh.handles.map((h) => h.send('peers').catch(() => ({ peers: -1 }))));
-                return seen.every((p) => p.peers === spec.count - 1);
-            }, PEER_WAIT_MS);
-        });
-
-        after(async function () {
-            if (mesh) {
-                // Drop each validator's schema before killing it; a shared venue
-                // must be handed back the way it was found.
-                const drops = await Promise.all(mesh.handles.map((h) => h.send('dropDb', {}, 60000)
-                    .then((r) => (r && r.dropped === false && !r.skipped ? 'not dropped: ' + JSON.stringify(r) : null),
-                          (e) => 'dropDb failed: ' + String(e && e.message || e))));
-                dropFailures = drops.filter(Boolean);
-                await mesh.stop();
-            }
-            if (logStream) logStream.end();
-            if (verdicts && verdicts.length) {
-                const summary = V.summarize(verdicts);
-                console.log('\n' + V.renderReport(plan, summary, { runId: 'N' + spec.count, startedAt: new Date().toISOString() }) + '\n');
-            }
-            if (dropFailures.length) throw new Error('schema teardown left databases behind: ' + dropFailures.join('; '));
-        });
-
-        it('A MESH: every validator sees ' + (spec.count - 1) + ' peers and all agree on quorum ' + spec.quorum, async function () {
-            const peers   = await Promise.all(mesh.handles.map((h) => h.send('peers')));
-            const quorums = await Promise.all(mesh.handles.map((h) => h.send('quorum')));
-            peers.forEach((p, i) => assert.strictEqual(
-                p.peers, spec.count - 1,
-                mesh.handles[i].id + ' on ' + mesh.handles[i].node.hostId + ' sees ' + p.peers + ' peers, expected ' + (spec.count - 1)));
-            const qs = quorums.map((q) => q.quorum);
-            assert.ok(qs.every((q) => q === qs[0]), 'validators disagree on quorum: ' + JSON.stringify(qs));
-            assert.strictEqual(qs[0], spec.quorum, 'expected quorum ' + spec.quorum + ', got ' + qs[0]);
-        });
-
-        it('B LIVENESS: ' + spec.faults + ' silent validators do not stall the federation', async function () {
-            const value = phaseValue(spec.count, 'B');
-            await realign(mesh);
-            const leader = await findLeader(mesh);
-            assert.ok(leader, 'no leader identified');
-            const victims = await applyFaults(mesh, leader, spec.faults, 'silent');
-            try {
-                await leader.send('propose', { config: cfgFor(value) });
-                await waitUntil(async () => {
-                    const rows = await readAll(mesh, value);
-                    return rows.filter((o) => o.applied === value).length >= spec.quorum;
-                }, APPLY_WAIT_MS);
-                const v = V.evaluateLiveness({
-                    quorum: spec.quorum,
-                    expectedValue: value,
-                    observations: roleObservations(await readAll(mesh, value), victims)
-                });
-                verdicts.push(v);
-                assert.strictEqual(v.status, V.PASS, v.phase + ': ' + v.status + ' ' + v.reasons.join('; '));
-            } finally {
-                await clearFaults(mesh);
-            }
-        });
-
-        it('C BOUNDARY: ' + (spec.faults + 1) + ' silent validators drop it below quorum, so nothing applies', async function () {
-            const value = phaseValue(spec.count, 'C');
-            await realign(mesh);
-            const leader = await findLeader(mesh);
-            assert.ok(leader, 'no leader identified');
-            const victims = await applyFaults(mesh, leader, spec.faults + 1, 'silent');
-            try {
-                await leader.send('propose', { config: cfgFor(value) });
-                const held = await holdAbsence(
-                    () => readAll(mesh, value),
-                    STALL_WAIT_MS,
-                    (rows) => rows.some((o) => o.applied === value));
-                const v = V.evaluateBoundary({
-                    expectedValue: value,
-                    observations: roleObservations(held, victims)
-                });
-                verdicts.push(v);
-                assert.strictEqual(v.status, V.PASS, v.phase + ': ' + v.status + ' ' + v.reasons.join('; '));
-            } finally {
-                await clearFaults(mesh);
-                await realign(mesh);
-            }
-        });
-
-        it('D SAFETY: a forged-digest PRE_PREPARE is rejected with no state change', async function () {
-            const value = phaseValue(spec.count, 'D');
-            const seq   = 9100 + spec.count;
-            const observations = [];
-            for (const h of mesh.handles) {
-                try {
-                    const r   = await h.send('forgePrePrepare', { seq, config: cfgFor(value), blockIndex: 100 });
-                    const cfg = await h.send('getConfig', { coin: COIN, net: NET, module: MODULE, key: KEY });
-                    observations.push({ id: h.id, pendingCreated: r.pendingCreated, applied: cfg.value });
-                } catch (e) {
-                    observations.push({ id: h.id, pendingCreated: undefined, applied: undefined });
-                }
-            }
-            const v = V.evaluateSafetyForge({ forgedValue: value, observations });
-            verdicts.push(v);
-            assert.strictEqual(v.status, V.PASS, v.phase + ': ' + v.status + ' ' + v.reasons.join('; '));
-            await realign(mesh);
-        });
-
-        it('E ACTIVE-BFT: ' + spec.faults + ' validators voting with forged signatures do not stall the federation', async function () {
-            const value = phaseValue(spec.count, 'E');
-            await realign(mesh);
-            const leader = await findLeader(mesh);
-            assert.ok(leader, 'no leader identified');
-            const victims = await applyFaults(mesh, leader, spec.faults, 'forge');
-            try {
-                await leader.send('propose', { config: cfgFor(value) });
-                await waitUntil(async () => {
-                    const rows = await readAll(mesh, value);
-                    const honest = rows.filter((o) => !victims.some((x) => x.id === o.id));
-                    return honest.filter((o) => o.applied === value).length >= spec.quorum;
-                }, APPLY_WAIT_MS);
-                // A forging validator still RECEIVES honest votes, so it may apply
-                // too; only the honest quorum is asserted here. Whether its own
-                // forged votes counted is what phase F settles.
-                const rows = (await readAll(mesh, value)).map((o) => Object.assign({}, o, { role: 'honest' }));
-                const honestOnly = rows.filter((o) => !victims.some((x) => x.id === o.id));
-                const v = V.evaluateLiveness({ quorum: spec.quorum, expectedValue: value, observations: honestOnly });
-                verdicts.push(Object.assign({}, v, { phase: 'active-byzantine-liveness' }));
-                assert.strictEqual(v.status, V.PASS, 'active-byzantine liveness: ' + v.status + ' ' + v.reasons.join('; '));
-            } finally {
-                await clearFaults(mesh);
-                await realign(mesh);
-            }
-        });
-
-        it('F EXCLUSION: ' + (spec.faults + 1) + ' forging validators stall it, proving forged votes were never counted', async function () {
-            const value = phaseValue(spec.count, 'F');
-            await realign(mesh);
-            const leader = await findLeader(mesh);
-            assert.ok(leader, 'no leader identified');
-            const victims = await applyFaults(mesh, leader, spec.faults + 1, 'forge');
-            try {
-                await leader.send('propose', { config: cfgFor(value) });
-                const held = await holdAbsence(
-                    () => readAll(mesh, value),
-                    STALL_WAIT_MS,
-                    (rows) => rows.some((o) => o.applied === value));
-                const v = V.evaluateBoundary({
-                    expectedValue: value,
-                    observations: roleObservations(held, victims)
-                });
-                verdicts.push(Object.assign({}, v, { phase: 'forged-vote-exclusion' }));
-                assert.strictEqual(v.status, V.PASS,
-                    'forged-vote exclusion: ' + v.status + ' ' + v.reasons.join('; ') +
-                    ' (an apply here means honest validators counted a signature that does not verify)');
-            } finally {
-                await clearFaults(mesh);
-            }
-        });
+async function startDrill(ctx, mochaContext) {
+    const { spec } = ctx;
+    if (!ctx.hostsRaw) {
+        console.log('Skipping physical drill N=' + spec.count + ': set XCHAIN_DRILL_HOSTS (see test/drills/README.md)');
+        mochaContext.skip();
+    }
+    ctx.verdicts = [];
+    ctx.plan = planDrill({
+        count: spec.count, faults: spec.faults, hosts: parseHosts(ctx.hostsRaw), basePort: spec.basePort,
+        runId: 's' + spec.count + '_' + process.pid,
+        allowSingleHost: process.env.XCHAIN_DRILL_ALLOW_SINGLE_HOST === '1'
     });
+    console.log('\n' + describePlan(ctx.plan) + '\n');
+    ctx.logPath = path.join(process.env.XCHAIN_DRILL_LOG_DIR || require('os').tmpdir(),
+        'xchain-drill-N' + spec.count + '-' + process.pid + '.log');
+    ctx.logStream = fs.createWriteStream(ctx.logPath);
+    console.log('validator output: ' + ctx.logPath);
+    ctx.mesh = await startMesh(ctx.plan, {
+        identities: loadIdentities(spec.count), logStream: ctx.logStream, snapshotBlock: 100
+    });
+    await waitUntil(async () => {
+        const seen = await Promise.all(ctx.mesh.handles.map((h) => h.send('peers').catch(() => ({ peers: -1 }))));
+        return seen.every((p) => p.peers === spec.count - 1);
+    }, ctx.peerWaitMs);
+}
+
+async function stopDrill(ctx) {
+    if (ctx.mesh) {
+        // Drop each validator's schema before killing it; a shared venue
+        // must be handed back the way it was found.
+        const drops = await Promise.all(ctx.mesh.handles.map((h) => h.send('dropDb', {}, 60000)
+            .then((r) => (r && r.dropped === false && !r.skipped ? 'not dropped: ' + JSON.stringify(r) : null),
+                (e) => 'dropDb failed: ' + String(e && e.message || e))));
+        ctx.dropFailures = drops.filter(Boolean);
+        await ctx.mesh.stop();
+    }
+    if (ctx.logStream) ctx.logStream.end();
+    if (ctx.verdicts && ctx.verdicts.length) {
+        const summary = V.summarize(ctx.verdicts);
+        console.log('\n' + V.renderReport(ctx.plan, summary, {
+            runId: 'N' + ctx.spec.count, startedAt: new Date().toISOString()
+        }) + '\n');
+    }
+    if (ctx.dropFailures.length)
+        throw new Error('schema teardown left databases behind: ' + ctx.dropFailures.join('; '));
+}
+
+async function proveMesh(ctx) {
+    const { mesh, spec } = ctx;
+    const peers = await Promise.all(mesh.handles.map((h) => h.send('peers')));
+    const quorums = await Promise.all(mesh.handles.map((h) => h.send('quorum')));
+    peers.forEach((p, i) => assert.strictEqual(p.peers, spec.count - 1,
+        mesh.handles[i].id + ' on ' + mesh.handles[i].node.hostId + ' sees ' + p.peers +
+        ' peers, expected ' + (spec.count - 1)));
+    const qs = quorums.map((q) => q.quorum);
+    assert.ok(qs.every((q) => q === qs[0]), 'validators disagree on quorum: ' + JSON.stringify(qs));
+    assert.strictEqual(qs[0], spec.quorum, 'expected quorum ' + spec.quorum + ', got ' + qs[0]);
+}
+
+async function proveLiveness(ctx) {
+    const { mesh, spec } = ctx;
+    const value = phaseValue(spec.count, 'B');
+    await realign(mesh);
+    const leader = await findLeader(mesh);
+    assert.ok(leader, 'no leader identified');
+    const victims = await applyFaults(mesh, leader, spec.faults, 'silent');
+    try {
+        await leader.send('propose', { config: cfgFor(value) });
+        await waitUntil(async () => {
+            const rows = await readAll(mesh, value);
+            return rows.filter((o) => o.applied === value).length >= spec.quorum;
+        }, ctx.applyWaitMs);
+        const verdict = V.evaluateLiveness({
+            quorum: spec.quorum, expectedValue: value,
+            observations: roleObservations(await readAll(mesh, value), victims)
+        });
+        ctx.verdicts.push(verdict);
+        assert.strictEqual(verdict.status, V.PASS,
+            verdict.phase + ': ' + verdict.status + ' ' + verdict.reasons.join('; '));
+    } finally { await clearFaults(mesh); }
+}
+
+async function proveBoundary(ctx) {
+    const { mesh, spec } = ctx;
+    const value = phaseValue(spec.count, 'C');
+    await realign(mesh);
+    const leader = await findLeader(mesh);
+    assert.ok(leader, 'no leader identified');
+    const victims = await applyFaults(mesh, leader, spec.faults + 1, 'silent');
+    try {
+        await leader.send('propose', { config: cfgFor(value) });
+        const held = await holdAbsence(() => readAll(mesh, value), ctx.stallWaitMs,
+            (rows) => rows.some((o) => o.applied === value));
+        const verdict = V.evaluateBoundary({
+            expectedValue: value, observations: roleObservations(held, victims)
+        });
+        ctx.verdicts.push(verdict);
+        assert.strictEqual(verdict.status, V.PASS,
+            verdict.phase + ': ' + verdict.status + ' ' + verdict.reasons.join('; '));
+    } finally {
+        await clearFaults(mesh);
+        await realign(mesh);
+    }
+}
+
+async function proveSafety(ctx) {
+    const { mesh, spec } = ctx;
+    const value = phaseValue(spec.count, 'D');
+    const observations = [];
+    for (const handle of mesh.handles) {
+        try {
+            const result = await handle.send('forgePrePrepare', {
+                seq: 9100 + spec.count, config: cfgFor(value), blockIndex: 100
+            });
+            const config = await handle.send('getConfig', { coin: COIN, net: NET, module: MODULE, key: KEY });
+            observations.push({ id: handle.id, pendingCreated: result.pendingCreated, applied: config.value });
+        } catch (error) {
+            observations.push({ id: handle.id, pendingCreated: undefined, applied: undefined });
+        }
+    }
+    const verdict = V.evaluateSafetyForge({ forgedValue: value, observations });
+    ctx.verdicts.push(verdict);
+    assert.strictEqual(verdict.status, V.PASS,
+        verdict.phase + ': ' + verdict.status + ' ' + verdict.reasons.join('; '));
+    await realign(mesh);
+}
+
+async function proveActiveByzantineLiveness(ctx) {
+    const { mesh, spec } = ctx;
+    const value = phaseValue(spec.count, 'E');
+    await realign(mesh);
+    const leader = await findLeader(mesh);
+    assert.ok(leader, 'no leader identified');
+    const victims = await applyFaults(mesh, leader, spec.faults, 'forge');
+    try {
+        await leader.send('propose', { config: cfgFor(value) });
+        await waitUntil(async () => {
+            const rows = await readAll(mesh, value);
+            const honest = rows.filter((o) => !victims.some((x) => x.id === o.id));
+            return honest.filter((o) => o.applied === value).length >= spec.quorum;
+        }, ctx.applyWaitMs);
+        // A forging validator still receives honest votes, so it may apply
+        // too; only the honest quorum is asserted here. Whether its own
+        // forged votes counted is what phase F settles.
+        // The returned rows therefore exclude every faulted validator.
+        const rows = (await readAll(mesh, value)).map((o) => Object.assign({}, o, { role: 'honest' }));
+        const honestOnly = rows.filter((o) => !victims.some((x) => x.id === o.id));
+        const verdict = V.evaluateLiveness({ quorum: spec.quorum, expectedValue: value, observations: honestOnly });
+        ctx.verdicts.push(Object.assign({}, verdict, { phase: 'active-byzantine-liveness' }));
+        assert.strictEqual(verdict.status, V.PASS,
+            'active-byzantine liveness: ' + verdict.status + ' ' + verdict.reasons.join('; '));
+    } finally {
+        await clearFaults(mesh);
+        await realign(mesh);
+    }
+}
+
+async function proveForgedVoteExclusion(ctx) {
+    const { mesh, spec } = ctx;
+    const value = phaseValue(spec.count, 'F');
+    await realign(mesh);
+    const leader = await findLeader(mesh);
+    assert.ok(leader, 'no leader identified');
+    const victims = await applyFaults(mesh, leader, spec.faults + 1, 'forge');
+    try {
+        await leader.send('propose', { config: cfgFor(value) });
+        const held = await holdAbsence(() => readAll(mesh, value), ctx.stallWaitMs,
+            (rows) => rows.some((o) => o.applied === value));
+        const verdict = V.evaluateBoundary({
+            expectedValue: value, observations: roleObservations(held, victims)
+        });
+        ctx.verdicts.push(Object.assign({}, verdict, { phase: 'forged-vote-exclusion' }));
+        assert.strictEqual(verdict.status, V.PASS,
+            'forged-vote exclusion: ' + verdict.status + ' ' + verdict.reasons.join('; ') +
+            ' (an apply here means honest validators counted a signature that does not verify)');
+    } finally { await clearFaults(mesh); }
+}
+
+function registerDrillSuite(ctx) {
+    this.timeout(30 * 60 * 1000);
+    const { spec } = ctx;
+    before(function () { return startDrill(ctx, this); });
+    after(() => stopDrill(ctx));
+    it('A MESH: every validator sees ' + (spec.count - 1) + ' peers and all agree on quorum ' + spec.quorum,
+        () => proveMesh(ctx));
+    it('B LIVENESS: ' + spec.faults + ' silent validators do not stall the federation',
+        () => proveLiveness(ctx));
+    it('C BOUNDARY: ' + (spec.faults + 1) + ' silent validators drop it below quorum, so nothing applies',
+        () => proveBoundary(ctx));
+    it('D SAFETY: a forged-digest PRE_PREPARE is rejected with no state change', () => proveSafety(ctx));
+    it('E ACTIVE-BFT: ' + spec.faults + ' validators voting with forged signatures do not stall the federation',
+        () => proveActiveByzantineLiveness(ctx));
+    it('F EXCLUSION: ' + (spec.faults + 1) + ' forging validators stall it, proving forged votes were never counted',
+        () => proveForgedVoteExclusion(ctx));
+}
+
+function drillScale(spec) {
+    const ctx = {
+        spec,
+        hostsRaw: process.env.XCHAIN_DRILL_HOSTS,
+        applyWaitMs: parseInt(process.env.XCHAIN_DRILL_APPLY_WAIT_MS, 10) || 20000,
+        stallWaitMs: parseInt(process.env.XCHAIN_DRILL_STALL_WAIT_MS, 10) || 20000,
+        peerWaitMs: parseInt(process.env.XCHAIN_DRILL_PEER_WAIT_MS, 10) || 20000,
+        plan: null, mesh: null, verdicts: [], logStream: null, logPath: null, dropFailures: []
+    };
+    describe('PHYSICAL byzantine drill N=' + spec.count + ' f=' + spec.faults,
+        function () { registerDrillSuite.call(this, ctx); });
 }
 
 drillScale({ count: 7,  quorum: 5, faults: 2, basePort: 41000 });
