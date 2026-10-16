@@ -45,25 +45,27 @@ describe('attest mirror barrier attribution', function () {
         assert.strictEqual(isAttributedPark({ reason: null, klass: 'barrier_defer' }), false)
     })
 
-    it('wires at0b to the shared helper without a local parked-class constant', function () {
+    it('wires the at0b steps to the shared helper without a local parked-class constant', function () {
         const source = fs.readFileSync(path.join(
             __dirname,
             '..',
             'attestMirror',
-            'at0b_barrier_attribution.test.js'
+            'at0b_barrier_attribution.test',
+            'steps.test.js'
         ), 'utf8')
-        assert.ok(source.includes("require('./helpers/barrierAttribution')"))
+        assert.ok(source.includes("require('../helpers/barrierAttribution')"))
         assert.strictEqual(/^const PARKED_CLASSES\s*=/m.test(source), false)
     })
 
-    it('wires at2b_forward_margin to the shared helper without a local parked-class constant', function () {
+    it('wires the at2b_forward_margin steps to the shared helper without a local parked-class constant', function () {
         const source = fs.readFileSync(path.join(
             __dirname,
             '..',
             'attestMirror',
-            'at2b_forward_margin.test.js'
+            'at2b_forward_margin.test',
+            'steps.test.js'
         ), 'utf8')
-        assert.ok(source.includes("require('./helpers/barrierAttribution')"))
+        assert.ok(source.includes("require('../helpers/barrierAttribution')"))
         assert.strictEqual(/^const PARKED_CLASSES\s*=/m.test(source), false)
         assert.ok(source.includes('isAttributedPark('))
     })
