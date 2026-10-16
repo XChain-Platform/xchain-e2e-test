@@ -658,11 +658,15 @@ describe('nativeFeeHelper.nativeFeeSats', () => {
         global.utxoTrackerConnector = { getUtxosFromAddress: async () => ({ utxos: [{ value: sats }] }) }
     }
 
+    it('sets the flat native fee at the DOGE dust threshold', () => {
+        assert.strictEqual(freshHelper().FLAT_FEE_SATS, 100000)
+    })
+
     it('pays the flat fee at the seeded pair and asks for no quote', async () => {
         schedules = [SEED]
         const helper = freshHelper()
         assert.strictEqual(await helper.nativeFeeSats('ISSUE|0|TICK|1000|100|0|d|10', 'DSrc111'), helper.FLAT_FEE_SATS)
-        assert.strictEqual(quotes().length, 0, 'the seed path must stay as cheap as it was')
+        assert.strictEqual(quotes().length, 0, 'the seed path must not require a quote')
         assert.strictEqual(seeded.length, 0, 'a visible seed must not be re-seeded')
         assert.strictEqual(reseeds, 0)
     })
@@ -769,8 +773,8 @@ describe('nativeFeeHelper.nativeFeeSats', () => {
         quote = new Error('invalid: TICK (already exists)')   // the connector throws on the error envelope
         const helper = freshHelper()
         const sats = await helper.nativeFeeSats('ISSUE|0|TICK|1000|100|0|d|10', 'DSrc111')
-        // 25 XCHAIN at $2 / $1000 = 0.05 DOGE, plus headroom.
-        assert.strictEqual(sats, Math.ceil(5000000 * helper.FEE_HEADROOM))
+        // 50 XCHAIN at $2 / $1000 = 0.1 DOGE, plus headroom.
+        assert.strictEqual(sats, Math.ceil(10000000 * helper.FEE_HEADROOM))
     })
 
     it('sizes DEPLOY from the static schedule-priced quote, whose valid is null rather than true', async () => {
@@ -787,14 +791,14 @@ describe('nativeFeeHelper.nativeFeeSats', () => {
         quote = { supported: false, denied: true, valid: null, requiredFeeSats: 200000 }
         const helper = freshHelper()
         const sats = await helper.nativeFeeSats('BATCH|0|abc', 'DSrc111')
-        // 25 XCHAIN at $2 / $1000 = 0.05 DOGE, plus headroom: the priced budget, not the quote.
-        assert.strictEqual(sats, Math.ceil(5000000 * helper.FEE_HEADROOM))
+        // 50 XCHAIN at $2 / $1000 = 0.1 DOGE, plus headroom: the priced budget, not the quote.
+        assert.strictEqual(sats, Math.ceil(10000000 * helper.FEE_HEADROOM))
     })
 
     it('prices by budget when no action string is given (the SDK and multisig lanes)', async () => {
         schedules = [REPRICED]
         const helper = freshHelper()
-        assert.strictEqual(await helper.nativeFeeSats(), Math.ceil(5000000 * helper.FEE_HEADROOM))
+        assert.strictEqual(await helper.nativeFeeSats(), Math.ceil(10000000 * helper.FEE_HEADROOM))
         assert.strictEqual(quotes().length, 0)
     })
 

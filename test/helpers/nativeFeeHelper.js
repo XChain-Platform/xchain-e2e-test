@@ -48,19 +48,19 @@ const COIN_USD   = '100000.00000000'
 
 // Flat native fee output (satoshis). With the prices above, the indexer's
 // minAcceptable for an action costing X XCHAIN is 0.95 * X * 2 / 100000 coin;
-// 50000 sats (0.0005 coin) clears the min for any action up to ~26 XCHAIN.
+// 100000 sats (0.001 coin) clears the min for any action up to ~52 XCHAIN.
 // (That headroom halved when the seed moved from the 1.00-era value to the $2
 // bootstrap. The largest action any e2e composes is a full-size contract
-// deploy at well under 2 XCHAIN, so 26 is still an order of magnitude of slack; if
+// deploy at well under 2 XCHAIN, so 52 is still an order of magnitude of slack; if
 // a future action approaches it, raise this rather than lowering the price.)
-// Matches nativeFeeLive's proven output and is negligible against the ~1-coin
-// fundings cryptoHelper uses.
-const FLAT_FEE_SATS = 50000
+// This also meets DOGE's 0.001-coin dust threshold and is negligible against the
+// ~1-coin fundings cryptoHelper uses.
+const FLAT_FEE_SATS = 100000
 
-// The XCHAIN cost FLAT_FEE_SATS covers at the seeded pair (0.0005 coin * 100000 / 2).
+// The XCHAIN cost FLAT_FEE_SATS covers at the seeded pair (0.001 coin * 100000 / 2).
 // Re-valued at the indexer's current prices it is the fallback size for an action the
 // feequote cannot price, so the fallback always buys the same XCHAIN as the flat fee.
-const FEE_BUDGET_XCHAIN = 25
+const FEE_BUDGET_XCHAIN = 50
 
 // Headroom over the indexer's own expected fee. The band's floor is 0.95x expected, so
 // 1.10x survives a price move of about 14% between the quote and the action's block.
