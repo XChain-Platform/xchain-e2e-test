@@ -35,7 +35,7 @@ const assert = require('assert');
 const crypto = require('crypto');
 const path   = require('path');
 const fs     = require('fs');
-const { codeHashOf, findDeployedContract } = require('../../bin/seed-contract-state.js');
+const { codeHashOf, findDeployedContract } = require('../../../bin/seed-contract-state.js');
 
 const ADDR  = 'n3ksrwbSRGXwdXTCHYWjdRux5iD8uEoujg';
 const CODE  = 'contract source bytes\n';
@@ -80,7 +80,7 @@ describe('seed-contract-state findDeployedContract: resume from the chain, not t
     // exactly when a resume would stop finding an already-deployed copy.
     // Re-pin this literal deliberately whenever spvSeed.js is edited on purpose.
     it('pins the sha256 of the seed contract source the resume lookup matches on', function () {
-        const src = fs.readFileSync(path.join(__dirname, '../../bin/contracts/spvSeed.js'), 'utf8');
+        const src = fs.readFileSync(path.join(__dirname, '../../../bin/contracts/spvSeed.js'), 'utf8');
         assert.strictEqual(
             codeHashOf(src),
             '8844863444b6f278cc00520dcb420b4713eb3c0784a722e25356b2eb1cd578b4'

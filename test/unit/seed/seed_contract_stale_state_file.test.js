@@ -36,7 +36,7 @@
 
 const assert = require('assert');
 const crypto = require('crypto');
-const { resolveContractIndex } = require('../../bin/seed-contract-state.js');
+const { resolveContractIndex } = require('../../../bin/seed-contract-state.js');
 
 const ADDR = 'n3ksrwbSRGXwdXTCHYWjdRux5iD8uEoujg';
 const CODE = 'contract source bytes\n';

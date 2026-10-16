@@ -51,7 +51,7 @@ const path   = require('path');
 const crypto = require('crypto');
 const {
     listRows, holdsEscrow, isSeedOrder, escrowLeafGate, RELEASED_STATUSES,
-} = require('../../bin/seed-escrow-state.js');
+} = require('../../../bin/seed-escrow-state.js');
 
 describe('seed-escrow-state helpers', function () {
 

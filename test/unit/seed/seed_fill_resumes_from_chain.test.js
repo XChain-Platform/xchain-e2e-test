@@ -45,7 +45,7 @@ const resumeFrom = (liveKeys, fillNext) =>
 describe('seed-contract-state: the fill resume position', function () {
 
     it('SEED_BASE_KEYS equals what the contract initialize() actually writes', function () {
-        const src   = fs.readFileSync(path.join(__dirname, '../../bin/contracts/spvSeed.js'), 'utf8');
+        const src   = fs.readFileSync(path.join(__dirname, '../../../bin/contracts/spvSeed.js'), 'utf8');
         const from  = src.indexOf('initialize:');
         assert.ok(from >= 0, 'no initialize() in the contract source');
         // End at the method's own closing brace, not at the next occurrence of
@@ -60,7 +60,7 @@ describe('seed-contract-state: the fill resume position', function () {
     });
 
     it('the constant is the one the tool actually uses', function () {
-        const src = fs.readFileSync(path.join(__dirname, '../../bin/seed-contract-state.js'), 'utf8');
+        const src = fs.readFileSync(path.join(__dirname, '../../../bin/seed-contract-state.js'), 'utf8');
         assert.ok(/const SEED_BASE_KEYS = 7;/.test(src), 'SEED_BASE_KEYS drifted from this test');
     });
 

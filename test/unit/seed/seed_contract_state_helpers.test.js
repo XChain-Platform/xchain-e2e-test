@@ -35,7 +35,7 @@
 'use strict';
 
 const assert = require('assert');
-const { contractIndexOf, coinPrefix } = require('../../bin/seed-contract-state.js');
+const { contractIndexOf, coinPrefix } = require('../../../bin/seed-contract-state.js');
 
 // A real DEPLOY action row, as the explorer returns it (trimmed to the fields
 // these helpers touch; the live row also carries abi/code/code_hash/...).

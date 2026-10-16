@@ -38,7 +38,7 @@ const assert = require('assert');
 const path   = require('path');
 const {
     explorerField, isExplorerError, EXPLORER_ENVELOPES, makeSubmitChecked, requireValid
-} = require('../../bin/seed-contract-state.js');
+} = require('../../../bin/seed-contract-state.js');
 
 // The SDK's own ActionWaiter, resolved through the same candidate paths the
 // tool's loadSDK uses (this repo's node_modules/xchain-sdk is a link to a
@@ -46,8 +46,8 @@ const {
 // the tests that need it skip rather than passing vacuously.
 function loadActionWaiter() {
     for (const c of ['xchain-sdk/src/utils/action_waiter.js',
-                     '../../xchain-sdk/src/utils/action_waiter.js',
-                     '../../../xchain-sdk/src/utils/action_waiter.js']) {
+                     '../../../xchain-sdk/src/utils/action_waiter.js',
+                     '../../../../xchain-sdk/src/utils/action_waiter.js']) {
         try {
             return c.startsWith('.') ? require(path.resolve(__dirname, c)) : require(c);
         } catch (e) { /* next */ }

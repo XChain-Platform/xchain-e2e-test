@@ -18,7 +18,7 @@ const {
     BARRIER_REASON,
     PARKED_CLASSES,
     isAttributedPark,
-} = require('../attestMirror/helpers/barrierAttribution')
+} = require('../../attestMirror/helpers/barrierAttribution')
 
 describe('attest mirror barrier attribution', function () {
     it('accepts the barrier reason with each parked class', function () {
@@ -49,6 +49,7 @@ describe('attest mirror barrier attribution', function () {
         const source = fs.readFileSync(path.join(
             __dirname,
             '..',
+            '..',
             'attestMirror',
             'at0b_barrier_attribution.test',
             'steps.test.js'
@@ -60,6 +61,7 @@ describe('attest mirror barrier attribution', function () {
     it('wires the at2b_forward_margin steps to the shared helper without a local parked-class constant', function () {
         const source = fs.readFileSync(path.join(
             __dirname,
+            '..',
             '..',
             'attestMirror',
             'at2b_forward_margin.test',

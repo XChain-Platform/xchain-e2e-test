@@ -1,7 +1,7 @@
 const assert = require('assert')
 const { EventEmitter } = require('events')
 
-const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
+const { AttestMirrorVenue } = require('../../helpers/attestMirrorVenue')
 
 // A stand-in child process. It records the signals sent to it and emits 'exit'
 // on SIGTERM only when `exitsOnTerm` is set.

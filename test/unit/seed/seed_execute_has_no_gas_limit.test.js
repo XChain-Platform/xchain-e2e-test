@@ -32,8 +32,8 @@ const path   = require('path');
 // node_modules link, so a bare require('xchain-sdk') is not enough.
 function loadFormats() {
     for (const c of ['xchain-sdk/src/protocol/formats.js',
-                     '../../xchain-sdk/src/protocol/formats.js',
-                     '../../../xchain-sdk/src/protocol/formats.js']) {
+                     '../../../xchain-sdk/src/protocol/formats.js',
+                     '../../../../xchain-sdk/src/protocol/formats.js']) {
         try {
             return c.startsWith('.') ? require(path.resolve(__dirname, c)) : require(c);
         } catch (e) { /* next */ }
@@ -84,7 +84,7 @@ describe('seed-contract-state: the EXECUTE wire format carries no gas limit', fu
     // in CI rather than three steps into a paid run.
     it('the seed tool passes no gasLimit to either of its EXECUTEs', function () {
         const fs  = require('fs');
-        const src = fs.readFileSync(path.join(__dirname, '../../bin/seed-contract-state.js'), 'utf8');
+        const src = fs.readFileSync(path.join(__dirname, '../../../bin/seed-contract-state.js'), 'utf8');
         // Each EXECUTE submit block runs from "action: 'EXECUTE'" to the closing
         // "} }," of its params object.
         const blocks = src.split("action: 'EXECUTE'").slice(1);
