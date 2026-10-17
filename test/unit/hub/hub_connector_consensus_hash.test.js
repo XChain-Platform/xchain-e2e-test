@@ -26,8 +26,8 @@
 const assert = require('assert');
 const nock   = require('nock');
 
-const XChainHubConnector = require('../../src/XChainHubConnector.js');
-const coins              = require('../../src/coins');
+const XChainHubConnector = require('../../../src/XChainHubConnector.js');
+const coins              = require('../../../src/coins');
 
 const HUB_BASE = 'http://hub.test:10000';
 

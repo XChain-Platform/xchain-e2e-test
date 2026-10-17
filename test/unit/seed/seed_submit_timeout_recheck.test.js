@@ -26,7 +26,7 @@
  */
 
 const assert = require('assert');
-const { makeSubmitChecked } = require('../../bin/seed-contract-state.js');
+const { makeSubmitChecked } = require('../../../bin/seed-contract-state.js');
 
 const TXID = 'a'.repeat(64);
 
@@ -147,7 +147,7 @@ describe('seed-contract-state submitChecked: the timeout is not evidence', funct
     });
 
     it('recovers a DEPLOY well enough for contractIndexOf to read the action_index', async function () {
-        const { contractIndexOf } = require('../../bin/seed-contract-state.js');
+        const { contractIndexOf } = require('../../../bin/seed-contract-state.js');
         const sdk = stubSdk(timeoutErr(), {
             tx_hash: TXID,
             block_index: 5,

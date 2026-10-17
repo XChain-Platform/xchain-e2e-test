@@ -20,7 +20,7 @@ const {
     ATTEST_RESPONSE_MIRROR_ACTIVATION,
     isLegacyResponsePathUnreachable,
     skipIfResponseMirrorEra
-} = require('../helpers/attestLegacyResponsePath')
+} = require('../../helpers/attestLegacyResponsePath')
 
 describe('the legacy on-chain ATTEST response path guard', function () {
 
@@ -31,7 +31,7 @@ describe('the legacy on-chain ATTEST response path guard', function () {
     // through the indexer's consumer-shaped registry entry) is the nearest
     // authority a sibling checkout has.
     it('carries the same activation map as the indexer it is predicting', function () {
-        const sibling = path.join(__dirname, '..', '..', '..', 'xchain-indexer',
+        const sibling = path.join(__dirname, '..', '..', '..', '..', 'xchain-indexer',
             'src', 'consensus', 'gate_registry.js')
         if (!fs.existsSync(sibling)) {
             console.log('xchain-indexer not checked out beside this repo; parity unchecked')
@@ -102,7 +102,7 @@ describe('the legacy on-chain ATTEST response path guard', function () {
 describe('contract tests that broadcast legacy ATTEST responses', function () {
 
     it('reference the mirror-era skip guard', function () {
-        const contractsDir = path.join(__dirname, '..', '..', 'test/contracts')
+        const contractsDir = path.join(__dirname, '..', '..', '..', 'test/contracts')
         const pendingDirs = [contractsDir]
         const testFiles = []
         while (pendingDirs.length > 0) {

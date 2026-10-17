@@ -67,7 +67,7 @@ const path   = require('path');
 //     reason contract work verifies on the Linux venue under Node 22 and is not
 //     a reason to call an unproven tree green. So the require is NOT wrapped:
 //     the load error surfaces as a failed hook and the run goes red.
-const VM_CANDIDATES = ['xchain-vm', '../../../xchain-vm', '../../../../xchain-vm'];
+const VM_CANDIDATES = ['xchain-vm', '../../../../xchain-vm', '../../../../../xchain-vm'];
 
 function resolveVM() {
     for (const c of VM_CANDIDATES) {
@@ -109,7 +109,7 @@ process.on('exit', function () {
 });
 
 const CODE = fs.readFileSync(
-    path.join(__dirname, '..', '..', 'bin', 'contracts', 'spvSeed.js'), 'utf8');
+    path.join(__dirname, '..', '..', '..', 'bin', 'contracts', 'spvSeed.js'), 'utf8');
 
 const OWNER  = 'mownerXXXXXXXXXXXXXXXXXXXXXXXXXXXX';
 const STRANGER = 'mstrangerXXXXXXXXXXXXXXXXXXXXXXXXX';
@@ -120,8 +120,8 @@ const STRANGER = 'mstrangerXXXXXXXXXXXXXXXXXXXXXXXXX';
 // exactly these numbers, and a seed rehearsal priced differently from the chain
 // is not a rehearsal.
 function loadGasSchedule() {
-    for (const c of ['../../../xchain-indexer/src/coins/BTC.js',
-                     '../../../../xchain-indexer/src/coins/BTC.js']) {
+    for (const c of ['../../../../xchain-indexer/src/coins/BTC.js',
+                     '../../../../../xchain-indexer/src/coins/BTC.js']) {
         try { return require(path.resolve(__dirname, c)).GAS_SCHEDULE; } catch (e) { /* next */ }
     }
     return null;

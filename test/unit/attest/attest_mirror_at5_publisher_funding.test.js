@@ -15,7 +15,7 @@ const fs = require('fs')
 const path = require('path')
 
 // stageDogeSigner lives in the AT5 parts directory and funds the publisher through fundPublisher.
-const LEG = path.resolve(__dirname, '../attestMirror/at5_batch_replay.test/signer.test.js')
+const LEG = path.resolve(__dirname, '../../attestMirror/at5_batch_replay.test/signer.test.js')
 
 function functionBody (source, name) {
     const start = source.indexOf('async function ' + name + ' ')

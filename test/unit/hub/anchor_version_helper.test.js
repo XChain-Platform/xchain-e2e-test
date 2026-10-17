@@ -19,7 +19,7 @@
 'use strict';
 
 const assert = require('assert');
-const av     = require('../helpers/anchorVersionHelper');
+const av     = require('../../helpers/anchorVersionHelper');
 
 // Flag-day predicate triple with each gate independently switchable.
 function flags({ roots = false, anchorReward = false, archiveReward = false } = {}){
@@ -229,7 +229,7 @@ describe('anchorVersionHelper', function () {
 
         it('parses the frozen protocol vector', function () {
             let vector;
-            try { vector = require('../../../xchain-documentation/protocol/test-vectors/anchor_canonical.json'); }
+            try { vector = require('../../../../xchain-documentation/protocol/test-vectors/anchor_canonical.json'); }
             catch (e) { return this.skip(); }        // no docs checkout on this box
             const b = av.parseAnchorV0(vector.vectors.v0);
             assert.strictEqual(b.section_count, b.sections.length);

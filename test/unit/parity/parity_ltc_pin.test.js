@@ -20,7 +20,7 @@ const fs      = require('fs');
 const path    = require('path');
 const { expect } = require('chai');
 
-const SCRIPT = path.join(__dirname, '..', 'parity', 'run-multichain-parity.sh');
+const SCRIPT = path.join(__dirname, '..', '..', 'parity', 'run-multichain-parity.sh');
 
 describe('parity harness LTC daemon pin', function () {
     let src;
