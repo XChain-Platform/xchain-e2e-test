@@ -113,6 +113,41 @@ describe('directGateTarget', function () {
     });
 });
 
+describe('directGateFailureMessage', function () {
+    const { directGateFailureMessage } = loadRailGateContract;
+
+    it('names the red ci:full tier and every mocha failure before the stderr tail', function () {
+        const message = directGateFailureMessage({
+            status: 1,
+            signal: null,
+            error: null,
+            stdout: [
+                'ci:full ----- unit FAIL (3s)',
+                'ci:full ----- integration FAIL (12s)',
+                '  2 failing',
+                '',
+                '  1) Suite A',
+                '       does b:',
+                '     AssertionError: x',
+                '',
+                '  2) Suite C',
+                '       does d:',
+                '     Error: y',
+                'ci:full: RED tiers: [unit integration]',
+            ].join('\n'),
+            tail: 'stderr-only tail',
+        }, 'ci-one');
+
+        assert.match(message, /ci:full FAIL tier: unit/);
+        assert.match(message, /ci:full FAIL tier: integration/);
+        assert.match(message, /ci:full: RED tiers: \[unit integration\]/);
+        assert.match(message, /mocha failing title: Suite A does b:/);
+        assert.match(message, /mocha failing title: Suite C does d:/);
+        assert.ok(message.indexOf('mocha failing title: Suite C does d:') <
+            message.indexOf('stderr-only tail'));
+    });
+});
+
 describe('venueWorktreeScript', function () {
     const { venueWorktreeScript } = loadRailGateContract;
     const { spawnSync } = require('child_process');

@@ -266,9 +266,11 @@ function gateEnv(extra) {
 function run(cmd, args, cwd, env, input) {
     const res = spawnSync(cmd, args, { cwd, env, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024,
         timeout: GATE_TIMEOUT_MS, input: input === undefined ? '' : input });
-    const out = String(res.stdout || '') + String(res.stderr || '');
+    const stdout = String(res.stdout || '');
+    const stderr = String(res.stderr || '');
+    const out = stdout + stderr;
     return { status: res.status, signal: res.signal, error: res.error ? String(res.error.message) : null,
-        out, tail: out.split('\n').slice(-60).join('\n') };
+        stdout, stderr, out, tail: out.split('\n').slice(-60).join('\n') };
 }
 
 function headOf(dir) {
@@ -347,8 +349,7 @@ function runDirectCiGate() {
     at9.ordinaryCi = { command: CI_GATE_COMMAND, cwd: E2E_ROOT, venue,
         transport: target.remote ? 'ci-venue-worktree' : 'direct', directGateTarget: target, exit: res.status, signal: res.signal, counts,
         cachedVerdict: null, failureTail: res.status === 0 ? null : res.tail };
-    assert.strictEqual(res.status, 0, 'the full CI gate is red on venue ' + venue + ' (exit ' + res.status +
-        (res.signal ? ', signal ' + res.signal : '') + (res.error ? ', ' + res.error : '') + '):\n' + res.tail);
+    assert.strictEqual(res.status, 0, loadRailGateContract.directGateFailureMessage(res, venue));
     assert.match(res.out, /^ci:full: all tiers green /m,
         'the direct gate exited 0 without its all-tiers GREEN verdict on venue ' + venue + ':\n' + res.tail);
     assert.ok(counts.passing > 0, 'the full CI gate exited 0 having run no mocha case on venue ' + venue + ':\n' + res.tail);
