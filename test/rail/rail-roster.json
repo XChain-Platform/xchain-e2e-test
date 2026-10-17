@@ -53,6 +53,11 @@
             "run": true
         },
         {
+            "file": "test/actions/attestation.test/02_accepts_a_signed_attest_v1_response.test.js",
+            "run": false,
+            "why": "regtest response mirror is armed at block 0 (test/helpers/attestLegacyResponsePath.js)"
+        },
+        {
             "file": "test/actions/price.test.js",
             "run": true
         },
