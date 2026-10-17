@@ -65,10 +65,8 @@
  * a verdict it wants. `expectValidationStatus` lets a drill pin the one it
  * expects.
  *
- * ONE VENUE AT A TIME. startDisposableHubDb self-provisions its throwaway
- * MariaDB on a fixed port (13307) when the environment's hub DB credentials do
- * not answer, which is the path this stack takes, so two venue runs in parallel
- * would fight over that container. Run drills against this venue serially.
+ * ONE VENUE AT A TIME. The venue always self-provisions its throwaway MariaDB
+ * on the first free port from 13307. Run drills against this venue serially.
  ********************************************************************/
 
 const fs   = require('fs');
@@ -428,7 +426,7 @@ class OracleBatchVenue {
         // transaction helpers read have to already be this chain's when it fires.
         this['_railSaved'] = chainRail.enterRail(this.rail);
 
-        this.hubDb = await startDisposableHubDb();
+        this.hubDb = await startDisposableHubDb({ forceDocker: true });
         if (!this.hubDb) {
             chainRail.exitRail(this['_railSaved']);
             this['_railSaved'] = null;
