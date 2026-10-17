@@ -126,7 +126,9 @@ async function acceptsNativeFeeIssue() {
     const tick = "NFL" + address.substring(address.length - 8)
 
     // Generous fee output (overpayment is always accepted; only underpayment is rejected).
-    const feeSats = 50000
+    // Above every chain's relay dust floor (BTC 546, LTC 5460, DOGE 100000 base units): the
+    // v0.24.0 encoder refuses a payment output below it, and overpayment is accepted.
+    const feeSats = 200000
     const txHash = await transactionHelper.createAndSendTransaction(
         addr, issueMessage(tick), null, [{ address: FEE_DEST, value: feeSats }]
     )
