@@ -115,7 +115,7 @@ module.exports = {
                 contractIndex: contractIndex,
                 caller:        caller,
                 methodName:    method
-            }).catch(() => null)
+            })
             if (row) return row
             await new Promise(r => setTimeout(r, 1000))
         }
