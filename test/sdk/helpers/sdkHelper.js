@@ -111,7 +111,7 @@ async function fundedSdkAddress(sdk, amountToFund = 1, addressType = 'p2pkh') {
 // (a genuinely invalid action is rejected later by the indexer, not here).
 function isTransientStackError(err) {
     const msg = (err && err.message) || '';
-    return /missingorspent|missing\s*or\s*spent|missing\s+inputs|bad-txns-inputs|no utxos|Cannot read propert(y|ies).*txid|Internal encoder error|txn-mempool-conflict|too-long-mempool-chain|insufficient priority|min relay fee/i.test(msg);
+    return /missingorspent|missing\s*or\s*spent|missing\s+inputs|bad-txns-inputs|no utxos|Internal encoder error|txn-mempool-conflict|too-long-mempool-chain|insufficient priority|min relay fee/i.test(msg);
 }
 
 // Submit through the SDK with a quiesce+retry barrier around transient stack races.
