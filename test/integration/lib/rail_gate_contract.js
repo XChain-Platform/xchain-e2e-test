@@ -8,6 +8,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { gateFailureSummary } = require('./gate_failure_summary');
 
 const FIXTURE_PATH = path.resolve(__dirname, '..', '..', 'fixtures', 'rail', 'ci_gate_contract.json');
 
@@ -101,6 +102,16 @@ function directGateTarget(ciVenues, options = {}) {
     throw error;
 }
 
+function directGateFailureMessage(result, venue) {
+    const summary = gateFailureSummary(result.stdout);
+    const status = 'the full CI gate is red on venue ' + venue + ' (exit ' + result.status +
+        (result.signal ? ', signal ' + result.signal : '') + (result.error ? ', ' + result.error : '') + '):';
+    const details = summary.failTiers.map((tier) => 'ci:full FAIL tier: ' + tier);
+    if (summary.redTiersLine) details.push(summary.redTiersLine);
+    for (const title of summary.failingTitles) details.push('mocha failing title: ' + title);
+    return [status, ...details, 'gate output tail:', result.tail].join('\n');
+}
+
 const VENUE_TREE_ENV = 'CI_VENUE_E2E_TREE';
 const VENUE_TREE_DEFAULT = '$HOME/xchain-e2e-test';
 
@@ -143,6 +154,7 @@ module.exports = loadRailGateContract;
 module.exports.venueWorktreeScript = venueWorktreeScript;
 module.exports.VENUE_TREE_ENV = VENUE_TREE_ENV;
 module.exports.directGateTarget = directGateTarget;
+module.exports.directGateFailureMessage = directGateFailureMessage;
 module.exports.venueHostList = venueHostList;
 module.exports.contractFromDispatcher = contractFromDispatcher;
 module.exports.dispatcherPath = dispatcherPath;
