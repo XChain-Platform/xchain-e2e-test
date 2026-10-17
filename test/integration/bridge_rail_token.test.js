@@ -338,7 +338,8 @@ function runDirectCiGate() {
         // ci-venue-worktree: ship the graded head as a tar stream into a scratch worktree of the
         // venue's cached e2e tree, so sibling checkouts and node_modules resolve there.
         const remote = loadRailGateContract.venueWorktreeScript(
-            { command: CI_GATE_COMMAND, enclosingEnv: ENCLOSING_CI_VENUE_ENV });
+            { tree: process.env[loadRailGateContract.VENUE_TREE_ENV],
+                command: CI_GATE_COMMAND, enclosingEnv: ENCLOSING_CI_VENUE_ENV });
         const script = 'set -e; (cd "$1" && git archive HEAD) | ssh -o BatchMode=yes "$2" "$3"';
         res = run('bash', ['-c', script, 'at9-direct-gate', E2E_ROOT, venue, remote], E2E_ROOT, gateEnv());
     }

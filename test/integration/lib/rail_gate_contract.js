@@ -104,21 +104,23 @@ function directGateTarget(ciVenues, options = {}) {
 const VENUE_TREE_ENV = 'CI_VENUE_E2E_TREE';
 const VENUE_TREE_DEFAULT = '$HOME/xchain-e2e-test';
 
-// Remote script for the ci-venue-worktree transport. The venue keeps a cached e2e tree whose
-// parent holds the sibling checkouts and whose node_modules is installed. The graded head
-// arrives as a tar stream on stdin; it is laid over a scratch git worktree created beside the
-// cached tree (so ../ siblings resolve) with the cached node_modules linked in, the gate runs
-// there, and the worktree is removed on exit whatever the gate returned.
+// Remote script contract: scratch/xchain-e2e-test beside cached sibling links, streamed graded
+// head, cached node_modules, a full-tier gate, and unconditional worktree cleanup.
 function venueWorktreeScript(options) {
     const tree = options.tree || '${' + VENUE_TREE_ENV + ':-' + VENUE_TREE_DEFAULT + '}';
     return [
         'set -e',
         'tree="' + tree + '"',
         '[ -d "$tree/.git" ] || { echo "ci-venue-worktree: no cached e2e tree at $tree" >&2; exit 1; }',
-        'wt=$(mktemp -d "$(dirname "$tree")/.at9-wt.XXXXXX")',
+        'cache_parent=$(dirname "$tree")',
+        'scratch=$(mktemp -d "$cache_parent/.at9-wt.XXXXXX")',
+        'wt="$scratch/xchain-e2e-test"',
         'trap \'git -C "$tree" worktree remove --force "$wt" >/dev/null 2>&1 || rm -rf "$wt"; ' +
-            'git -C "$tree" worktree prune >/dev/null 2>&1\' EXIT',
-        'git -C "$tree" worktree add --detach "$wt" HEAD >/dev/null',
+            'rm -rf "$scratch"; git -C "$tree" worktree prune >/dev/null 2>&1\' EXIT',
+        'git -C "$tree" worktree add --detach "$scratch/xchain-e2e-test" HEAD >/dev/null',
+        'for sibling in "$cache_parent"/*; do',
+        '  [ "$sibling" = "$tree" ] || ln -s "$sibling" "$scratch/$(basename "$sibling")"',
+        'done',
         'find "$wt" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +',
         'tar -x -C "$wt"',
         'if [ -d "$tree/node_modules" ] && [ ! -e "$wt/node_modules" ]; then ln -s "$tree/node_modules" "$wt/node_modules"; fi',
