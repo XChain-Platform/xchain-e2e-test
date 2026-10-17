@@ -97,21 +97,27 @@ describe('rail roster runner', () => {
         assert.strictEqual(result.status, 0, result.stderr)
         assert.match(result.stdout, /--reporter json/)
         assert.ok(!result.stdout.includes('--parallel'))
-        const suites = readRailRoster().suites.filter(entry => entry.run)
+        const roster = readRailRoster().suites
+        const suites = roster.filter(entry => entry.run)
+        const skipped = roster.filter(entry => !entry.run)
+        const lines = result.stdout.trim().split('\n')
+        const command = lines.at(-1)
         const expected = [
             'npx', 'mocha', '--timeout', '0', '--exit', '--require',
             './test/initial_check.test.js', '--reporter', 'json',
             '--reporter-option', 'output=<report-file>',
             ...suites.map(entry => entry.file)
         ]
-        assert.deepStrictEqual(result.stdout.trim().split(' '), expected)
+        assert.deepStrictEqual(lines.slice(0, -1), skipped.map(entry => 'skip ' + entry.file + ': ' + entry.why))
+        assert.deepStrictEqual(command.split(' '), expected)
+        assert.ok(skipped.every(entry => !command.includes(entry.file)))
         assert.ok(fs.existsSync(path.resolve(REPO_ROOT, expected[6])))
         const smokePositions = suites
             .filter(entry => entry.file.startsWith('test/smoke/'))
-            .map(entry => result.stdout.indexOf(entry.file))
+            .map(entry => command.indexOf(entry.file))
         const actionPositions = suites
             .filter(entry => entry.file.startsWith('test/actions/'))
-            .map(entry => result.stdout.indexOf(entry.file))
+            .map(entry => command.indexOf(entry.file))
         assert.ok(smokePositions.every(position => position >= 0))
         assert.ok(actionPositions.every(position => position >= 0))
         assert.ok(Math.max(...smokePositions) < Math.min(...actionPositions))
