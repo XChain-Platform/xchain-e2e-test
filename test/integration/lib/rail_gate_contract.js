@@ -104,11 +104,8 @@ function directGateTarget(ciVenues, options = {}) {
 const VENUE_TREE_ENV = 'CI_VENUE_E2E_TREE';
 const VENUE_TREE_DEFAULT = '$HOME/xchain-e2e-test';
 
-// Remote script for the ci-venue-worktree transport. The venue keeps a cached e2e tree whose
-// parent holds the sibling checkouts and whose node_modules is installed. The graded head
-// arrives as a tar stream on stdin; it is laid over an xchain-e2e-test worktree in a scratch
-// directory whose other entries link to the cached siblings, with the cached node_modules linked
-// in. The gate runs there, and the worktree is removed on exit whatever the gate returned.
+// Remote script contract: scratch/xchain-e2e-test beside cached sibling links, streamed graded
+// head, cached node_modules, a full-tier gate, and unconditional worktree cleanup.
 function venueWorktreeScript(options) {
     const tree = options.tree || '${' + VENUE_TREE_ENV + ':-' + VENUE_TREE_DEFAULT + '}';
     return [
