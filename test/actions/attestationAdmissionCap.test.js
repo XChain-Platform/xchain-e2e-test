@@ -154,7 +154,7 @@ module.exports = {
         validator.source = stakeSource.address
         attestationHelper.registerStakedValidator(validator)
         await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
-        await utxoTrackerConnector.waitForSync()
+        await utxoTrackerConnector.requireSync()
 
         let deploy = await vmHelper.sendDeployV0(operatorAddr, CONTRACT_CODE, 500000)
         assert(deploy.contract, 'contract should deploy')
@@ -188,7 +188,7 @@ module.exports = {
         await regtestMinerConnector.pauseMining()
         let pairTx, singleTx
         try {
-            await utxoTrackerConnector.waitForSync()
+            await utxoTrackerConnector.requireSync()
             pairTx   = await vmHelper.sendExecuteV0Broadcast(operatorAddr, contractIndex, 'askPair', [])
             singleTx = await vmHelper.sendExecuteV0Broadcast(secondCaller, contractIndex, 'askOnce', [])
             await regtestMinerConnector.generateBlocks(1)
