@@ -154,6 +154,59 @@ describe('venueWorktreeScript', function () {
         }
     });
 
+    it('pins each cached sibling and refuses a dirty sibling', function () {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'venue-pins-'));
+        try {
+            const git = (cwd, ...args) => {
+                const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args],
+                    { cwd, encoding: 'utf8' });
+                assert.strictEqual(r.status, 0, r.stderr);
+                return r.stdout.trim();
+            };
+            const tree = path.join(root, 'xchain-e2e-test');
+            const sibling = path.join(root, 'xchain-hub');
+            for (const repo of [tree, sibling]) {
+                fs.mkdirSync(repo);
+                git(repo, 'init', '-q');
+                fs.writeFileSync(path.join(repo, 'tracked.txt'), 'clean\n');
+                git(repo, 'add', 'tracked.txt');
+                git(repo, 'commit', '-qm', 'cached');
+            }
+            const siblingHead = git(sibling, 'rev-parse', 'HEAD');
+            const helperPath = path.resolve(__dirname, '../helpers/sibling_checkout.js');
+            const head = path.join(root, 'head');
+            fs.mkdirSync(head);
+            fs.writeFileSync(path.join(head, 'check.js'), [
+                `'use strict';`,
+                `const path = require('path');`,
+                `const { siblingCheckout } = require(${JSON.stringify(helperPath)});`,
+                `const verdict = siblingCheckout(path.join(process.cwd(), 'test', 'unit'),`,
+                `    '../../../xchain-hub', { ownRoot: process.cwd() });`,
+                `process.stdout.write(JSON.stringify({ pins: JSON.parse(process.env.XCHAIN_SIBLING_COMMITS), verdict }));`,
+                `if (!verdict.usable) process.exit(42);`,
+            ].join('\n'));
+            const tar = spawnSync('tar', ['-c', '-C', head, '.']);
+            assert.strictEqual(tar.status, 0, tar.stderr);
+
+            const script = venueWorktreeScript({ tree, command: 'node check.js', enclosingEnv: 'ENC' });
+            const clean = spawnSync('bash', ['-c', script], { input: tar.stdout, encoding: 'utf8' });
+            assert.strictEqual(clean.status, 0, clean.stderr);
+            const cleanResult = JSON.parse(clean.stdout);
+            assert.strictEqual(cleanResult.pins['xchain-hub'], siblingHead);
+            assert.strictEqual(cleanResult.verdict.usable, true);
+
+            fs.writeFileSync(path.join(sibling, 'tracked.txt'), 'dirty\n');
+            const dirty = spawnSync('bash', ['-c', script], { input: tar.stdout, encoding: 'utf8' });
+            assert.strictEqual(dirty.status, 42, dirty.stderr);
+            const dirtyResult = JSON.parse(dirty.stdout);
+            assert.strictEqual(dirtyResult.pins['xchain-hub'], siblingHead);
+            assert.strictEqual(dirtyResult.verdict.usable, false);
+            assert.match(dirtyResult.verdict.reason, /which no commit pins/);
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
     it('fails without running the gate when the cached tree is absent', function () {
         const script = venueWorktreeScript({ tree: path.join(os.tmpdir(), 'no-such-tree'), command: 'echo ran', enclosingEnv: 'ENC' });
         const res = spawnSync('bash', ['-c', script], { input: '', encoding: 'utf8' });
