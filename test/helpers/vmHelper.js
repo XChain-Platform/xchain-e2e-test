@@ -140,6 +140,19 @@ module.exports = {
         return { txHash, execution: executionRow }
     },
 
+    // Broadcast an EXECUTE and return its txHash WITHOUT waiting for the indexer. For
+    // tests that must land several EXECUTEs in ONE block (miner paused, then a single
+    // generateBlocks): the waiting variants above would block on the first tx until a
+    // block exists, which serialises the sends into separate blocks. The caller polls
+    // the execution row itself once it has mined the block.
+    async sendExecuteV0Broadcast(addressInfo, contractActionIndex, method, params){
+        let msg = "EXECUTE|0|" + contractActionIndex + "|" + method
+        if(params && params.length > 0) msg += "|" + params.join("|")
+
+        console.log("Creating and sending EXECUTE V0 tx (broadcast only)...")
+        return transactionHelper.createAndSendTransaction(addressInfo, msg)
+    },
+
     // EXECUTE expected to FAIL (reverted / rejected emission). The valid-only
     // waitForExecution can never observe a failed execution, so broadcast and poll the
     // row status-agnostically on (contract, caller, method), mirroring sendDeployV1Invalid.
