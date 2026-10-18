@@ -280,7 +280,16 @@ jobs:
   #
   # Verified end to end against genuinely bare clones of all three repos plus
   # npm ci in each: 20 suites, 62 passing, 0 failing, ~19 min.
+  #
+  # An ordinary GitHub-hosted run has no standing local hub and indexer stack.
+  # Keep the job visibly skipped unless the repository explicitly declares a
+  # provisioned live venue. This prevents missing services from being reported
+  # as a product failure while preserving the runnable tier for that venue.
+  # An unset repository variable evaluates as the empty string, so skipping is
+  # the safe default.
   live-tier:
+    name: live-tier (local stack opt-in)
+    if: ${{ vars.LIVE_TIER_STACK_AVAILABLE == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
