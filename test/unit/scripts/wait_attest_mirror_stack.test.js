@@ -5,9 +5,9 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
-const ready = require('../../../scripts/wait-attest-mirror-stack')
+const ready = require('../../../bin/wait-attest-mirror-stack')
 
-const HELPER = path.join(__dirname, '..', '..', '..', 'scripts', 'wait-attest-mirror-stack.js')
+const HELPER = path.join(__dirname, '..', '..', '..', 'bin', 'wait-attest-mirror-stack.js')
 // A literal, so a change to the pinned table list has to touch this test too.
 const PINNED_TABLE_COUNT = 8
 const HEALTHY_BODY = { jsonrpc: '2.0', id: 1, result: { status: 'success', reason: 'ok', wallet_ready: true, mining_started: true } }
@@ -46,8 +46,8 @@ function useStackFixture () {
 
     beforeEach(function () {
         fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'attest-mirror-ready-'))
-        fs.mkdirSync(path.join(fixtureRoot, 'scripts'))
-        fs.copyFileSync(HELPER, path.join(fixtureRoot, 'scripts', 'wait-attest-mirror-stack.js'))
+        fs.mkdirSync(path.join(fixtureRoot, 'bin'))
+        fs.copyFileSync(HELPER, path.join(fixtureRoot, 'bin', 'wait-attest-mirror-stack.js'))
     })
 
     afterEach(function () {
@@ -55,7 +55,7 @@ function useStackFixture () {
     })
 
     function runFixture (env) {
-        return spawnSync(process.execPath, [path.join(fixtureRoot, 'scripts', 'wait-attest-mirror-stack.js')], {
+        return spawnSync(process.execPath, [path.join(fixtureRoot, 'bin', 'wait-attest-mirror-stack.js')], {
             cwd: fixtureRoot,
             env: Object.assign({}, env),
             encoding: 'utf8',

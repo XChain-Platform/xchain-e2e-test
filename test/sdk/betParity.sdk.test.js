@@ -28,7 +28,7 @@
  * halts on.
  *
  * THE VENUE. Node B is a second indexer container on the same regtest chain,
- * with its own database, provisioned by `scripts/bet-parity-node.sh up` (run on
+ * with its own database, provisioned by `bin/bet-parity-node.sh up` (run on
  * the venue host). It is clone-forward, not a genesis replay: this chain's
  * history was created with every gate genesis-active, so re-indexing it from
  * block 0 mis-decodes it (drill-clone-forward-venue-recipe). Node B therefore
@@ -98,7 +98,7 @@
  *
  * Run:
  *   # on the venue host, once:
- *   bash scripts/bet-parity-node.sh up
+ *   bash bin/bet-parity-node.sh up
  *   # from the Mac:
  *   BET_PARITY_DB_NAME=XChain_BTC_DrillB_Indexer npm run test:sdk:bet-parity
  *
@@ -123,7 +123,7 @@ async function connectNodeB(context) {
     if (global.COIN_CODE === 'DOGE') context.skip();
     if (!process.env.BET_PARITY_DB_NAME) {
         console.log('BET_PARITY_DB_NAME unset: no second indexer node provisioned.');
-        console.log('Provision one on the venue host with scripts/bet-parity-node.sh up, then re-run.');
+        console.log('Provision one on the venue host with bin/bet-parity-node.sh up, then re-run.');
         context.skip();
     }
 

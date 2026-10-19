@@ -108,7 +108,7 @@ function dispatch(argv, suites) {
     if (argv.length === 2 && argv[0] === '--report-file')
         return judgeReportFile(suites, argv[1])
     if (argv.length === 0) return runRoster(suites)
-    console.error('Usage: node scripts/run-rail-roster.js [--list|--dry-run|--report-file <path>]')
+    console.error('Usage: node bin/run-rail-roster.js [--list|--dry-run|--report-file <path>]')
     return 2
 }
 

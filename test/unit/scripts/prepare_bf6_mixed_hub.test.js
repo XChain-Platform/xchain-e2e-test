@@ -6,7 +6,7 @@ const os = require('os')
 const path = require('path')
 const { execFileSync } = require('child_process')
 
-const prep = require('../../../scripts/prepare-bf6-mixed-hub')
+const prep = require('../../../bin/prepare-bf6-mixed-hub')
 
 const ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const BUILD_HUB = path.join(ROOT, 'xchain-hub')

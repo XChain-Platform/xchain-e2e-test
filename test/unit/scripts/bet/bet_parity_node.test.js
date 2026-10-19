@@ -7,7 +7,7 @@ const path = require('path')
 const { spawnSync } = require('child_process')
 
 const ROOT = path.resolve(__dirname, '..', '..', '..', '..')
-const SCRIPT = path.join(ROOT, 'scripts', 'bet-parity-node.sh')
+const SCRIPT = path.join(ROOT, 'bin', 'bet-parity-node.sh')
 
 function writeExecutable (file, contents) {
     fs.writeFileSync(file, contents)

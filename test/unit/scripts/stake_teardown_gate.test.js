@@ -13,7 +13,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Coverage for the untracked-stake gate (scripts/check-stake-teardown.js).
+ * Coverage for the untracked-stake gate (bin/check-stake-teardown.js).
  *
  * A hygiene gate that quietly stops matching is worse than no gate: the suite
  * reads as clean while the shared venue fills up again. So the matcher is
@@ -23,7 +23,7 @@
  ********************************************************************/
 
 const assert = require('assert')
-const gate = require('../../../scripts/check-stake-teardown')
+const gate = require('../../../bin/check-stake-teardown')
 
 const scan = (src, rel) => gate.scanLines(src.split('\n'), rel || 'test/actions/example.test.js')
 

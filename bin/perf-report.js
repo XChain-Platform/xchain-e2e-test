@@ -19,9 +19,9 @@
  * Reads perf-results JSON and outputs a markdown performance report.
  *
  * Usage:
- *   node scripts/perf-report.js
- *   node scripts/perf-report.js --file perf-results/perf-2026-04-06.json
- *   node scripts/perf-report.js > perf-results/report.md
+ *   node bin/perf-report.js
+ *   node bin/perf-report.js --file perf-results/perf-2026-04-06.json
+ *   node bin/perf-report.js > perf-results/report.md
  *
  ********************************************************************/
 

@@ -93,15 +93,15 @@ describe('stubbed integration lane stays hermetic', () => {
     })
 
     it('phase-2 mutation spec resolves to the same integration files as the npm script', async () => {
-        const config = (await import(pathToFileURL(path.join(REPO_ROOT, 'stryker.phase2.config.mjs')).href)).default
+        const config = (await import(pathToFileURL(path.join(REPO_ROOT, 'test', 'mutation', 'stryker.phase2.config.mjs')).href)).default
         const { spec, ignore = [] } = config.mochaOptions
         const integration = resolveSelection(spec, ignore).filter(f => f.startsWith('test/integration/'))
         assert.deepStrictEqual(integration, stubbedScriptSelection(),
-            'stryker.phase2.config.mjs and package.json test:integration:stubbed select different integration files')
+            'test/mutation/stryker.phase2.config.mjs and package.json test:integration:stubbed select different integration files')
     })
 
     it('phase-2 mutation spec pins the hermetic directories with no glob or ignore', async () => {
-        const config = (await import(pathToFileURL(path.join(REPO_ROOT, 'stryker.phase2.config.mjs')).href)).default
+        const config = (await import(pathToFileURL(path.join(REPO_ROOT, 'test', 'mutation', 'stryker.phase2.config.mjs')).href)).default
         const { spec, ignore = [] } = config.mochaOptions
         assert.deepStrictEqual(spec.filter(g => g.startsWith('test/integration/')), HERMETIC_SPECS)
         assert.deepStrictEqual(ignore, [])

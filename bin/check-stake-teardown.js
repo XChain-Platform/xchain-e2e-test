@@ -49,7 +49,7 @@
  * the venue nothing, while a valid one that merely looks incidental is exactly
  * the stake that accumulated 43 orphans.
  *
- * Usage:  node scripts/check-stake-teardown.js [--list]
+ * Usage:  node bin/check-stake-teardown.js [--list]
  *
  ********************************************************************/
 
@@ -98,7 +98,7 @@ const NON_STAKE_OPAQUE_PAYLOADS = new Map([
     ['test/rail/custody_guard/withdraw.test.js', new Set(['wire'])],
 ])
 
-// Accept a marker only when its reason is a sentence (shared rule, see scripts/lib).
+// Accept a marker only when its reason is a sentence (shared rule, see bin/lib).
 const hasOptOut = optOutMarker('stake-teardown-ok')
 
 function isSkippedDir(name, dir, root){

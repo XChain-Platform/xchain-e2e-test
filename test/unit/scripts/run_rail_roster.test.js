@@ -17,10 +17,10 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
-const { readRailRoster } = require('../../../scripts/rail-roster')
+const { readRailRoster } = require('../../../bin/rail-roster')
 
 const REPO_ROOT = path.resolve(__dirname, '../../..')
-const SCRIPT = path.join(REPO_ROOT, 'scripts', 'run-rail-roster.js')
+const SCRIPT = path.join(REPO_ROOT, 'bin', 'run-rail-roster.js')
 
 function runCli(...args) {
     return spawnSync(process.execPath, [SCRIPT, ...args], {

@@ -19,7 +19,7 @@
  * for inclusion in reports/ or pasting into a PR description.
  *
  * Usage:
- *   node scripts/mutation-report.js [path/to/report.json]
+ *   node bin/mutation-report.js [path/to/report.json]
  *
  * Defaults to reports/mutation/phase1.json if no argument given.
  * Writes reports/mutation/report-<phase>-<YYYY-MM-DD>.md, where <phase> is the

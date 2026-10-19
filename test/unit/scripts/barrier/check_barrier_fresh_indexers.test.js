@@ -4,7 +4,7 @@ const assert = require('assert')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { findReusedLabelBoots, main } = require('../../../../scripts/check-barrier-fresh-indexers')
+const { findReusedLabelBoots, main } = require('../../../../bin/check-barrier-fresh-indexers')
 
 describe('check-barrier-fresh-indexers', function () {
     it('finds a one-line boot and reports its literal label and line', function () {

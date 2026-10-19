@@ -6,7 +6,7 @@ const {
     legVerdicts,
     parseSweepArgs,
     renderSweepReport,
-} = require('../../../scripts/rail_drive_sweep')
+} = require('../../../bin/rail_drive_sweep')
 
 const DRIVES = {
     policy: {

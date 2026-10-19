@@ -250,7 +250,7 @@ jobs:
         working-directory: xchain-e2e-test
         run: npm run test:unit
 
-  # THE LIVE TIER, as `npm run ci:live` -> scripts/run-live-tier.js over the
+  # THE LIVE TIER, as `npm run ci:live` -> bin/run-live-tier.js over the
   # roster in test/integration/live-tier.json. That is the same lane the venue
   # pre-push gate runs, so the two cannot drift apart about what "the live tier"
   # means. A hardcoded single-suite command line is a roster of one that nothing

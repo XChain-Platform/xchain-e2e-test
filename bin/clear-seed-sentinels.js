@@ -36,7 +36,7 @@
 // Credentials are read from the environment and never printed.
 //
 // Usage:
-//   XCHAIN_E2E_NO_PRICE_SEED=1 node scripts/clear-seed-sentinels.js [--env .env.ltc] [--pair XCHAIN/USD]
+//   XCHAIN_E2E_NO_PRICE_SEED=1 node bin/clear-seed-sentinels.js [--env .env.ltc] [--pair XCHAIN/USD]
 
 const path = require('path')
 

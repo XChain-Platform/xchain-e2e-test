@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * Shared opt-out marker check for the scripts/check-*.js lint gates.
+ * Shared opt-out marker check for the bin/check-*.js lint gates.
  *
  * A gate lets a site opt out with `// <name>: <reason>`, and every gate's
  * header says the reason is a sentence, not a pragma. This module is where

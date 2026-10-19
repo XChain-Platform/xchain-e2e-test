@@ -14,7 +14,7 @@
 const assert = require('assert')
 const fs = require('fs')
 const path = require('path')
-const { findReusedLabelBoots } = require('../../../../scripts/check-barrier-fresh-indexers')
+const { findReusedLabelBoots } = require('../../../../bin/check-barrier-fresh-indexers')
 
 describe('check-barrier-fresh-indexers repository', function () {
     it('keeps every barrier-family test on fresh indexers', function () {

@@ -39,7 +39,7 @@
  * already exist (src/db.js `_waitFor` and its `waitForX` wrappers,
  * test/helpers/stakeHelper.js).
  *
- * Usage:  node scripts/check-sleep-flake.js [--list] [--write-baseline]
+ * Usage:  node bin/check-sleep-flake.js [--list] [--write-baseline]
  *
  ********************************************************************/
 
@@ -50,7 +50,7 @@ const path = require('path')
 
 const ROOT         = path.join(__dirname, '..')
 const SCAN_DIR     = path.join(ROOT, 'test')
-const BASELINE_REL = path.join('scripts', 'sleep-flake-baseline.json')
+const BASELINE_REL = path.join('bin', 'sleep-flake-baseline.json')
 const BASELINE     = path.join(ROOT, BASELINE_REL)
 
 // Only test/ is scanned. One-off drill scripts tracked outside it have no npm
@@ -423,7 +423,7 @@ function main() {
     }
 
     if (!fs.existsSync(BASELINE)) {
-        console.error(`sleep-flake: missing ${BASELINE_REL}; run: node scripts/check-sleep-flake.js --write-baseline`)
+        console.error(`sleep-flake: missing ${BASELINE_REL}; run: node bin/check-sleep-flake.js --write-baseline`)
         return 1
     }
     const baseline = JSON.parse(fs.readFileSync(BASELINE, 'utf8')).count
@@ -442,13 +442,13 @@ function main() {
         console.error('that re-checks a condition are not counted and need no change.')
         // Which site is new cannot be told from a list of every site, so print
         // the count and the command rather than 100 lines of unchanged debt.
-        console.error('List every counted site: node scripts/check-sleep-flake.js --list')
+        console.error('List every counted site: node bin/check-sleep-flake.js --list')
         return 1
     }
 
     if (hits.length < baseline) {
         console.log(`sleep-flake: ${hits.length} fixed-settle sleep call sites, below the baseline of ${baseline}.`)
-        console.log(`Lower it: node scripts/check-sleep-flake.js --write-baseline`)
+        console.log(`Lower it: node bin/check-sleep-flake.js --write-baseline`)
         return 0
     }
 

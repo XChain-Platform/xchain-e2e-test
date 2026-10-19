@@ -75,7 +75,7 @@ case "$phase" in
         fi
         "${ATTEST_MIRROR_STACK_ROOT}/setup-stack.sh" "$number" "$base"
         if [ "$leg" = "$bf6_leg" ]; then
-            "$node_bin" "${repo_root}/scripts/prepare-bf6-mixed-hub.js" create \
+            "$node_bin" "${repo_root}/bin/prepare-bf6-mixed-hub.js" create \
                 --workspace "$stack_dir" --stack "$stack" --build-hub "$build_hub"
         fi
         ;;
@@ -92,7 +92,7 @@ case "$phase" in
         export BTC_REGTEST_MINER_API_PORT=$MINER_HOST_PORT
         export LTC_REGTEST_MINER_API_PORT=$LTC_MINER_HOST_PORT
         export DOGE_REGTEST_MINER_API_PORT=$DOGE_MINER_HOST_PORT
-        "$node_bin" "${repo_root}/scripts/wait-attest-mirror-stack.js"
+        "$node_bin" "${repo_root}/bin/wait-attest-mirror-stack.js"
         ;;
     seed)
         "${ATTEST_MIRROR_STACK_ROOT}/run-leg.sh" "${stack}-seed" "$number" "$venue_base" \
@@ -115,7 +115,7 @@ case "$phase" in
             docker compose -p "$project" -f "${stack_dir}/compose.yml" down -v || down_status=$?
         fi
         if [ "$leg" = "$bf6_leg" ]; then
-            "$node_bin" "${repo_root}/scripts/prepare-bf6-mixed-hub.js" remove \
+            "$node_bin" "${repo_root}/bin/prepare-bf6-mixed-hub.js" remove \
                 --workspace "$stack_dir" --stack "$stack" || down_status=$?
         fi
         test -z "$(docker ps -aq --filter "label=com.docker.compose.project=${project}")" || down_status=$?

@@ -20,9 +20,9 @@
  * if any performance threshold is breached. Designed for CI pipelines.
  *
  * Usage:
- *   node scripts/perf-gate.js
- *   node scripts/perf-gate.js --file perf-results/perf-2026-04-06.json
- *   node scripts/perf-gate.js --config scripts/perf-thresholds.json
+ *   node bin/perf-gate.js
+ *   node bin/perf-gate.js --file perf-results/perf-2026-04-06.json
+ *   node bin/perf-gate.js --config bin/perf-thresholds.json
  *
  ********************************************************************/
 

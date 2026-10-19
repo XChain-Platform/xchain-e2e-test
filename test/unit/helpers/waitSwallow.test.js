@@ -24,7 +24,7 @@ const assert = require('assert')
 const path = require('path')
 
 const requireRow = require('../../helpers/requireRow')
-const gate = require('../../../scripts/check-wait-swallow')
+const gate = require('../../../bin/check-wait-swallow')
 
 // One synthetic file, scanned the way the gate scans a real one.
 function findings(src, { helper = false } = {}){

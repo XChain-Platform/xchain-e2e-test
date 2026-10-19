@@ -7,7 +7,7 @@ const path = require('path')
 const { spawnSync } = require('child_process')
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..')
-const SCRIPT = path.join(REPO_ROOT, 'scripts', 'rail_leg_drive.js')
+const SCRIPT = path.join(REPO_ROOT, 'bin', 'rail_leg_drive.js')
 const RAIL_DRIVES = {
     plain: {
         legs: {

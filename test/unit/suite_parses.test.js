@@ -37,7 +37,7 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..');
 
 // Every tree that holds executable JS this repo owns. node_modules and the
 // sibling checkouts are somebody else's problem.
-const SCANNED_DIRS = ['test', 'src', 'scripts', 'bin'];
+const SCANNED_DIRS = ['test', 'src', 'bin'];
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'coverage', 'reports']);
 

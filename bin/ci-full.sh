@@ -162,7 +162,7 @@ else
 fi
 
 # --- job: live-tier --------------------------------------------------------
-# Full runs call scripts/run-live-tier.js over test/integration/live-tier.json.
+# Full runs call bin/run-live-tier.js over test/integration/live-tier.json.
 # HUB_DB_* stays unset so the fixture uses Docker instead of external credentials.
 if [ "${CI_TIER:-}" = "fast" ]; then
   fast_defer "live-tier (ci:live)"

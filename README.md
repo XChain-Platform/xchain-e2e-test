@@ -121,7 +121,7 @@ checkouts (`../xchain-sdk`, `../xchain-hub`, next to this repo) into the
 vendor slots when they are absent or empty. If a directory already holds a
 staged snapshot (its own `package.json`), the script leaves it alone and
 says so; it never overwrites real content. Remove a symlink it created with
-`node scripts/stage-siblings.js --unstage`.
+`node bin/stage-siblings.js --unstage`.
 
 ## Scripts
 

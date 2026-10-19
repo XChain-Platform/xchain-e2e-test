@@ -73,7 +73,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Poll a condition to a deadline rather than a fixed `await sleep(n)` before an
 // assertion, which passes or fails on how busy the venue is
-// (scripts/check-sleep-flake.js ratchets that shape).
+// (bin/check-sleep-flake.js ratchets that shape).
 async function waitUntil(predicate, timeoutMs) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {

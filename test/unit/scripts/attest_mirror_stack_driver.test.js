@@ -7,7 +7,7 @@ const path = require('path')
 const { spawnSync } = require('child_process')
 
 const ROOT = path.resolve(__dirname, '..', '..', '..')
-const DRIVER = path.join(ROOT, 'scripts', 'attest-mirror-stack-driver.sh')
+const DRIVER = path.join(ROOT, 'bin', 'attest-mirror-stack-driver.sh')
 const BF6 = 'test/attestMirror/barrier_family/bf6_producer_follower_parity.test.js'
 
 function writeExecutable (file, contents) {

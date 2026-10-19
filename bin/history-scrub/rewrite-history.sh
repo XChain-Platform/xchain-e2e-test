@@ -24,7 +24,7 @@
 # so the run that matters is the one whose output you have already read.
 #
 # Usage:
-#   scripts/history-scrub/rewrite-history.sh [--source <path|url>] [--out <dir>] [--keep]
+#   bin/history-scrub/rewrite-history.sh [--source <path|url>] [--out <dir>] [--keep]
 #
 #   --source  What to mirror-clone. Defaults to the `origin` URL of the repo
 #             this script lives in, because origin is what the public actually
@@ -206,7 +206,7 @@ fi
 if [ "${AFTER_STATUS}" -ne 0 ]; then
     say "FAILED"
     echo "The rewrite did not clean every leak. Do NOT push. See ${OUT}/scan-after.txt,"
-    echo "add the missed shape to scripts/history-scrub/leak-patterns.js, re-emit, re-run."
+    echo "add the missed shape to bin/history-scrub/leak-patterns.js, re-emit, re-run."
     exit 1
 fi
 

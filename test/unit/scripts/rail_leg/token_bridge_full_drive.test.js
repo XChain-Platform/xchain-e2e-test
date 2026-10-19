@@ -12,7 +12,7 @@ const {
     parseArgs,
     readJournal,
     runFullDrive,
-} = require('../../../../scripts/rail_leg/token_bridge_full_drive')
+} = require('../../../../bin/rail_leg/token_bridge_full_drive')
 
 const DRIVES = { token: { legs: { full: { minPassed: 2 } } }, base: { legs: { full: { minPassed: 1 } } } }
 

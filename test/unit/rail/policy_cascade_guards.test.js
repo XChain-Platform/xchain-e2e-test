@@ -4,7 +4,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const { triageJournal } = require('../../../scripts/rail_journal_triage');
+const { triageJournal } = require('../../../bin/rail_journal_triage');
 
 const POLICY_SUITE_DIR = path.resolve(__dirname,
     '../../integration/bridge_rail_policy.test');

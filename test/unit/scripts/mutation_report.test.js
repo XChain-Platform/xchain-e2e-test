@@ -37,7 +37,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
-const script = require('../../../scripts/mutation-report')
+const script = require('../../../bin/mutation-report')
 
 // A tiny file with a known layout, so every column below is countable by hand.
 //   line 1: function ping(ms) {
@@ -249,7 +249,7 @@ function registerReportPathTests() {
             try {
                 const inDir = path.join(dir, 'reports', 'mutation')
                 fs.mkdirSync(inDir, { recursive: true })
-                const cli = path.resolve(__dirname, '../../../scripts/mutation-report.js')
+                const cli = path.resolve(__dirname, '../../../bin/mutation-report.js')
                 for (const [phase, status] of [['phase1', 'Killed'], ['phase2', 'Survived']]) {
                     fs.writeFileSync(path.join(inDir, `${phase}.json`),
                         JSON.stringify(oneFileReport([mutant({ status })])))

@@ -13,7 +13,7 @@ const {
     quoteSql,
     readReadyFrame,
     reportsForHub,
-} = require('../../../scripts/hub-failover-stack-driver')
+} = require('../../../bin/hub-failover-stack-driver')
 
 function registerDefaultTargetTests () {
     it('is the non-skipping default for the failover drill', function () {

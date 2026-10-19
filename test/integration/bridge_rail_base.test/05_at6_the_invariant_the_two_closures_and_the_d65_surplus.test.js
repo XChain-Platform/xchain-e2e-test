@@ -30,7 +30,7 @@ const {
     confirmedHeight,
 } = require('./support');
 const { journalCase } = require('../../helpers/bridgeRailVenue');
-const { WATCH_INPUT_TITLE } = require('../../../scripts/rail_leg/rail_watch_verdict');
+const { WATCH_INPUT_TITLE } = require('../../../bin/rail_leg/rail_watch_verdict');
 
 async function createSurplus(escrowAddr) {
     const before = await chainHalves();
@@ -137,7 +137,7 @@ bridgeRailSuite('AT6: the invariant, the two closures and the D65 surplus', func
             'stray credit: ' + JSON.stringify(doge));
 
         // The watch half runs where the platform watch script is: this records the real hub
-        // answer, uncorrected, and scripts/rail_leg/rail_watch_verdict.js asserts WARN
+        // answer, uncorrected, and bin/rail_leg/rail_watch_verdict.js asserts WARN
         // BRIDGE_INVARIANT_SURPLUS on it (a CRIT would be a hub-side deficit finding).
         const watchInput = { tick: GAS_TICK, chain: 'DOGE',
             reports: [{ label: 'venue-hub-0', ok: true, byTick: inv }],

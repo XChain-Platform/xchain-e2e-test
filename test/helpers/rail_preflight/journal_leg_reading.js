@@ -3,7 +3,7 @@
 
 const fs = require('fs')
 
-const { triageJournal } = require('../../../scripts/rail_journal_triage')
+const { triageJournal } = require('../../../bin/rail_journal_triage')
 const { RAIL_DRIVES } = require('../bridge_rail_legs')
 
 function railLeg (drive, leg, drives) {

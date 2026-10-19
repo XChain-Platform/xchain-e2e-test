@@ -3,7 +3,7 @@
 
 // Classifier half of the base drive's AT6 surplus case: grades the recorded hub answer
 // with the platform watch script, which only the platform checkout above this repo has.
-// Usage: node scripts/rail_leg/rail_watch_verdict.js --journal <case-journal.jsonl> [--watch <xchain-watch.js>]
+// Usage: node bin/rail_leg/rail_watch_verdict.js --journal <case-journal.jsonl> [--watch <xchain-watch.js>]
 // Exit 0 PASS, 1 FAIL, 2 when the input or the classifier cannot be read.
 
 const fs = require('fs')

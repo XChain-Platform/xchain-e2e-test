@@ -31,7 +31,7 @@ function registerLeakCases(getResult) {
 
         assert.deepStrictEqual(newBlobs, [],
             'a NEW developer path reached git history; it cannot be fixed by editing the file, ' +
-            'because the blob stays reachable. See scripts/history-scrub/.');
+            'because the blob stays reachable. See bin/history-scrub/.');
         assert.deepStrictEqual(newMsgs, [],
             'a NEW developer path reached a commit message');
     });

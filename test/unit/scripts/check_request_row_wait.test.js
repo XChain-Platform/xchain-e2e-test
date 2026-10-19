@@ -20,8 +20,8 @@ const fs     = require('fs')
 const os     = require('os')
 const path   = require('path')
 
-const checker = require('../../../scripts/check-request-row-wait')
-const script  = path.join(__dirname, '..', '..', '..', 'scripts', 'check-request-row-wait.js')
+const checker = require('../../../bin/check-request-row-wait')
+const script  = path.join(__dirname, '..', '..', '..', 'bin', 'check-request-row-wait.js')
 
 function scan (lines) {
     return checker.scanSource(lines.join('\n'), 'fixture.test.js')

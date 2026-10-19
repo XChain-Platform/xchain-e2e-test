@@ -17,7 +17,7 @@ const path = require('path')
 const { spawnSync } = require('child_process')
 
 const REPO_ROOT = path.join(__dirname, '../../..')
-const SCRIPT = path.join(REPO_ROOT, 'scripts/rail-verdict.js')
+const SCRIPT = path.join(REPO_ROOT, 'bin/rail-verdict.js')
 const ALPHA = 'test/rail/alpha.rail.test.js'
 const BETA = 'test/rail/beta.rail.test.js'
 

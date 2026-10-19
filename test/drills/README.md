@@ -3,7 +3,7 @@
 ## Two-hub indexer failover drill
 
 `hub_failover.test.js` drives the two-hub regtest venue built by xchain-node.
-By default it invokes `scripts/hub-failover-stack-driver.js`, which directly
+By default it invokes `bin/hub-failover-stack-driver.js`, which directly
 drives the two-hub Compose services, status endpoints, miners, durable report
 queue, and fixture databases. Each invocation prints exactly one JSON object on
 stdout. Diagnostic output belongs on stderr.

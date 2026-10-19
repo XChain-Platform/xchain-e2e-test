@@ -4,7 +4,7 @@ const assert = require('assert')
 const fs = require('fs')
 const path = require('path')
 
-const runner = require('../../../../scripts/run-attest-mirror')
+const runner = require('../../../../bin/run-attest-mirror')
 const { ABORT_THRESHOLD, fakeSpawn, fixture, restoreFakeEnv } = require('./support/helpers')
 
 function registerAbortTests () {

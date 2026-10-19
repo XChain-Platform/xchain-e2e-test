@@ -91,7 +91,7 @@ function canonical(network, epochHeight, ledgerHash, gates){
 }
 
 // The two ROLLCALL wire versions. Spelled as literals rather than assembled from
-// parts so scripts/count-action-suites.js sees the payloads this harness builds
+// parts so bin/count-action-suites.js sees the payloads this harness builds
 // and the published ACTION-name figure carries ROLLCALL.
 const ROLLCALL_WIRE_V0 = 'ROLLCALL|0'
 const ROLLCALL_WIRE_V1 = 'ROLLCALL|1'

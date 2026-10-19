@@ -12,7 +12,7 @@
 #
 #   env REGTEST_MINER_API_PORT=<btc miner> DOGE_REGTEST_MINER_API_PORT=<doge miner> \
 #       BRIDGE_RAIL_MINER_PAUSE_FILE=<file> BRIDGE_RAIL_DOGE_MINER_PAUSE_FILE=<file> \
-#       scripts/run-with-ambient-mining.sh <command>...
+#       bin/run-with-ambient-mining.sh <command>...
 #
 # The loops are this script's own children; it signals them by the pids it recorded
 # when the command exits, and returns the command's exit code.

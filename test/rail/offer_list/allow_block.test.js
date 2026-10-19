@@ -20,7 +20,7 @@
 // harness against an unarmed indexer would read a missing gate as a refusal.
 //
 // Stakes: this leg builds none. Every identity here is a funded address, so there
-// is nothing for scripts/check-stake-teardown.js to release. A later edit that adds
+// is nothing for bin/check-stake-teardown.js to release. A later edit that adds
 // a STAKE must go through test/helpers/stakeHelper, which registers it for release.
 
 const assert = require('assert')

@@ -14,7 +14,7 @@
 
 const assert = require('assert')
 const path = require('path')
-const { readRailRoster, auditRailRoster } = require('../../../scripts/rail-roster')
+const { readRailRoster, auditRailRoster } = require('../../../bin/rail-roster')
 
 const REPO_ROOT = path.resolve(__dirname, '../../..')
 const SMOKE_FILES = [

@@ -44,7 +44,7 @@
  * waitUntil raises it.
  *
  * Every wait here polls inside a loop and returns early, which is also the
- * shape scripts/check-sleep-flake.js exempts from its fixed-settle ratchet.
+ * shape bin/check-sleep-flake.js exempts from its fixed-settle ratchet.
  ********************************************************************/
 
 'use strict';

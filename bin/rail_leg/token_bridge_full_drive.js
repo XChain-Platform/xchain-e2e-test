@@ -4,7 +4,7 @@
 // Runner for the token and base bridge rail full drives. Captures the three repo heads,
 // drives token then base full into one run directory (journals and venue logs per drive),
 // and writes the drive report from both journals.
-// Usage: node scripts/rail_leg/token_bridge_full_drive.js --run-dir <dir> [--date YYYY-MM-DD]
+// Usage: node bin/rail_leg/token_bridge_full_drive.js --run-dir <dir> [--date YYYY-MM-DD]
 //   [--platform-root <dir>] [--indexer-root <dir>] [--limit-minutes <n>]
 // Exit 0 when both drives pass, 1 when either fails, 2 on a usage error.
 
@@ -17,7 +17,7 @@ const { renderDriveReport } = require('./token_bridge_drive_report')
 const { RAIL_DRIVES } = require('../../test/helpers/bridge_rail_legs')
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..')
-const LEG_DRIVE = path.join(REPO_ROOT, 'scripts', 'rail_leg_drive.js')
+const LEG_DRIVE = path.join(REPO_ROOT, 'bin', 'rail_leg_drive.js')
 const DRIVE_ORDER = ['token', 'base']
 const LEG = 'full'
 const REPORT_NAME = 'drive-report.md'

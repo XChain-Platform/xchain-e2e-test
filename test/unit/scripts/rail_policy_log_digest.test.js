@@ -6,8 +6,8 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 
-const { digestPolicyLog } = require('../../../scripts/rail_policy_log_digest')
-const script = path.join(__dirname, '..', '..', '..', 'scripts', 'rail_policy_log_digest.js')
+const { digestPolicyLog } = require('../../../bin/rail_policy_log_digest')
+const script = path.join(__dirname, '..', '..', '..', 'bin', 'rail_policy_log_digest.js')
 
 describe('rail policy log digest', function () {
     it('tracks finalizations after the latest follower spawn', function () {

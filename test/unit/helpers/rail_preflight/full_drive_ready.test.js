@@ -4,7 +4,7 @@ const assert = require('assert')
 const Module = require('module')
 const path = require('path')
 
-const railDriveScript = path.resolve(__dirname, '..', '..', '..', '..', 'scripts', 'rail_leg_drive.js')
+const railDriveScript = path.resolve(__dirname, '..', '..', '..', '..', 'bin', 'rail_leg_drive.js')
 const originalLoad = Module['_load']
 Module['_load'] = function (request, parent, isMain) {
     if (request === '../test/helpers/bridge_rail_legs' && parent && parent.filename === railDriveScript) {

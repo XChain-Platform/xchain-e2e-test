@@ -99,7 +99,7 @@ function scriptEntries(fileSet) {
     return Array.from(entries)
 }
 
-/** Runtime roots are the package entry and the files npm scripts run with node; a file only tests, bin/ or scripts/ reach is a candidate. */
+/** Runtime roots are the package entry and the files npm scripts run with node; a file only tests, bin/ or bin/ reach is a candidate. */
 function analyse() {
     const fileSet = new Set(trackedFiles().filter((f) => f.endsWith('.js') || f.endsWith('.mjs')))
     const sources = Array.from(fileSet).filter((f) => f.startsWith('src/')).sort()

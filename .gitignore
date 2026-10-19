@@ -46,3 +46,6 @@ data/*spend.jsonl
 # Oracle publisher queue, written to the same cwd-relative default as the batch
 # buffer above. Per-run state, not source.
 data/publisher-queue*.jsonl
+
+# Attestation queue state, written at run time and not source.
+data/attestation-queue.jsonl

@@ -12,7 +12,7 @@
 
 // The live integration tier ran in no CI lane, so a product change in a
 // sibling repo turned one of its suites red for ten days unheard. The lane is
-// scripts/run-live-tier.js; these are the guards that keep the lane honest, and
+// bin/run-live-tier.js; these are the guards that keep the lane honest, and
 // they live in the HERMETIC unit tier on purpose - the roster check needs no
 // venue, no database and no siblings, so a live suite that nobody wired is
 // caught on the machine that added it rather than on a venue days later.
@@ -29,7 +29,7 @@
 const assert = require('assert')
 const fs     = require('fs')
 const path   = require('path')
-const lane   = require('../../../scripts/run-live-tier')
+const lane   = require('../../../bin/run-live-tier')
 
 describe('live integration tier roster', () => {
 
@@ -337,7 +337,7 @@ describe('live integration tier roster', () => {
             const fullGate = fs.readFileSync(path.resolve(__dirname, '../../../bin/ci-full.sh'), 'utf8')
             assert.match(fullGate, /^run_tier "[^"]*" npm run lint:mirror-pendings$/m,
                 'the full gate must run mirror-pendings lint, since its unit file reads only fixtures')
-            assert.strictEqual(pkg.scripts['lint:mirror-pendings'], 'node scripts/check-mirror-pendings.js')
+            assert.strictEqual(pkg.scripts['lint:mirror-pendings'], 'node bin/check-mirror-pendings.js')
         })
 
         // A fast run may not select the unit files that also scan the real tree, so each gate runs as its own tier.
@@ -346,7 +346,7 @@ describe('live integration tier roster', () => {
                 const fullGate = fs.readFileSync(path.resolve(__dirname, '../../../bin/ci-full.sh'), 'utf8')
                 assert.match(fullGate, new RegExp('^run_tier "[^"]*" npm run lint:' + lint + '$', 'm'),
                     'the full gate must run ' + lint + ' lint directly')
-                assert.strictEqual(pkg.scripts['lint:' + lint], 'node scripts/' + script)
+                assert.strictEqual(pkg.scripts['lint:' + lint], 'node bin/' + script)
             })
         }
 

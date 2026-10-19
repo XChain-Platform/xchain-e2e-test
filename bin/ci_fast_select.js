@@ -19,7 +19,7 @@ const CONSENSUS = [
 ]
 const WIDEN = ['test/support/', 'test/initialCheck.test.js']
 const GLOBAL_INPUTS = ['package.json', 'package-lock.json']
-const SOURCE_ROOTS = ['src/', 'test/helpers/', 'scripts/']
+const SOURCE_ROOTS = ['src/', 'test/helpers/', 'bin/']
 const ALWAYS = [
     'test/unit/suite_parses.test.js',
     'test/unit/sibling_coverage.test.js',

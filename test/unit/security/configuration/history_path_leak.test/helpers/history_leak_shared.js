@@ -15,7 +15,7 @@ const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-const SCRUB_DIR = path.join(REPO_ROOT, 'scripts', 'history-scrub');
+const SCRUB_DIR = path.join(REPO_ROOT, 'bin', 'history-scrub');
 
 // Leaked paths are assembled from parts, never written as literals.
 //

@@ -11,10 +11,10 @@
 # Runs ON the venue host, not the development machine: it drives docker and the
 # stack's own MariaDB container.
 #
-#   bash scripts/bet-parity-node.sh up      # clone-forward + launch node B
-#   bash scripts/bet-parity-node.sh status  # both tips, side by side
-#   bash scripts/bet-parity-node.sh logs
-#   bash scripts/bet-parity-node.sh down    # stop node B, keep its database
+#   bash bin/bet-parity-node.sh up      # clone-forward + launch node B
+#   bash bin/bet-parity-node.sh status  # both tips, side by side
+#   bash bin/bet-parity-node.sh logs
+#   bash bin/bet-parity-node.sh down    # stop node B, keep its database
 #
 # WHY CLONE-FORWARD RATHER THAN GENESIS REPLAY: regtest runs every gate
 # genesis-active, so this chain's history was CREATED gates-on and re-indexing

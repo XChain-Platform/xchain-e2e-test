@@ -6,8 +6,8 @@ const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
 
-const checker = require('../../../scripts/check-mirror-pendings')
-const checkerPath = path.resolve(__dirname, '../../../scripts/check-mirror-pendings.js')
+const checker = require('../../../bin/check-mirror-pendings')
+const checkerPath = path.resolve(__dirname, '../../../bin/check-mirror-pendings.js')
 
 function fixture (files) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mirror-pendings-'))

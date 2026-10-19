@@ -9,9 +9,9 @@ const path = require('path')
 const { spawnSync } = require('child_process')
 
 const REPO_ROOT = path.join(__dirname, '../../..')
-const SCRIPT = path.join(REPO_ROOT, 'scripts', 'rail_policy_full_verdict.js')
+const SCRIPT = path.join(REPO_ROOT, 'bin', 'rail_policy_full_verdict.js')
 const POLICY_SUITES = path.join(REPO_ROOT, 'test', 'integration', 'bridge_rail_policy.test')
-const { staticSkipTitles, judgePolicyDrive } = require('../../../scripts/rail_policy_full_verdict')
+const { staticSkipTitles, judgePolicyDrive } = require('../../../bin/rail_policy_full_verdict')
 
 function report ({ passes = 28, failures = [], pending = [] } = {}) {
     return {

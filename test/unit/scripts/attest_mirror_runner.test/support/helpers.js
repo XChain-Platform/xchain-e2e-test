@@ -78,7 +78,7 @@ async function captureStdout (action) {
     }
 }
 
-const CLI = path.join(__dirname, '..', '..', '..', '..', '..', 'scripts', 'run-attest-mirror.js')
+const CLI = path.join(__dirname, '..', '..', '..', '..', '..', 'bin', 'run-attest-mirror.js')
 
 function runCli (options) {
     return spawnSync(process.execPath, [CLI], Object.assign({ encoding: 'utf8' }, options))

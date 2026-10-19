@@ -48,7 +48,7 @@
  * passes only as a `return` hand-back or with a `// give-up-ok:` reason; the
  * fix is `utxoTrackerConnector.requireSync()`, which throws at the wait.
  *
- * Usage:  node scripts/check-wait-swallow.js [--list]
+ * Usage:  node bin/check-wait-swallow.js [--list]
  *
  ********************************************************************/
 

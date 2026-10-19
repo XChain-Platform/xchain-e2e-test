@@ -133,7 +133,7 @@ const RAIL_DRIVES = {
         legs: {
             // The fold and bundle suites anchor on DOGE. The workflow writes a dogecoin
             // drive .env for these legs (test/helpers/rail_leg_coins.js), and COIN here
-            // replaces the bitcoin COIN that scripts/rail_leg_drive.js gives every child,
+            // replaces the bitcoin COIN that bin/rail_leg_drive.js gives every child,
             // which dotenv would not override (R-3 attempt 4 gaps A and C). Their suites pay only
             // native DOGE, so they skip the off-BTC gas bootstrap, which needs a bridge relay
             // the GitHub rail does not run (R-3 attempt 5).

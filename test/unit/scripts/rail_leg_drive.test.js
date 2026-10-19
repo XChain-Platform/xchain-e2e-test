@@ -8,7 +8,7 @@ const proxyquire = require('proxyquire')
 const { ancestorPids } = require('../../helpers/rail_preflight/rail_drive_processes')
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..')
-const SCRIPT = path.join(REPO_ROOT, 'scripts', 'rail_leg_drive.js')
+const SCRIPT = path.join(REPO_ROOT, 'bin', 'rail_leg_drive.js')
 const POLICY_ROOT = 'test/integration/bridge_rail_policy.test.js'
 const POLICY_GLOB = 'test/integration/bridge_rail_policy.test/*.test.js'
 const GUARDS = 'test/integration/bridge_rail_doge_guards.test.js'
@@ -126,7 +126,7 @@ describe('bridge rail overlap detection', function () {
         const psText = [
             ' 101 node ./node_modules/.bin/mocha test/integration/bridge_rail_policy.test.js',
             ' 202 node ./node_modules/.bin/mocha test/integration/bridge_rail_token.test.js',
-            ' 303 node scripts/bridge_rail_policy.test.js',
+            ' 303 node bin/bridge_rail_policy.test.js',
             ' 404 node ./node_modules/.bin/mocha test/integration/ordinary.test.js',
         ].join('\n')
 
@@ -161,7 +161,7 @@ describe('bridge rail overlap detection over the process tree', function () {
     })
 })
 
-// These cases lived inside scripts/rail_leg_drive.js, which registered them in every
+// These cases lived inside bin/rail_leg_drive.js, which registered them in every
 // mocha run that loaded the script, including the policy rail drive's dry-run roster.
 describe('bridge rail drive stack scope', function () {
     it('does not see a drive with another stack prefix as competing', function () {

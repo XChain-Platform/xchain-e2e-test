@@ -15,7 +15,7 @@
 // gained suites and the number never moved, and nobody could re-derive it
 // because "suite" had never been defined. The operator settled the definition
 // on 2026-08-11 (one suite per ACTION NAME, versions folded in), and
-// scripts/count-action-suites.js implements it. These guards keep the published
+// bin/count-action-suites.js implements it. These guards keep the published
 // numbers tied to the tree:
 //
 //  - VOCABULARY DRIFT: the script falls back to a vendored action list in a
@@ -37,7 +37,7 @@ const assert  = require('assert')
 const fs      = require('fs')
 const os      = require('os')
 const path    = require('path')
-const counter = require('../../../scripts/count-action-suites')
+const counter = require('../../../bin/count-action-suites')
 
 const REPO_ROOT   = path.join(__dirname, '../../..')
 const DECODER_SRC = path.join(REPO_ROOT, '../xchain-decoder/src/XChainDecoder.js')
@@ -75,7 +75,7 @@ function vocabularyChecks() {
         const valid = [...found.block[1].matchAll(/'([A-Z][A-Z0-9]*)'/g)].map((m) => m[1]).sort()
 
         assert.deepStrictEqual([...counter.FALLBACK_ACTION_NAMES].sort(), valid,
-            'FALLBACK_ACTION_NAMES in scripts/count-action-suites.js has drifted from the ' +
+            'FALLBACK_ACTION_NAMES in bin/count-action-suites.js has drifted from the ' +
             'decoder VALID_ACTION_NAMES set; re-vendor it')
     })
 }
@@ -108,7 +108,7 @@ function aliasChecks() {
         if (!fs.existsSync(ALIAS_SRC)) return this.skip()
 
         assert.deepStrictEqual({ ...counter.FALLBACK_ACTION_ALIASES }, { ...require(ALIAS_SRC) },
-            'FALLBACK_ACTION_ALIASES in scripts/count-action-suites.js has drifted from the ' +
+            'FALLBACK_ACTION_ALIASES in bin/count-action-suites.js has drifted from the ' +
             'decoder alias table; re-vendor it')
     })
 
@@ -169,7 +169,7 @@ function docsChecks() {
 
         assert.strictEqual(Number(bullet[1]), recount.count,
             'README.md publishes ' + bullet[1] + ' ACTION test suites; the tree has ' +
-            recount.count + '. Re-run: node scripts/count-action-suites.js')
+            recount.count + '. Re-run: node bin/count-action-suites.js')
 
         const published = bullet[2].split(',').map((s) => s.trim()).filter(Boolean).sort()
         assert.deepStrictEqual(published, recount.actions,

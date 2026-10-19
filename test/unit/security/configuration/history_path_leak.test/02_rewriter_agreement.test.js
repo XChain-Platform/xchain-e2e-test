@@ -27,7 +27,7 @@ function registerSpecCases() {
             const onDisk   = fs.readFileSync(path.join(SCRUB_DIR, name), 'utf8');
             const expected = patterns.emitFilterRepoSpec(header);
             assert.strictEqual(onDisk, expected,
-                `${name} is stale; run: node scripts/history-scrub/leak-patterns.js --emit`);
+                `${name} is stale; run: node bin/history-scrub/leak-patterns.js --emit`);
         }
     });
 

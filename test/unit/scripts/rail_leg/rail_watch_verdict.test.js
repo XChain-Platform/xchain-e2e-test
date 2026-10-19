@@ -10,9 +10,9 @@ const {
     WATCH_INPUT_TITLE,
     watchInputFrom,
     watchVerdict,
-} = require('../../../../scripts/rail_leg/rail_watch_verdict')
+} = require('../../../../bin/rail_leg/rail_watch_verdict')
 
-const SCRIPT = path.resolve(__dirname, '..', '..', '..', '..', 'scripts', 'rail_leg', 'rail_watch_verdict.js')
+const SCRIPT = path.resolve(__dirname, '..', '..', '..', '..', 'bin', 'rail_leg', 'rail_watch_verdict.js')
 
 function input (delta) {
     return {

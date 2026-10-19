@@ -60,9 +60,9 @@
  * no lane at all was not.
  *
  * Usage:
- *   node scripts/run-live-tier.js            run the lane
- *   node scripts/run-live-tier.js --list     print the roster and exit
- *   node scripts/run-live-tier.js --force-docker
+ *   node bin/run-live-tier.js            run the lane
+ *   node bin/run-live-tier.js --list     print the roster and exit
+ *   node bin/run-live-tier.js --force-docker
  *       ignore HUB_DB_* and require the disposable Docker database path
  *
  * Exit: 0 green; 1 red (roster drift, a failing case, or a suite that ran

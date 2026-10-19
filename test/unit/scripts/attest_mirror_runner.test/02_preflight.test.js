@@ -4,14 +4,14 @@ const assert = require('assert')
 const fs = require('fs')
 const path = require('path')
 
-const runner = require('../../../../scripts/run-attest-mirror')
+const runner = require('../../../../bin/run-attest-mirror')
 const { captureStdout, fakeSpawn, fixture, restoreFakeEnv } = require('./support/helpers')
 
 function stagedRealHelper () {
     const f = fixture()
-    const scripts = path.join(f.root, 'scripts')
+    const scripts = path.join(f.root, 'bin')
     fs.mkdirSync(scripts)
-    fs.copyFileSync(path.join(__dirname, '..', '..', '..', '..', 'scripts', 'wait-attest-mirror-stack.js'),
+    fs.copyFileSync(path.join(__dirname, '..', '..', '..', '..', 'bin', 'wait-attest-mirror-stack.js'),
         path.join(scripts, 'wait-attest-mirror-stack.js'))
     fs.copyFileSync(f.driver, path.join(scripts, 'driver.js'))
     return Object.assign(f, { driver: path.join(scripts, 'driver.js') })

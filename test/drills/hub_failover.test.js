@@ -12,7 +12,7 @@ describe('two-hub indexer failover drill', function () {
         const command = customCommand || process.execPath
         const args = customCommand
             ? parseArgs(process.env.XCHAIN_HUB_FAILOVER_DRIVER_ARGS)
-            : [path.resolve(__dirname, '../../scripts/hub-failover-stack-driver.js')]
+            : [path.resolve(__dirname, '../../bin/hub-failover-stack-driver.js')]
         const driver = new HubFailoverProcessDriver(command,
             args, {
                 cwd: path.resolve(__dirname, '../..'),

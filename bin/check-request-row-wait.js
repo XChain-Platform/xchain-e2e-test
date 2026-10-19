@@ -25,7 +25,7 @@
  *
  *     // request-row-wait-ok: absence is the assertion in this poll.
  *
- * Usage: node scripts/check-request-row-wait.js [--list] [path ...]
+ * Usage: node bin/check-request-row-wait.js [--list] [path ...]
  *
  ********************************************************************/
 

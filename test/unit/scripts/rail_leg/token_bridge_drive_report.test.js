@@ -5,8 +5,8 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 
-const { triageJournal } = require('../../../../scripts/rail_journal_triage')
-const { main, renderDriveReport } = require('../../../../scripts/rail_leg/token_bridge_drive_report')
+const { triageJournal } = require('../../../../bin/rail_journal_triage')
+const { main, renderDriveReport } = require('../../../../bin/rail_leg/token_bridge_drive_report')
 
 function journal (count, state = 'passed') {
     const entries = []

@@ -21,7 +21,7 @@ const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
 
-const { triageJournal } = require('../../../../scripts/rail_journal_triage.js');
+const { triageJournal } = require('../../../../bin/rail_journal_triage.js');
 
 const SUITE_DIR = path.resolve(__dirname, '..', '..', '..', 'integration', 'bridge_rail_token.test');
 const MIN_GUARDS = 16;

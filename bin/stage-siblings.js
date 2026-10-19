@@ -21,9 +21,9 @@
 // vendor dir when there is nothing there worth keeping.
 //
 // Usage:
-//   node scripts/stage-siblings.js            stage what is missing
-//   node scripts/stage-siblings.js --check     report state, change nothing
-//   node scripts/stage-siblings.js --unstage   remove symlinks this script made
+//   node bin/stage-siblings.js            stage what is missing
+//   node bin/stage-siblings.js --check     report state, change nothing
+//   node bin/stage-siblings.js --unstage   remove symlinks this script made
 
 const fs = require('fs')
 const path = require('path')

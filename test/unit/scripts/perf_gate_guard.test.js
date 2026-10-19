@@ -22,7 +22,7 @@ const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
 
-const cli = path.resolve(__dirname, '../../../scripts/perf-gate.js')
+const cli = path.resolve(__dirname, '../../../bin/perf-gate.js')
 
 function runFixture(data) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'perf-gate-'))

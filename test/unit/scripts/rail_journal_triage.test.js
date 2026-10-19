@@ -5,8 +5,8 @@ const childProcess = require('child_process')
 const os = require('os')
 const path = require('path')
 
-const { triageJournal } = require('../../../scripts/rail_journal_triage')
-const script = path.join(__dirname, '..', '..', '..', 'scripts', 'rail_journal_triage.js')
+const { triageJournal } = require('../../../bin/rail_journal_triage')
+const script = path.join(__dirname, '..', '..', '..', 'bin', 'rail_journal_triage.js')
 
 function line (entry) {
     return JSON.stringify(entry)

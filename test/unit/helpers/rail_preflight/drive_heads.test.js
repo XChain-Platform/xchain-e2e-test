@@ -84,7 +84,7 @@ describe('rail_preflight drive_heads', function(){
         it('classifies the platform record paths', function(){
             for(const p of [P('LEDGER.md'), P('BOARD-2.md'), P('specs/a.md'), P('specs/x/y.md'),
                 P('reports/r.md'), 'tmp/run/o.txt']) assert.strictEqual(isLedgerPath(p), true, p);
-            for(const p of [P('scripts/a.js'), P('bin/x.js'), P('notes.md'), P('deploy/k.json'),
+            for(const p of [P('bin/a.js'), P('bin/x.js'), P('notes.md'), P('deploy/k.json'),
                 'xchain-hub/src/a.js', P('specs'), 'src/' + P('specs/a.md'), '', null])
                 assert.strictEqual(isLedgerPath(p), false, String(p));
         });
@@ -97,7 +97,7 @@ describe('rail_preflight drive_heads', function(){
         });
 
         it('still fails when any changed path is code', function(){
-            const res = judgeDriveHeads(pinned, live, () => [P('specs/a.md'), P('scripts/run.sh')]);
+            const res = judgeDriveHeads(pinned, live, () => [P('specs/a.md'), P('bin/run.sh')]);
             assert.strictEqual(res.ok, false);
             assert.deepStrictEqual(res.moved.map(m => m.name), ['platform']);
         });
@@ -138,9 +138,9 @@ describe('rail_preflight drive_heads', function(){
             };
             try {
                 git('init', '-q');
-                const base = commit(P('scripts/run.sh'), 'base');
+                const base = commit(P('bin/run.sh'), 'base');
                 const record = commit(P('specs/board.md'), 'record');
-                const code = commit(P('scripts/run.sh'), 'code');
+                const code = commit(P('bin/run.sh'), 'code');
                 const roots = { platform: dir, e2e: 'e', indexer: 'i' };
                 const at = p => ({ platform: p, e2e: B, indexer: C });
                 assert.strictEqual(judgeDriveHeads(at(base), at(record), rootDiff(roots)).ok, true);

@@ -31,7 +31,7 @@
 // Hermetic: the scanner reads source text, so no regtest venue is involved.
 
 const assert  = require('assert')
-const scanner = require('../../../scripts/check-sleep-flake')
+const scanner = require('../../../bin/check-sleep-flake')
 
 const linesOf = (src) => scanner.scanSource(src, 'fixture.js').hits.map((h) => h.line)
 const countOf = (src) => scanner.scanSource(src, 'fixture.js').hits.length
