@@ -58,8 +58,10 @@ describe('Attestation framework: per-contract admission cap rejects an over-cap 
     // Each request method emits N requests to the free http_get provider, one URL per
     // slot so the request_ids differ (request_id derives from the emitter position too,
     // but distinct payloads keep the rows readable in the attests table).
+    // DEPLOY refuses a contract without a meta export (CONTRACT_MANIFEST, meta required).
     const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Attest Admission Cap Asker', description: 'Emits attestation requests to exercise the per-contract admission cap.', version: '1.0.0' },
     askTwice: function(xchain) {
         var a = xchain.attestation.request('http_get', 'https://example.com/cap/at/1', 'handleResponse', ['cap-at-1'], { redundancy: 1, deadlineBlocks: 10 });
         var b = xchain.attestation.request('http_get', 'https://example.com/cap/at/2', 'handleResponse', ['cap-at-2'], { redundancy: 1, deadlineBlocks: 10 });
