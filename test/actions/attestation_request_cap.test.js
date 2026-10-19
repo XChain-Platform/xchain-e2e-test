@@ -99,10 +99,9 @@ async function setupAdmissionCaps() {
             this.skip()
             return
         }
-        // The gate under test must actually be armed on this venue, or the suite
-        // would assert an admission that nothing was ever going to refuse.
-        assert.ok(capRule.isAttestRequestCapActive(0, NETWORK),
-            'the ATTEST request cap is inert on network "' + NETWORK + '"; there is no cap to drive')
+        // The request caps apply unconditionally since their activation gate was
+        // retired, so there is no arming to check here: only the cap value the
+        // suite drives.
         assert.strictEqual(capRule.ATTEST_REQUEST_CAPS.perContract, 2,
             'this suite drives the per-contract cap by emitting 3 requests; it must be 2')
 
