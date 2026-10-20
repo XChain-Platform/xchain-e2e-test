@@ -145,6 +145,25 @@ function registerReasonSourceCases () {
         assert.match(result.stdout, /reason: Regtest is armed at height zero/)
     })
 
+    it('refuses an attached comment shorter than the shared three-word reason rule', function () {
+        const withComment = (comment) => run(fixture({
+            'at6.test.js': [
+                "describe('AT6', function () {",
+                '  // ' + comment,
+                "  it.skip('serves a below-height request', function () {})",
+                '})',
+            ].join('\n'),
+        }))
+        for (const thin of ['TODO fix', 'flaky - 12345678', 'Section: requests']) {
+            const result = withComment(thin)
+            assert.strictEqual(result.status, 1, thin + ' must not count as a reason')
+            assert.match(result.stderr, /unreasoned pending: .*serves a below-height request/)
+        }
+        const reasoned = withComment('Regtest arms at genesis.')
+        assert.strictEqual(reasoned.status, 0, reasoned.stderr)
+        assert.match(reasoned.stdout, /reason: Regtest arms at genesis\./)
+    })
+
     it('does not count the standard unavailable-venue hook as a pending claim', function () {
         const source = [
             "describe('venue leg', function () {",
@@ -157,6 +176,62 @@ function registerReasonSourceCases () {
             '})',
         ].join('\n')
         assert.deepStrictEqual(checker.parseSource(source, 'at0.test.js').pending, [])
+    })
+
+    it('does not count a skip right after a SKIPPED unreachable-rail log as a pending claim', function () {
+        const source = [
+            "describe('rail leg', function () {",
+            '  before(function () {',
+            '    if (!rail) {',
+            "      console.log('AT5 SKIPPED: the DOGE regtest rail is unreachable')",
+            '      this.skip()',
+            '    }',
+            '  })',
+            '})',
+        ].join('\n')
+        assert.deepStrictEqual(checker.parseSource(source, 'at5.test.js').pending, [])
+    })
+
+    it('still reports an unrelated skip near a comment that reads like the venue guard', function () {
+        const source = [
+            "describe('venue leg', function () {",
+            '  before(function () {',
+            '    // When if (!up) holds the venue is unavailable; that case is handled elsewhere.',
+            '    if (!llm.ok) {',
+            '      this.skip()',
+            '    }',
+            '  })',
+            '})',
+        ].join('\n')
+        const pending = checker.parseSource(source, 'at0.test.js').pending
+        assert.strictEqual(pending.length, 1, JSON.stringify(pending))
+        assert.strictEqual(pending[0].line, 5)
+    })
+
+    it('still reports a skip that only follows the venue guard or a SKIPPED log', function () {
+        const afterGuard = [
+            "describe('venue leg', function () {",
+            '  before(function () {',
+            '    if (!up) {',
+            "      console.log('SKIPPED: ' + venue.unavailable)",
+            '      return',
+            '    }',
+            '    if (!seeded) this.skip()',
+            '  })',
+            '})',
+        ].join('\n')
+        assert.strictEqual(checker.parseSource(afterGuard, 'at0.test.js').pending.length, 1)
+        const afterLog = [
+            "describe('rail leg', function () {",
+            "  it('settles on the rail', function () {",
+            "    console.log('AT9 SKIPPED: the rail is unreachable')",
+            '    if (!ready) {',
+            '      this.skip()',
+            '    }',
+            '  })',
+            '})',
+        ].join('\n')
+        assert.strictEqual(checker.parseSource(afterLog, 'at9.test.js').pending.length, 1)
     })
 }
 

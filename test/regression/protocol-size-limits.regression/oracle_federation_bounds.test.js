@@ -25,4 +25,22 @@ void describe('Oracle federation bounds (hub is the arbiter)', () => {
             'hub ORACLE_DEVIATION_THRESHOLD drifted from the canonical protocol constant'
         )
     })
+
+    // Pin the per-round move clamps the hub re-declares: a divergent clamp forks
+    // the federation, since hubs re-derive each other's aggregates before co-signing.
+    it('[regression:p0] hub ORACLE_MAX_CHANGE_PER_ROUND === canonical', () => {
+        assert.strictEqual(
+            hubConstants.ORACLE_MAX_CHANGE_PER_ROUND,
+            protocol.ORACLE_MAX_CHANGE_PER_ROUND,
+            'hub ORACLE_MAX_CHANGE_PER_ROUND drifted from the canonical protocol constant'
+        )
+    })
+
+    it('[regression:p0] hub XCHAIN_PRICE_MAX_CHANGE_PER_ROUND === canonical', () => {
+        assert.strictEqual(
+            hubConstants.XCHAIN_PRICE_MAX_CHANGE_PER_ROUND,
+            protocol.XCHAIN_PRICE_MAX_CHANGE_PER_ROUND,
+            'hub XCHAIN_PRICE_MAX_CHANGE_PER_ROUND drifted from the canonical protocol constant'
+        )
+    })
 })

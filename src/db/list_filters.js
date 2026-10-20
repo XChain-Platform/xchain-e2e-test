@@ -216,4 +216,4 @@ async function checkListItems(database, listRow, type, items){
  * the indexer has not written yet.
  */
 
-module.exports = { buildBroadcastFilter, getListWhere, getListQuery, findListRow, getListItemsQuery, listItemsMatch, checkListItems }
+module.exports = { buildBroadcastFilter, getListWhere, getListQuery, findListRow, checkListItems }

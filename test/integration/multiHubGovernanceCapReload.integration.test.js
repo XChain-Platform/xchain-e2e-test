@@ -75,10 +75,10 @@ const CAPS = {
     },
     price:          { sources: ['coingecko'], fiats: ['USD'] },
     cross_chain:    { chains: { BTC: { rpc: 'http://node:8332' } } },
-    // A REGTEST-format DOGE address ('n' prefix, 34 chars). The hub's oracle_publish
-    // self-test validates doge_address against HUB_NETWORK, so a mainnet 'D' address
-    // fails closed on the regtest hubs this harness stands up.
-    oracle_publish: { doge_address: 'nsTake195wjCuVwLHf26EsZnRjwpm2LJtb', doge_wallet: '/data/.dogecoin/wallet.dat' }
+    // A DOGE REGTEST address (version byte 0x6f, valid checksum; the registry EXPLORER
+    // literal). The hub's oracle_publish self-test decodes doge_address against
+    // HUB_NETWORK, so a mainnet 0x1e or DOGE-testnet 0x71 address fails on these hubs.
+    oracle_publish: { doge_address: 'n1AvTJLLSA1NHamHd5KFj9mRn6BEcwnVbf', doge_wallet: '/data/.dogecoin/wallet.dat' }
 };
 
 async function assertFollowersDropRoguePropose(mvh) {

@@ -114,4 +114,4 @@ function buildDispenserQuery(whereClauses){
         `+"WHERE "+whereClauses.join(" AND ");
 }
 
-module.exports = { addDispenserWhereValue, addDispenserIdentityFilters, addDispenserGiveFilters, addDispenserGetFilters, addDispenserConstraintFilters, buildDispenserFilters, buildDispenserQuery }
+module.exports = { buildDispenserFilters, buildDispenserQuery }

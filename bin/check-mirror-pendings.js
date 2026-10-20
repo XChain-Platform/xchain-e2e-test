@@ -4,6 +4,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const { MIN_REASON_WORDS, reasonWords } = require('./lib/opt_out_marker')
 
 const ROOT = path.resolve(__dirname, '..')
 const DEFAULT_INPUTS = [path.join(ROOT, 'test', 'attestMirror')]
@@ -226,13 +227,49 @@ function reasonFrom (title, comment) {
     if (/\b(?:because|needs?|not\s+drivable|only\s+when|unless|until|driven\s+in)\b/i.test(title || '')) {
         return title.trim()
     }
-    return comment && comment.length >= 8 ? comment : ''
+    // Hold an attached comment to the reason rule every check-* gate shares, not a length floor.
+    return comment && reasonWords(comment) >= MIN_REASON_WORDS ? comment : ''
 }
 
-function availabilityGuard (source, call, offset) {
-    const lead = source.slice(Math.max(call.bodyOpen, offset - 600), offset)
-    const unavailableVenue = /if\s*\(\s*!\s*up\s*\)/.test(lead) && /unavailable/.test(lead)
-    const unavailableRail = /SKIPPED[\s\S]*(?:unreachable|cannot be driven)/.test(lead)
+// Find the innermost block still open at offset inside the call body, or -1 for the body itself.
+function enclosingBlockOpen (masked, from, offset) {
+    let depth = 0
+    for (let i = offset - 1; i > from; i--) {
+        if (masked[i] === '}') depth++
+        else if (masked[i] === '{') {
+            if (depth === 0) return i
+            depth--
+        }
+    }
+    return -1
+}
+
+// Return the source arguments of a console.log that is the statement right before offset, or null.
+function previousLogArgs (source, masked, blockStart, offset) {
+    const before = masked.slice(blockStart, offset).replace(/[\s;]+$/, '')
+    if (!before.endsWith(')')) return null
+    const close = blockStart + before.length - 1
+    let depth = 0
+    let open = close
+    for (; open >= blockStart; open--) {
+        if (masked[open] === ')') depth++
+        else if (masked[open] === '(' && --depth === 0) break
+    }
+    if (open < blockStart || !/console\s*\.\s*log\s*$/.test(masked.slice(blockStart, open))) return null
+    return source.slice(open + 1, close)
+}
+
+// Exempt only the venue-down skip itself, judged on code rather than comments: a statement of an
+// `if (!up) { ... }` block that reads `.unavailable`, or the statement right after a SKIPPED
+// unreachable or cannot-be-driven log. A skip that merely sits near such text is still reported.
+function availabilityGuard (source, masked, call, offset) {
+    const open = enclosingBlockOpen(masked, call.bodyOpen, offset)
+    const blockStart = open === -1 ? call.bodyOpen + 1 : open + 1
+    const head = open === -1 ? '' : masked.slice(call.bodyOpen + 1, open)
+    const unavailableVenue = /\bif\s*\(\s*!\s*up\s*\)\s*$/.test(head) &&
+        /\.\s*unavailable\b/.test(masked.slice(blockStart, offset))
+    const log = previousLogArgs(source, masked, blockStart, offset)
+    const unavailableRail = log !== null && /SKIPPED[\s\S]*(?:unreachable|cannot be driven)/.test(log)
     return unavailableVenue || unavailableRail
 }
 
@@ -283,7 +320,7 @@ function runtimePendings (source, file, calls, masked) {
             .filter((call) => call.bodyOpen < match.index && call.bodyClose > match.index)
             .sort((a, b) => b.bodyOpen - a.bodyOpen)
             .find((call) => HOOKS.has(call.kind) || TESTS.has(call.kind))
-        if (!container || container.skipped || availabilityGuard(source, container, match.index)) continue
+        if (!container || container.skipped || availabilityGuard(source, masked, container, match.index)) continue
         const line = lineAt(source, match.index)
         const comment = attachedComment(source, line)
         const suite = parentSuite(container, calls)
