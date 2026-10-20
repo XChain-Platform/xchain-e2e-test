@@ -158,6 +158,7 @@ describe('release leaked stakes recorded by drill ' + LABEL, function () {
         const file = path.join(DRILL_KEYS_DIR, LABEL + '.json')
         if (!fs.existsSync(file)) {
             console.log('RELEASE SKIPPED: no recorded keys at ' + file);
+            // Skip when no drill recorded keys under this label, since there is nothing to release.
             this.skip()
             return
         }

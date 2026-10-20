@@ -191,6 +191,7 @@ async function settleHttpGet (ctx) {
 }
 
 async function settleLlm (ctx, mocha) {
+    // Skip the llm case when no LLM provider is runnable on this box; bringUp prints why.
     if (!ctx.llm.ok) return mocha.skip()
     const payload = JSON.stringify({ prompt: 'What is 2+2? Reply with only the number.' })
     await driveAndAssert(ctx, 'llm', payload, (body) => {

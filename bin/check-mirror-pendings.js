@@ -9,12 +9,17 @@ const { MIN_REASON_WORDS, reasonWords } = require('./lib/opt_out_marker')
 const ROOT = path.resolve(__dirname, '..')
 const DEFAULT_INPUTS = [path.join(ROOT, 'test', 'attestMirror')]
 const TEST_FILE = /\.test\.js$/
+// Read helper modules too: a skip a hook hands to a helper lives there, not in the leg file.
+const SOURCE_FILE = /\.js$/
 // Match the x-prefixed skip aliases too; the lookbehind keeps a member call such as re.test( out.
 const MOCHA_CALL = /(?<![.$\w])(x?(?:describe|context|it|specify)|suite|test|before|beforeEach|setup)(\.skip)?\s*\(/g
 const BASE_KIND = { specify: 'it', xspecify: 'it', xit: 'it', xdescribe: 'describe', xcontext: 'context' }
 const HOOKS = new Set(['before', 'beforeEach', 'setup'])
 const SUITES = new Set(['describe', 'context', 'suite'])
 const TESTS = new Set(['it', 'test'])
+// Every name MOCHA_CALL declares with, so `<name>.skip(` is read as a declaration, never a runtime skip.
+const MOCHA_DECLARERS = new Set(['describe', 'context', 'it', 'specify', 'xdescribe', 'xcontext', 'xit', 'xspecify',
+    'suite', 'test', 'before', 'beforeEach', 'setup'])
 
 function maskNonCode (source) {
     const out = source.split('')
@@ -244,9 +249,10 @@ function enclosingBlockOpen (masked, from, offset) {
     return -1
 }
 
-// Return the source arguments of a console.log that is the statement right before offset, or null.
+// Return the source and code arguments of a console.log that is the statement right before offset, or null.
 function previousLogArgs (source, masked, blockStart, offset) {
-    const before = masked.slice(blockStart, offset).replace(/[\s;]+$/, '')
+    // A `return` in front of the skip belongs to the skip's own statement.
+    const before = masked.slice(blockStart, offset).replace(/\breturn\s*$/, '').replace(/[\s;]+$/, '')
     if (!before.endsWith(')')) return null
     const close = blockStart + before.length - 1
     let depth = 0
@@ -256,21 +262,35 @@ function previousLogArgs (source, masked, blockStart, offset) {
         else if (masked[open] === '(' && --depth === 0) break
     }
     if (open < blockStart || !/console\s*\.\s*log\s*$/.test(masked.slice(blockStart, open))) return null
-    return source.slice(open + 1, close)
+    return { text: source.slice(open + 1, close), code: masked.slice(open + 1, close) }
 }
 
 // Exempt only the venue-down skip itself, judged on code rather than comments: a statement of an
-// `if (!up) { ... }` block that reads `.unavailable`, or the statement right after a SKIPPED
-// unreachable or cannot-be-driven log. A skip that merely sits near such text is still reported.
-function availabilityGuard (source, masked, call, offset) {
-    const open = enclosingBlockOpen(masked, call.bodyOpen, offset)
-    const blockStart = open === -1 ? call.bodyOpen + 1 : open + 1
-    const head = open === -1 ? '' : masked.slice(call.bodyOpen + 1, open)
+// `if (!up) { ... }` block that reads `.unavailable`, or the statement right after a SKIPPED log
+// that says unreachable or cannot-be-driven, or that reads the venue's `.unavailable` in code.
+// A skip that merely sits near such text is still reported. bodyOpen is -1 for a helper skip.
+function availabilityGuard (source, masked, bodyOpen, offset) {
+    const open = enclosingBlockOpen(masked, bodyOpen, offset)
+    const blockStart = open === -1 ? bodyOpen + 1 : open + 1
+    const head = open === -1 ? '' : masked.slice(bodyOpen + 1, open)
     const unavailableVenue = /\bif\s*\(\s*!\s*up\s*\)\s*$/.test(head) &&
         /\.\s*unavailable\b/.test(masked.slice(blockStart, offset))
     const log = previousLogArgs(source, masked, blockStart, offset)
-    const unavailableRail = log !== null && /SKIPPED[\s\S]*(?:unreachable|cannot be driven)/.test(log)
+    const unavailableRail = log !== null && (/SKIPPED[\s\S]*(?:unreachable|cannot be driven)/.test(log.text) ||
+        (/SKIPPED/.test(log.text) && /\.\s*unavailable\b/.test(log.code)))
     return unavailableVenue || unavailableRail
+}
+
+// Name the function whose body holds offset, for a skip outside any hook or test body.
+function enclosingFunctionName (masked, offset) {
+    const head = /(?:\bfunction\b\s*([\w$]*)\s*\([^()]*\)|(?:([\w$]+)\s*[=:]\s*)?(?:async\s+)?(?:\([^()]*\)|[\w$]+)\s*=>|\b(?!(?:if|for|while|switch|catch|with)\b)([\w$]+)\s*\([^()]*\))\s*$/
+    let open = enclosingBlockOpen(masked, -1, offset)
+    while (open !== -1) {
+        const found = head.exec(masked.slice(Math.max(0, open - 300), open))
+        if (found) return found[1] || found[2] || found[3] || 'anonymous function'
+        open = enclosingBlockOpen(masked, -1, open)
+    }
+    return 'top level'
 }
 
 function pendingEntry (file, line, title, claim, comment, kind) {
@@ -310,19 +330,30 @@ function declaredPendings (source, file, calls) {
     return pending
 }
 
-// Report a this.skip() in a hook or a test body, except the standard unavailable-venue guard.
+// Report a runtime skip, except the standard unavailable-venue guard: this.skip(), or the mocha
+// context a hook passes into a helper (mocha.skip()). A skip outside any hook or test body is
+// charged to its helper function, since the gate cannot follow the call back to a test.
 function runtimePendings (source, file, calls, masked) {
     const pending = []
-    const skipCall = /\bthis\s*\.\s*skip\s*\(\s*\)/g
+    const skipCall = /(?<![.$\w])([A-Za-z_$][\w$]*)\s*\.\s*skip\s*\(/g
     let match
     while ((match = skipCall.exec(masked)) !== null) {
+        const openParen = match.index + match[0].length - 1
+        // A declared skip (it.skip, describe.skip) or a skip with arguments is not mocha's runtime skip.
+        if (MOCHA_DECLARERS.has(match[1]) || source.slice(openParen + 1, closeParen(masked, openParen)).trim() !== '') continue
         const container = calls
             .filter((call) => call.bodyOpen < match.index && call.bodyClose > match.index)
             .sort((a, b) => b.bodyOpen - a.bodyOpen)
             .find((call) => HOOKS.has(call.kind) || TESTS.has(call.kind))
-        if (!container || container.skipped || availabilityGuard(source, masked, container, match.index)) continue
+        if (container && container.skipped) continue
+        if (availabilityGuard(source, masked, container ? container.bodyOpen : -1, match.index)) continue
         const line = lineAt(source, match.index)
         const comment = attachedComment(source, line)
+        if (!container) {
+            const title = enclosingFunctionName(masked, match.index) + ' [helper skip]'
+            pending.push(pendingEntry(file, line, title, title, comment, 'helper'))
+            continue
+        }
         const suite = parentSuite(container, calls)
         if (TESTS.has(container.kind)) {
             const title = container.title || '<untitled test>'
@@ -358,7 +389,7 @@ function walkTests (directory, output) {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
         const absolute = path.join(directory, entry.name)
         if (entry.isDirectory()) walkTests(absolute, output)
-        else if (TEST_FILE.test(entry.name)) output.push(absolute)
+        else if (SOURCE_FILE.test(entry.name)) output.push(absolute)
     }
 }
 
@@ -398,6 +429,8 @@ function activeCaseTitles (calls) {
 
 function legFiles (parsedFiles, name) {
     return [...parsedFiles.entries()].filter(([file]) => {
+        // Only a leg file can be a cross-reference target; a helper module named zc1_fixture.js is not leg zc1.
+        if (!TEST_FILE.test(file)) return false
         const base = path.basename(file, '.test.js').toLowerCase()
         return base === name || base.startsWith(name + '-') || base.startsWith(name + '_')
     })

@@ -138,9 +138,9 @@ function entryKey(spec){
     return 's:' + String(spec.signingPubkey).toLowerCase()
 }
 
-// Record a stake this run created. Called by stakeHelper on every STAKE that
-// indexed at status=valid; an intentionally-rejected stake never becomes a
-// member of anything and is not registered.
+// Record a stake this run created. An intentionally-rejected stake never becomes
+// a member of anything and is not registered; stakeHelper books through
+// bookBroadcastStake so a stake whose wait gave up is still released.
 function registerStake(spec){
     if(!spec || !spec.signingPubkey || !spec.addressInfo) return null
     const key = entryKey(spec)
@@ -164,6 +164,24 @@ function registerStake(spec){
     }
     ledger.set(key, entry)
     return entry
+}
+
+// Book a STAKE the moment it is broadcast, because it can still confirm after its
+// wait gives up. The returned undo restores the key's exact prior ledger state, and
+// is for a stake the indexer has recorded as rejected.
+function bookBroadcastStake(spec){
+    const key   = (spec && spec.signingPubkey && spec.addressInfo) ? entryKey(spec) : null
+    const prior = key ? ledger.get(key) : undefined
+    const was   = prior ? { released: prior.released, count: prior.amounts.length } : null
+    const entry = registerStake(spec)
+    const undo  = () => {
+        if(!entry || ledger.get(key) !== entry) return
+        // A first booking leaves no trace; a top-up gives back its amount and the prior released flag.
+        if(!was){ ledger.delete(key); return }
+        entry.amounts.splice(was.count, 1)
+        entry.released = was.released
+    }
+    return { entry: entry, undo: undo }
 }
 
 // Record that a stake left the set under its own test's control. Only a FULL
@@ -568,6 +586,7 @@ module.exports = {
     STRICT_REREAD_ROUNDS,
     policy,
     registerStake,
+    bookBroadcastStake,
     noteUnstake,
     outstanding,
     reset,

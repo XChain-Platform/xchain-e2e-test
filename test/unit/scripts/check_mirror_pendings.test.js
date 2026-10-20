@@ -468,3 +468,91 @@ describe('check-mirror-pendings: a call binds only the callback inside its own p
     registerSuiteBindingCases()
     registerNamedHookCase()
 })
+
+// A hook that hands its mocha context to a helper (bringUp(ctx, this)) skips from the helper.
+const HELPER_LEG = (comment) => [
+    'async function settleLlm (ctx, mocha) {',
+    comment,
+    '    if (!ctx.llm.ok) return mocha.skip()',
+    '}',
+    "describe('AT1', function () {",
+    "  it('settles an llm request', async function () { await settleLlm(ctx, this) })",
+    '})',
+].join('\n')
+
+function registerHelperSkipCases () {
+    it('reports a mocha.skip in a helper, charged to the helper, and refuses it without a reason', function () {
+        const pending = checker.parseSource(HELPER_LEG('    const unused = 0'), 'at1.test.js').pending
+        assert.deepStrictEqual(pending.map((p) => [p.title, p.kind, p.line, p.reason]),
+            [['settleLlm [helper skip]', 'helper', 3, '']])
+        const result = run(fixture({ 'at1.test.js': HELPER_LEG('    const unused = 0') }))
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /unreasoned pending: .*at1\.test\.js:3 settleLlm \[helper skip\]/)
+    })
+
+    it('accepts a helper skip whose attached comment states the reason', function () {
+        const result = run(fixture({ 'at1.test.js': HELPER_LEG('    // Skip the llm case when no provider is runnable here.') }))
+        assert.strictEqual(result.status, 0, result.stderr)
+        assert.match(result.stdout, /settleLlm \[helper skip\] \| reason: Skip the llm case/)
+    })
+
+    it('does not count a helper venue guard that logs the venue unavailable reason', function () {
+        const source = [
+            'async function bringUp (ctx, mocha) {',
+            '    if (!(await ctx.venue.start())) {',
+            "        console.log('AT1 SKIPPED: ' + ctx.venue.unavailable)",
+            '        return mocha.skip()',
+            '    }',
+            '}',
+        ].join('\n')
+        assert.deepStrictEqual(checker.parseSource(source, 'at1.test.js').pending, [])
+    })
+
+    it('still reports a helper skip after a SKIPPED log that only mentions unavailable in text', function () {
+        const source = [
+            'function requireHappyPath (ctx, mocha) {',
+            "    console.log('AT2 SKIPPED: the path was unavailable ' + ctx.why)",
+            '    mocha.skip()',
+            '}',
+        ].join('\n')
+        const pending = checker.parseSource(source, 'at2.test.js').pending
+        assert.deepStrictEqual(pending.map((p) => p.title), ['requireHappyPath [helper skip]'])
+    })
+}
+
+function registerHelperModuleCases () {
+    it('reads a helper module that is not a test file', function () {
+        const root = fixture({
+            'at1.test.js': "describe('AT1', () => { it.skip('slow edge (needs 257 rounds)', () => {}) })",
+            'helpers/fixture.js': 'function bootFixture (ctx, mocha) {\n    mocha.skip()\n}\n',
+        })
+        const result = run(root)
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /unreasoned pending: .*helpers\/fixture\.js:2 bootFixture \[helper skip\]/)
+    })
+
+    it('does not take a helper module as the leg a cross-reference names', function () {
+        const root = fixture({
+            'at2.test.js': "describe('AT2', () => { it.skip('holds the margin (DRIVEN in zc1: \"holds the barrier\")', () => {}) })",
+            'helpers/zc1_fixture.js': "describe('zc1 helper', () => { it('holds the barrier', () => {}) })",
+        })
+        const result = run(root)
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /unresolved cross-reference zc1 .*leg file does not exist/)
+    })
+
+    it('reads neither a declared skip nor a skip with arguments as a runtime skip', function () {
+        const source = [
+            "describe('AT3', function () {",
+            '  const rows = cursor.skip(5)',
+            "  it('runs', function () { return rows })",
+            '})',
+        ].join('\n')
+        assert.deepStrictEqual(checker.parseSource(source, 'at3.test.js').pending, [])
+    })
+}
+
+describe('check-mirror-pendings: a skip handed to a helper is reported', function () {
+    registerHelperSkipCases()
+    registerHelperModuleCases()
+})

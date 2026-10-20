@@ -93,6 +93,7 @@ function requireHappyPath (ctx, driven, mocha) {
     })
     if (path.happy) return true
     console.log('AT2 SKIPPED on request ' + driven.requestId.slice(0, 12) + ': ' + path.why)
+    // Skip when no driven request took the happy path, which this case needs; the log names why.
     mocha.skip()
     return false
 }

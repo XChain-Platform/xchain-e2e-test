@@ -56,15 +56,6 @@ function withTimeout (work, ms) {
     return Promise.race([Promise.resolve(work), expiry]).finally(() => clearTimeout(timer))
 }
 
-async function responseOk (url, init, fetchImpl) {
-    try {
-        const response = await fetchImpl(url, init)
-        return !!response && response.ok
-    } catch (_) {
-        return false
-    }
-}
-
 function rpcErrorText (error) {
     const text = typeof error === 'object' ? (error.message || JSON.stringify(error)) : String(error)
     return text.slice(0, 200)
@@ -295,7 +286,6 @@ module.exports = {
     PROBE_TIMEOUT_MS,
     probeTimeout,
     loadDependencies,
-    responseOk,
     minerBodyProblem,
     minerProblem,
     indexerSchemaReady,

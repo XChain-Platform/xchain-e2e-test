@@ -20,11 +20,21 @@
 
 const axios = require('axios');
 const { getLogger } = require('./lib/logger');
+// Reads a non-2xx body so a refusal is not mistaken for a dead socket (see the helper)
+const { serviceRefusal } = require('./lib/service_refusal');
 const logger = getLogger();
 
 // Cap only the readiness probe: tx building legitimately runs long, so createTx
 // and the cancel builder keep the unbounded config.
 const PING_TIMEOUT_MS = 5000;
+
+// Name the encoder's own refusal (401 key gate, 429 limiter or shed) beside axios's
+// status text; a responseless failure keeps the bare transport message.
+function transportDetail(err) {
+    const refusal = serviceRefusal(err)
+    const message = err && err.message
+    return refusal ? 'encoder refused (' + refusal + '; ' + message + ')' : message
+}
 
 class XChainEncoderConnector {
     constructor(url, port, apiKey = null) {
@@ -54,7 +64,11 @@ class XChainEncoderConnector {
         try {
             response = await axios.post(this.url, data, { ...this.reqConfig, timeout: PING_TIMEOUT_MS })
         } catch (err) {
-            logger.info(err)
+            // A probe keeps its boolean sentinel: callers poll on false. Name the
+            // refusal in the log so a refused key is not read as a dead encoder.
+            const refusal = serviceRefusal(err)
+            if (refusal) logger.warn('Encoder ' + this.url + ' refused ping: ' + refusal)
+            else logger.info(err)
             return false
         }
 
@@ -85,7 +99,7 @@ class XChainEncoderConnector {
         try {
             response = await axios.post(this.url, dataToSend, this.reqConfig)
         } catch (err){
-            throw new Error('Error trying to create an envelope cancel tx: ' + (err && err.message))
+            throw new Error('Error trying to create an envelope cancel tx: ' + transportDetail(err))
         }
 
         if (response.data.result) return response.data.result
@@ -133,7 +147,7 @@ class XChainEncoderConnector {
             response = await axios.post(this.url, dataToSend, this.reqConfig)
         } catch (err){
             logger.info(err)
-            throw new Error('Error trying to create a tx with the encoder module: ' + (err && err.message));
+            throw new Error('Error trying to create a tx with the encoder module: ' + transportDetail(err));
         }
 
         if (response.data.result) {

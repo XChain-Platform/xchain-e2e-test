@@ -103,7 +103,9 @@ async function tearDown(ctx) {
 
 async function bringUp(ctx, mocha) {
     await prepareProvider(ctx)
+    // Skip when the DOGE regtest rail is unreachable; openDogeRail logs the cause.
     if (!(await openDogeRail(ctx))) return mocha.skip()
+    // Skip when the drill venue cannot start here; bootDrill logs why it is unavailable.
     if (!(await bootDrill(ctx))) return mocha.skip()
 }
 
@@ -112,6 +114,7 @@ async function bringUp(ctx, mocha) {
 // pending, and the reason is printed in the before-hook rather than left
 // to whoever reads a pending dot.
 async function landWindow(ctx, mocha) {
+    // Skip the llm window when no LLM provider is runnable on this box; the before hook prints why.
     if (ctx.responseProvider === 'llm' && !ctx.llm.ok) mocha.skip()
     await runResponseWindowCase(ctx)
 }

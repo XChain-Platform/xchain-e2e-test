@@ -76,6 +76,19 @@ async function waitForAnyRewardClaim({source, txHash}, timeMax = 60000){
     return null
 }
 
+// Wait for a STAKE that was booked for release at broadcast (see stakeTeardown.js).
+// A wait that gives up keeps the booking, since the stake can still confirm; only a
+// row the indexer has already recorded as rejected gives the booking back.
+async function awaitBookedStake(booking, wait, readAnyStatus){
+    try {
+        return await wait()
+    } catch (err){
+        const row = await Promise.resolve().then(readAnyStatus).catch(() => null)
+        if(row && /^invalid/.test(String(row.status))) booking.undo()
+        throw err
+    }
+}
+
 module.exports = {
     ATTESTATION_STAKE_VISIBLE_BLOCKS,
     // Negative-path helpers: return the row regardless of status so the
@@ -92,18 +105,19 @@ module.exports = {
         console.log("Creating and sending STAKE V1 tx...")
         const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
+        // The broadcast stake can become a REAL member of the venue's capability
+        // sets, so book the debt now for the run's teardown to give back.
+        const booking = stakeTeardown.bookBroadcastStake({ addressInfo, signingPubkey, amount })
+
         console.log("Waiting for stake in the database...")
-        const stakeRow = requireRow(await indexerDatabase.waitForStake({
+        const stakeRow = await awaitBookedStake(booking, async () => requireRow(await indexerDatabase.waitForStake({
             source:        address,
             signingPubkey: signingPubkey,
             txHash:        txHash,
             status:        "valid"
         }), "sendStakeV1: STAKE of " + amount + " by " + address + " (tx " + txHash
-            + ") at status=valid")
-
-        // The stake is now a REAL member of the venue's capability sets. Book the
-        // debt so the run's teardown gives it back (see stakeTeardown.js).
-        stakeTeardown.registerStake({ addressInfo, signingPubkey, amount })
+            + ") at status=valid"),
+        () => indexerDatabase.checkStake({ source: address, signingPubkey, txHash }))
 
         return { txHash, stake: stakeRow }
     },
@@ -116,18 +130,19 @@ module.exports = {
         console.log("Creating and sending STAKE V2 (top-up) tx...")
         const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
+        // A top-up onto a stake this run already released (or one seeded before
+        // it) is still this run's debt: the single UNSTAKE sweeps every row.
+        const booking = stakeTeardown.bookBroadcastStake({ addressInfo, signingPubkey, amount })
+
         console.log("Waiting for top-up stake row in the database...")
-        const stakeRow = requireRow(await indexerDatabase.waitForStake({
+        const stakeRow = await awaitBookedStake(booking, async () => requireRow(await indexerDatabase.waitForStake({
             source:        address,
             signingPubkey: signingPubkey,
             txHash:        txHash,
             status:        "valid"
         }), "sendStakeV2: the STAKE top-up of " + amount + " by " + address
-            + " (tx " + txHash + ") at status=valid")
-
-        // A top-up onto a stake this run already released (or one seeded before
-        // it) is still this run's debt: the single UNSTAKE sweeps every row.
-        stakeTeardown.registerStake({ addressInfo, signingPubkey, amount })
+            + " (tx " + txHash + ") at status=valid"),
+        () => indexerDatabase.checkStake({ source: address, signingPubkey, txHash }))
 
         return { txHash, stake: stakeRow }
     },
@@ -306,8 +321,10 @@ module.exports = {
         console.log("Creating and sending STAKE V3 tx...")
         const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
+        const booking = stakeTeardown.bookBroadcastStake({ addressInfo, signingPubkey, amount, contractIndex, tick })
+
         console.log("Waiting for contract stake in the database...")
-        const stakeRow = requireRow(await indexerDatabase.waitForContractStake({
+        const stakeRow = await awaitBookedStake(booking, async () => requireRow(await indexerDatabase.waitForContractStake({
             source:         address,
             signingPubkey:  signingPubkey,
             contractIndex:  contractIndex,
@@ -315,9 +332,8 @@ module.exports = {
             txHash:         txHash,
             status:         "valid"
         }), "sendStakeV3: the contract STAKE of " + amount + " " + tick + " into contract "
-            + contractIndex + " (tx " + txHash + ") at status=valid")
-
-        stakeTeardown.registerStake({ addressInfo, signingPubkey, amount, contractIndex, tick })
+            + contractIndex + " (tx " + txHash + ") at status=valid"),
+        () => indexerDatabase.checkContractStake({ source: address, signingPubkey, contractIndex, tick, txHash }))
 
         return { txHash, stake: stakeRow }
     },

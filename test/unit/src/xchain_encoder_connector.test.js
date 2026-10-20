@@ -330,3 +330,57 @@ describe('XChainEncoderConnector', function () {
         });
     });
 });
+
+// A non-2xx refusal as axios delivers it: the status text in err.message, the
+// encoder's JSON-RPC envelope only under err.response.
+function encoderRefusal(status, statusText, code, message) {
+    return Object.assign(new Error('Request failed with status code ' + status), {
+        response: { status, statusText, data: { jsonrpc: '2.0', id: null, error: { code, message } } }
+    });
+}
+
+describe('XChainEncoderConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
+    describe('non-2xx refusals', function () {
+        it('createTx names an Unauthorized key refusal and keeps the axios status text', async function () {
+            axiosPostStub.rejects(encoderRefusal(401, 'Unauthorized', -32001, 'Unauthorized'));
+            await assert.rejects(callCreateTx, (err) => {
+                assert.match(err.message, /^Error trying to create a tx with the encoder module: encoder refused \(Unauthorized; /);
+                assert.match(err.message, /status code 401/);
+                return true;
+            });
+        });
+
+        it('createEnvelopeCancelTx names a rate-limit refusal', async function () {
+            axiosPostStub.rejects(encoderRefusal(429, 'Too Many Requests', -32029, 'Too many requests'));
+            await assert.rejects(() => connector.createEnvelopeCancelTx(CANCEL_RECORD),
+                /Error trying to create an envelope cancel tx: encoder refused \(Too many requests; .*status code 429/);
+        });
+
+        it('createTx falls back to the HTTP status when the refusal has no RPC body', async function () {
+            axiosPostStub.rejects(Object.assign(new Error('Request failed with status code 502'), {
+                response: { status: 502, statusText: 'Bad Gateway', data: '<html>' }
+            }));
+            await assert.rejects(callCreateTx, /encoder refused \(HTTP 502 Bad Gateway; /);
+        });
+
+        it('createTx keeps the bare transport message when nothing answered', async function () {
+            axiosPostStub.rejects(new Error('connect ECONNREFUSED'));
+            await assert.rejects(callCreateTx, (err) => {
+                assert.strictEqual(err.message, 'Error trying to create a tx with the encoder module: connect ECONNREFUSED');
+                return true;
+            });
+        });
+
+        it('ping keeps returning false and names the refusal', async function () {
+            const warn = sinon.stub(console, 'warn');
+            try {
+                axiosPostStub.rejects(encoderRefusal(401, 'Unauthorized', -32001, 'Unauthorized'));
+                assert.strictEqual(await connector.ping(), false);
+                assert.strictEqual(warn.callCount, 1);
+                assert.match(warn.firstCall.args[0], /refused ping: Unauthorized/);
+            } finally { warn.restore(); }
+        });
+    });
+});

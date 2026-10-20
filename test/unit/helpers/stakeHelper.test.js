@@ -134,6 +134,67 @@ describe('stakeHelper', () => {
         })
     })
 
+    // A broadcast STAKE can confirm after its wait gives up, so the booking is
+    // kept unless the indexer has already recorded the stake as rejected.
+    describe('fixture-stake booking when the valid wait gives up', () => {
+        beforeEach(() => stakeTeardown.reset())
+        afterEach(() => stakeTeardown.reset())
+
+        it('keeps a v1 stake booked when the wait times out with no row yet', async () => {
+            global.indexerDatabase.waitForStake = sinon.stub().resolves(null)
+            global.indexerDatabase.checkStake = sinon.stub().resolves(null)
+            await assert.rejects(helper.sendStakeV1(addressInfo, '1000', 'pubkeyTO1'), /at status=valid/)
+            const out = stakeTeardown.outstanding()
+            assert.strictEqual(out.length, 1)
+            assert.strictEqual(out[0].signingPubkey, 'pubkeyTO1')
+        })
+
+        it('keeps the booking when the wait and the read-back both fail', async () => {
+            global.indexerDatabase.waitForStake = sinon.stub().rejects(new Error('database never answered'))
+            global.indexerDatabase.checkStake = sinon.stub().rejects(new Error('database never answered'))
+            await assert.rejects(helper.sendStakeV1(addressInfo, '1000', 'pubkeyTO2'), /never answered/)
+            assert.strictEqual(stakeTeardown.outstanding().length, 1)
+        })
+
+        it('gives the booking back when the indexer recorded the stake as rejected', async () => {
+            global.indexerDatabase.waitForStake = sinon.stub().resolves(null)
+            global.indexerDatabase.checkStake = sinon.stub().resolves({ status: 'invalid: insufficient funds (STAKE)' })
+            await assert.rejects(helper.sendStakeV1(addressInfo, '1000', 'pubkeyTO3'))
+            assert.strictEqual(stakeTeardown.outstanding().length, 0)
+            const arg = global.indexerDatabase.checkStake.firstCall.args[0]
+            assert.deepStrictEqual(arg, { source: 'addr1', signingPubkey: 'pubkeyTO3', txHash: 'abc123' })
+        })
+
+        it('a rejected top-up leaves an already-released stake released', async () => {
+            await helper.sendStakeV1(addressInfo, '1000', 'pubkeyTO4')
+            await helper.sendUnstakeV0(addressInfo, 'pubkeyTO4')
+            global.indexerDatabase.waitForStake = sinon.stub().resolves(null)
+            global.indexerDatabase.checkStake = sinon.stub().resolves({ status: 'invalid: no active stake' })
+            await assert.rejects(helper.sendStakeV2(addressInfo, '500', 'pubkeyTO4'))
+            assert.strictEqual(stakeTeardown.outstanding().length, 0)
+        })
+
+        it('a rejected top-up leaves an outstanding stake with only its own amounts', async () => {
+            await helper.sendStakeV1(addressInfo, '1000', 'pubkeyTO5')
+            global.indexerDatabase.waitForStake = sinon.stub().resolves(null)
+            global.indexerDatabase.checkStake = sinon.stub().resolves({ status: 'invalid: AMOUNT (format)' })
+            await assert.rejects(helper.sendStakeV2(addressInfo, '500', 'pubkeyTO5'))
+            const out = stakeTeardown.outstanding()
+            assert.strictEqual(out.length, 1)
+            assert.deepStrictEqual(out[0].amounts, ['1000'])
+        })
+
+        it('keeps a contract stake booked under its contract and tick when the wait times out', async () => {
+            global.indexerDatabase.waitForContractStake = sinon.stub().resolves(null)
+            global.indexerDatabase.checkContractStake = sinon.stub().resolves(null)
+            await assert.rejects(helper.sendStakeV3(addressInfo, '10', 'pubkeyTO6', 42, 'TOK'))
+            const out = stakeTeardown.outstanding()
+            assert.strictEqual(out.length, 1)
+            assert.strictEqual(out[0].contractIndex, 42)
+            assert.strictEqual(out[0].tick, 'TOK')
+        })
+    })
+
     describe('sendDelegateV0', () => {
         it('should build correct message', async () => {
             const result = await helper.sendDelegateV0(addressInfo, 'newPubkey789')
