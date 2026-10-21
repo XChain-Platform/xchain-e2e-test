@@ -24,8 +24,11 @@ const POLICY_DIR = path.resolve(__dirname, '..', '..', 'integration', 'bridge_ra
 const CASE_FILES = ['03_at3_the_copy_is_editable_by_no_key.test.js', '08_at9_controller_bindings_stay_refused.test.js'];
 
 function handler(parentOwner) {
+    // A fresh copy has no existing child row, so the child-edit path never skips the parent check.
     return {
+        config: { NETWORK: 'regtest', COIN: 'BTC' },
         actions: { protocolChanges: { isEnabled: async () => true } },
+        resolveOnlyGetTokenInfo: async () => null,
         util: { isNull: (v) => v === null || v === undefined || v === '' },
         parentGetTokenInfo: async () => ({ OWNER: parentOwner }),
         indexerDb: { isOwnershipEscrowed: async () => false },
