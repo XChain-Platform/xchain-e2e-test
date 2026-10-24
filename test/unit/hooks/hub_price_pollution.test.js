@@ -20,7 +20,7 @@ const {
 } = require('../../helpers/xchainPriceConstants')
 
 describe('root-hook hub price cleanup', () => {
-    it('removes its fixture rows from both the disposable mirror and shared hub', async () => {
+    it('removes only its XCHAIN/USD fixture rows from the disposable mirror and shared hub', async () => {
         const databases = {
             Disposable_Hub_Mirror: [
                 { round: 888100001, pair: 'XCHAIN/USD' },
@@ -39,7 +39,10 @@ describe('root-hook hub price cleanup', () => {
             query: async (sql, args) => {
                 calls.push({ database: target.database, sql, args })
                 const before = databases[target.database]
-                databases[target.database] = before.filter(row => !args.includes(row.round))
+                const rounds = args.slice(0, -1)
+                const pair = args.at(-1)
+                databases[target.database] = before.filter(row =>
+                    !rounds.includes(row.round) || row.pair !== pair)
                 return { affectedRows: before.length - databases[target.database].length }
             },
             end: async () => { closed.push(target.database) },
@@ -50,17 +53,21 @@ describe('root-hook hub price cleanup', () => {
             { database: 'Shared_Rail_Hub' },
         ], connect)
 
-        assert.strictEqual(removed, 5)
-        assert.deepStrictEqual(databases.Disposable_Hub_Mirror, [])
+        assert.strictEqual(removed, 3)
+        assert.deepStrictEqual(databases.Disposable_Hub_Mirror,
+            [{ round: 888100002, pair: 'BTC/USD' }])
         assert.deepStrictEqual(databases.Shared_Rail_Hub,
-            [{ round: 2048, pair: 'XCHAIN/USD' }])
+            [
+                { round: 2048, pair: 'XCHAIN/USD' },
+                { round: 888100012, pair: 'BTC/USD' },
+            ])
         assert.deepStrictEqual(closed, ['Disposable_Hub_Mirror', 'Shared_Rail_Hub'])
         assert.strictEqual(calls.length, 2)
         for (const call of calls) {
             assert.match(call.sql,
-                /^DELETE FROM price_snapshots WHERE round_number IN \(\?,\?,\?,\?\)$/)
-            assert.deepStrictEqual(call.args, ROOT_HOOK_PRICE_SEED_ROUNDS.slice())
-            assert.ok(!/coin_pair\s*=/.test(call.sql))
+                /^DELETE FROM price_snapshots WHERE round_number IN \(\?,\?,\?,\?\) AND coin_pair = \?$/)
+            assert.deepStrictEqual(call.args,
+                ROOT_HOOK_PRICE_SEED_ROUNDS.concat('XCHAIN/USD'))
         }
     })
 

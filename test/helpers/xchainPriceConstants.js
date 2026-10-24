@@ -158,14 +158,16 @@ const SEED_SENTINEL_ROUNDS = Object.freeze([
 async function clearRootHookPriceSeeds(targets, createConnection){
     const connect = createConnection || require('mariadb').createConnection
     const placeholders = ROOT_HOOK_PRICE_SEED_ROUNDS.map(() => '?').join(',')
-    const sql = 'DELETE FROM price_snapshots WHERE round_number IN (' + placeholders + ')'
+    const sql = 'DELETE FROM price_snapshots WHERE round_number IN (' + placeholders +
+        ') AND coin_pair = ?'
+    const params = ROOT_HOOK_PRICE_SEED_ROUNDS.concat('XCHAIN/USD')
     let removed = 0
     const failures = []
     for (const target of targets || []) {
         let conn = null
         try {
             conn = await connect(target)
-            const result = await conn.query(sql, ROOT_HOOK_PRICE_SEED_ROUNDS.slice())
+            const result = await conn.query(sql, params)
             removed += Number(result && result.affectedRows ? result.affectedRows : 0)
         } catch (error) {
             failures.push(error)
