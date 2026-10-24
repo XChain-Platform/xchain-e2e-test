@@ -1,29 +1,18 @@
 name: CI
 
-# xchain-e2e-test vendors the canonical coin registry from xchain-hub but had
-# no CI workflow, so its copy was never drift-checked. This workflow enforces
-# that cross-repo byte-identity, and runs the repo's hermetic unit tier.
+# xchain-e2e-test vendors consensus material from six sibling repositories.
+# This workflow checks all six out without repository keys, enforces the
+# cross-repo guards, and runs the repo's hermetic unit tier.
 #
 # Until 2026-07-26 this workflow ran NO tests at all, only the drift guards,
 # so hundreds of unit cases never executed on a push and a consensus-adjacent
 # integration suite sat red for ten days with nothing to report it. The unit
 # tier below closes the larger half of that.
 #
-# The live tier (test:integration:live) is still not run here, and the reason is
-# concrete rather than "needs services": test/helpers/multiValidatorHubHelper.js
-# resolves xchain-hub SOURCE at require time and THROWS at module load if it is
-# absent, so the sibling checkout below is what makes any of this runnable at
-# all. The full `npm run ci` gate additionally needs xchain-documentation,
-# xchain-explorer, xchain-indexer, xchain-sdk and xchain-sync as siblings (each
-# for a vendored consensus-constant parity check), which is five more deploy-key
-# secrets.
-#
-# SECRETS: two dedicated read-only deploy keys, one per consumer rather than a
-# shared pair, each verified by cloning with it directly:
-#   XCHAIN_HUB_DEPLOY_KEY       -> xchain-hub, read-only
-#   XCHAIN_INDEXER_DEPLOY_KEY   -> xchain-indexer, read-only
-# Secrets in this org are per-repo, not org-wide, so neither key is inherited
-# from another workflow that references the same name.
+# The live tier (test:integration:live) is opt-in below. Unit and parity tests
+# resolve sibling source directly, so every consensus sibling must be present
+# beside this checkout. All six repositories are public and use the default
+# read-only GITHUB_TOKEN path through actions/checkout.
 # Least privilege for the default GITHUB_TOKEN: every job here only reads the repo.
 permissions:
   contents: read
@@ -51,8 +40,8 @@ concurrency:
 
 jobs:
   # The hermetic unit tier. Verified against a pristine clone with exactly this
-  # layout (clean checkout + xchain-hub and a bare xchain-indexer as siblings
-  # + npm ci in the first two), exit 0. A
+  # layout (clean checkout plus all six consensus siblings, with dependencies
+  # installed in each source-bearing tree), exit 0. A
   # handful of cases skip for want of a .env, which CI does not have either,
   # so that is expected rather than a gap opening up.
   unit:
@@ -64,10 +53,6 @@ jobs:
 
       # Sibling, NOT nested: multiValidatorHubHelper tries <repo>/xchain-hub
       # first and the checkout parent second, and the second is what resolves.
-      # The canonical repo is private pre-launch, so this uses the same
-      # read-only deploy key the drift-guards job already relies on; drop the
-      # ssh-key line when the repos flip public at launch.
-      #
       # THE SIBLING REF EXPRESSION, repeated verbatim on every checkout below.
       # In the order it tries them:
       #   1. a release head (a PR from release/*) reads that same release branch,
@@ -98,7 +83,6 @@ jobs:
         with:
           repository: XChain-Platform/xchain-hub
           ref: ${{ startsWith(github.head_ref, 'release/') && github.head_ref || ((github.base_ref == 'master' || github.ref == 'refs/heads/master') && 'master' || 'develop') }}
-          ssh-key: ${{ secrets.XCHAIN_HUB_DEPLOY_KEY }}
           path: xchain-hub
 
       - name: Fall back to xchain-hub develop when its release branch is absent
@@ -138,7 +122,6 @@ jobs:
         with:
           repository: XChain-Platform/xchain-indexer
           ref: ${{ startsWith(github.head_ref, 'release/') && github.head_ref || ((github.base_ref == 'master' || github.ref == 'refs/heads/master') && 'master' || 'develop') }}
-          ssh-key: ${{ secrets.XCHAIN_INDEXER_DEPLOY_KEY }}
           path: xchain-indexer
 
       - name: Fall back to xchain-indexer develop when its release branch is absent
@@ -218,6 +201,58 @@ jobs:
           git -C xchain-documentation fetch --no-tags --depth=1 origin +refs/heads/develop:refs/remotes/origin/develop
           git -C xchain-documentation checkout --force --detach refs/remotes/origin/develop
 
+      - name: Check out xchain-explorer
+        id: unit_explorer_checkout
+        continue-on-error: ${{ startsWith(github.head_ref, 'release/') }}
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-explorer
+          ref: ${{ startsWith(github.head_ref, 'release/') && github.head_ref || ((github.base_ref == 'master' || github.ref == 'refs/heads/master') && 'master' || 'develop') }}
+          path: xchain-explorer
+
+      - name: Fall back to xchain-explorer develop when its release branch is absent
+        if: startsWith(github.head_ref, 'release/') && steps.unit_explorer_checkout.outcome == 'failure'
+        env:
+          RELEASE_REF: ${{ github.head_ref }}
+        run: |
+          set +e
+          git -C xchain-explorer ls-remote --exit-code --heads origin "refs/heads/$RELEASE_REF" >/dev/null
+          release_status=$?
+          set -e
+          if [ "$release_status" -eq 0 ]; then
+            echo "Release branch exists but checkout failed" >&2
+            exit 1
+          fi
+          if [ "$release_status" -ne 2 ]; then exit "$release_status"; fi
+          git -C xchain-explorer fetch --no-tags --depth=1 origin +refs/heads/develop:refs/remotes/origin/develop
+          git -C xchain-explorer checkout --force --detach refs/remotes/origin/develop
+
+      - name: Check out xchain-sync
+        id: unit_sync_checkout
+        continue-on-error: ${{ startsWith(github.head_ref, 'release/') }}
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-sync
+          ref: ${{ startsWith(github.head_ref, 'release/') && github.head_ref || ((github.base_ref == 'master' || github.ref == 'refs/heads/master') && 'master' || 'develop') }}
+          path: xchain-sync
+
+      - name: Fall back to xchain-sync develop when its release branch is absent
+        if: startsWith(github.head_ref, 'release/') && steps.unit_sync_checkout.outcome == 'failure'
+        env:
+          RELEASE_REF: ${{ github.head_ref }}
+        run: |
+          set +e
+          git -C xchain-sync ls-remote --exit-code --heads origin "refs/heads/$RELEASE_REF" >/dev/null
+          release_status=$?
+          set -e
+          if [ "$release_status" -eq 0 ]; then
+            echo "Release branch exists but checkout failed" >&2
+            exit 1
+          fi
+          if [ "$release_status" -ne 2 ]; then exit "$release_status"; fi
+          git -C xchain-sync fetch --no-tags --depth=1 origin +refs/heads/develop:refs/remotes/origin/develop
+          git -C xchain-sync checkout --force --detach refs/remotes/origin/develop
+
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
@@ -225,24 +260,19 @@ jobs:
 
       # Every suite in this repo requires exactly Node 22; 18 and 24 fail, and
       # some of those failures are silent skips rather than errors.
-      # ALL FOUR trees, for the reason the live-tier job below spells out: a
+      # ALL SIX source-bearing trees, for the reason the live-tier job below spells out: a
       # helper here requires sibling source at require time, and Node resolves
       # that file's dependencies from the SIBLING's own tree, never from
       # xchain-e2e-test's. A source-only sibling therefore dies at module load
       # on the sibling's own deps (`Cannot find module 'mariadb'` for the hub),
       # which is not a missing dependency here and reads like one.
       #
-      # The indexer belongs in this loop for exactly that reason and was
-      # missing from it: a unit test reaches attestMirrorVenue, which reaches
-      # attestationHelper, which requires the indexer's stake_weighted_quorum,
-      # which requires mathjs out of the INDEXER's tree. With the indexer
-      # checked out but never installed, the whole unit tier died at load with
-      # `Cannot find module 'mathjs'`, which reads as a missing dependency in
-      # this repo and is not one. The live-tier job below already installs all
-      # the others, which is why it stayed green while this job did not.
-      - name: Install dependencies (all four trees)
+      # Each source sibling is installed so a parity guard cannot fail at module
+      # load merely because Node resolves dependencies from the sibling tree.
+      # Documentation supplies static references and has no runtime install.
+      - name: Install dependencies (all six source trees)
         run: |
-          for d in xchain-e2e-test xchain-hub xchain-indexer xchain-sdk; do
+          for d in xchain-e2e-test xchain-explorer xchain-hub xchain-indexer xchain-sdk xchain-sync; do
             ( cd "$d" && if [ -f package-lock.json ]; then npm ci; else npm install; fi )
           done
 
@@ -273,11 +303,6 @@ jobs:
   # off, bootstrap still green, the streaming cases failing for a reason nothing
   # in the output names.)
   #
-  # Should XCHAIN_INDEXER_DEPLOY_KEY ever go missing this job fails loudly
-  # rather than skipping, which is deliberate: a job that skipped itself on a
-  # missing dependency would reproduce the exact defect this exists to fix, a
-  # suite that reports success while proving nothing.
-  #
   # Verified end to end against genuinely bare clones of all three repos plus
   # npm ci in each: 20 suites, 62 passing, 0 failing, ~19 min.
   #
@@ -303,7 +328,6 @@ jobs:
         with:
           repository: XChain-Platform/xchain-hub
           ref: ${{ startsWith(github.head_ref, 'release/') && github.head_ref || ((github.base_ref == 'master' || github.ref == 'refs/heads/master') && 'master' || 'develop') }}
-          ssh-key: ${{ secrets.XCHAIN_HUB_DEPLOY_KEY }}
           path: xchain-hub
 
       - name: Fall back to xchain-hub develop when its release branch is absent
@@ -330,7 +354,6 @@ jobs:
         with:
           repository: XChain-Platform/xchain-indexer
           ref: ${{ startsWith(github.head_ref, 'release/') && github.head_ref || ((github.base_ref == 'master' || github.ref == 'refs/heads/master') && 'master' || 'develop') }}
-          ssh-key: ${{ secrets.XCHAIN_INDEXER_DEPLOY_KEY }}
           path: xchain-indexer
 
       - name: Fall back to xchain-indexer develop when its release branch is absent
@@ -376,8 +399,6 @@ jobs:
   # a drifted vendored copy previously shipped green (the byte-identity checks
   # ran only in the monorepo's manual bin/ci-all.sh). This job recreates the
   # sibling layout (self + canonical side by side) and runs the same checks.
-  # The canonical repo is private pre-launch, so its checkout uses a read-only
-  # deploy key; drop the ssh-key line when the repos flip public at launch.
   drift-guards:
     runs-on: ubuntu-latest
     steps:
@@ -392,7 +413,6 @@ jobs:
         with:
           repository: XChain-Platform/xchain-hub
           ref: ${{ startsWith(github.head_ref, 'release/') && github.head_ref || ((github.base_ref == 'master' || github.ref == 'refs/heads/master') && 'master' || 'develop') }}
-          ssh-key: ${{ secrets.XCHAIN_HUB_DEPLOY_KEY }}
           path: xchain-hub
 
       - name: Fall back to xchain-hub develop when its release branch is absent
