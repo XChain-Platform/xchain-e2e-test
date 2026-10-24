@@ -133,12 +133,16 @@ function bridgeCreditWaitMs(destCoin){
 // at 60000 ms unless IDLE_MINE_INTERVAL_MS is set, so a run must restore, never zero, it.
 const heartbeatBaselines = new Map()
 
-// Record a miner's interval once, before anything here changes it. Best-effort:
-// a miner that cannot report one is recorded as null and never restored to a guess.
+// Record a miner's boot interval once, before anything here changes it. An older
+// miner has no boot field, so its current interval remains the compatibility
+// baseline. A miner that cannot report either is never restored to a guess.
 async function noteHeartbeatBaseline(miner){
     if (heartbeatBaselines.has(miner.url)) return
     let ms = null
-    try { ms = await miner.getIdleMineInterval() }
+    try {
+        ms = await miner.getIdleMineIntervalBoot()
+        if (ms === null) ms = await miner.getIdleMineInterval()
+    }
     catch (err) { console.log('[gasHelper] could not read ' + miner.url + ' idle heartbeat: ' + err.message) }
     heartbeatBaselines.set(miner.url, { miner, ms })
 }

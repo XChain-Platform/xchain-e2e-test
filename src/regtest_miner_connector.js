@@ -355,6 +355,14 @@ class RegtestMinerConnector {
         const ms = status && status.idle_mine_interval_ms
         return Number.isInteger(ms) && ms >= 0 ? ms : null
     }
+
+    // Read the heartbeat interval resolved when the miner service booted. Older
+    // miners omit the field and return null so callers can fall back explicitly.
+    async getIdleMineIntervalBoot(){
+        const status = await this.getStatus()
+        const ms = status && status.idle_mine_interval_boot_ms
+        return Number.isInteger(ms) && ms >= 0 ? ms : null
+    }
 }
 
 module.exports = RegtestMinerConnector
