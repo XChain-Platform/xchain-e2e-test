@@ -8,6 +8,8 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
+const { isNoUtxosRefusal } = require('../../no_utxos_refusal')
+
 // Verified confirmed UTXOs from the last tx wait loop, keyed by address.
 // Passed directly to the encoder on the next call to bypass the tracker fetch,
 // preventing stale mempool-db outputs from being picked up.
@@ -18,16 +20,14 @@ const transactionState = {
 
 function internalIsStaleUtxoError(err){
     const msg = (err && err.message) || ''
+    // NO_UTXOS (the encoder's -32010 reason, carried as rpcReason): the tracker had
+    //   not yet indexed the change output from the source's previous tx. Keyed on the
+    //   reason, not the wording or the generic -32603 "Internal encoder error", which
+    //   every unrelated encoder fault also returns and which must fail the test.
     // `missingorspent`/`bad-txns-inputs`: node rejected because inputs were already spent.
     // `Missing inputs`: bitcoin/dogecoin's bare RPC error -25 message for the same condition
     //   (kept as a distinct pattern because the JSON-RPC layer can deliver either form).
-    // `no utxos ... no utxos found`: encoder asked the tracker for UTXOs but the tracker
-    //   hadn't yet indexed the change output from the source's previous tx.
-    // `Internal encoder error`: the encoder maps TypeErrors to this generic -32603
-    //   response. An empty post-filter UTXO set is raised as NO_UTXOS, so internal
-    //   details from UTXO sorting do not reach the client. Retrying is safe even if
-    //   the generic error has another cause because a persistent error is surfaced.
-    return /missingorspent|missing\s*or\s*spent|missing\s+inputs|bad-txns-inputs|no utxos.*no utxos|Internal encoder error/i.test(msg)
+    return isNoUtxosRefusal(err) || /missingorspent|missing\s*or\s*spent|missing\s+inputs|bad-txns-inputs/i.test(msg)
 }
 
 module.exports = {

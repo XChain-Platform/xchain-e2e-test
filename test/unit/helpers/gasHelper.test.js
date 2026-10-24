@@ -36,12 +36,15 @@ const relay = loadRelayMargin()
 // to refuse the disable so the restore path is exercised, not just the happy one.
 // startInterval is the heartbeat it booted with, as its status call reports it.
 function fakeMiner(name, opts = {}) {
+    const startInterval = Object.prototype.hasOwnProperty.call(opts, 'startInterval') ? opts.startInterval : 0
+    const bootInterval = Object.prototype.hasOwnProperty.call(opts, 'bootInterval') ? opts.bootInterval : startInterval
     return {
         name,
         url: 'http://' + name + ':1',
         intervals: [],
-        interval: opts.startInterval || 0,
+        interval: startInterval,
         async getIdleMineInterval() { return this.interval },
+        async getIdleMineIntervalBoot() { return bootInterval },
         async setIdleMineInterval(ms) {
             if (ms === 0 && opts.failRestore) throw new Error(name + ' refused the restore')
             this.intervals.push(ms)
@@ -596,6 +599,20 @@ describe('gasHelper', () => {
     })
 
     describe('run heartbeat baseline', () => {
+        it('restores the boot interval when an earlier run left the live interval off', async () => {
+            const a = fakeMiner('btc', { startInterval: 0, bootInterval: 60000 })
+            await helper.pinHeartbeatOff(a)
+            await helper.restoreHeartbeatBaselines()
+            assert.deepStrictEqual(a.intervals, [0, 60000])
+        })
+
+        it('falls back to the live interval when an older miner omits the boot field', async () => {
+            const a = fakeMiner('btc', { startInterval: 10000, bootInterval: null })
+            await helper.pinHeartbeatOff(a)
+            await helper.restoreHeartbeatBaselines()
+            assert.deepStrictEqual(a.intervals, [0, 10000])
+        })
+
         it('pins a miner off once per URL, keeping the first snapshot', async () => {
             const a = fakeMiner('dest', { startInterval: 60000 })
             const sameMiner = Object.assign(fakeMiner('dest'), { interval: 0 })
@@ -608,6 +625,7 @@ describe('gasHelper', () => {
 
         it('never restores a miner whose interval could not be read', async () => {
             const a = fakeMiner('btc', { startInterval: 60000 })
+            a.getIdleMineIntervalBoot = async () => { throw new Error('status unavailable') }
             a.getIdleMineInterval = async () => { throw new Error('status unavailable') }
             await helper.pinHeartbeatOff(a)
             assert.deepStrictEqual(await helper.restoreHeartbeatBaselines(), [])

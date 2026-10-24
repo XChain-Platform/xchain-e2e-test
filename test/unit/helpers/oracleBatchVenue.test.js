@@ -131,7 +131,7 @@ describe('oracleBatchVenue round anchor time', function () {
     const { loadHubModule } = require('../../helpers/multiValidatorHubHelper')
     const { roundTimeMatches } = loadHubModule('src/oracle/consensus/round_time/round_time.js')
 
-    it('is the nominal round start accepted by the hub round-time gate', function () {
+    it('is the nominal round start a follower accepts under the round-time gate', function () {
         const clock = { epochStart: 1700000000000, roundInterval: 600000 }
         for (const round of [0, 1, 1792866594]) {
             const t = roundAnchorTime(clock, round)
@@ -140,7 +140,7 @@ describe('oracleBatchVenue round anchor time', function () {
         }
     })
 
-    it('does not reuse a fixed anchor time across distant windows', function () {
+    it('never answers the old fixed base, which the gate drops', function () {
         const clock = { epochStart: 1700000000000, roundInterval: 600000 }
         assert.ok(!roundTimeMatches(1700000000, 1792866594, clock.epochStart, clock.roundInterval))
         assert.notStrictEqual(roundAnchorTime(clock, 1792866594), 1700000000)

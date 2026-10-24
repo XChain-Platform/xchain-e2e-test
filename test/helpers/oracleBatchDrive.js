@@ -237,7 +237,7 @@ function attachBatchSigners(venue, opts) {
 async function finalizeRoundNoWait(venue, index, opts) {
     opts = opts || {};
     const round      = venue.roundBase + index;
-    const anchorTime = venue.anchorTimeBase + index * 600;
+    const anchorTime = venue.anchorTimeFor(index);
     const prices     = opts.prices || submissionsForRound(venue.pairs, index);
 
     const addrs = venue.mvh.hubs.map((h) => h.getPeerManager().validatorAddr);

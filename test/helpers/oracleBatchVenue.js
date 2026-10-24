@@ -646,7 +646,9 @@ class OracleBatchVenue {
 
     // ---- driving rounds -------------------------------------------------
 
-    // Return the nominal start time accepted by the hubs' round-time gate.
+    // The BTC block time a driven round carries: since xchain-hub 51ab8aee a follower
+    // drops a PROPOSE not at the round's nominal start, so a fixed base never finalizes.
+    // The venue hubs share one OracleRound clock, so the first hub answers for all.
     anchorTimeFor(index) {
         return roundAnchorTime(this['_oracles'][0].round, this.roundBase + index);
     }
@@ -873,6 +875,7 @@ class OracleBatchVenue {
     }
 }
 
+// The nominal start of `round` on an OracleRound clock, through the hub's own helper.
 function roundAnchorTime(oracleRound, round) {
     const t = nominalRoundSeconds(round, oracleRound.epochStart, oracleRound.roundInterval);
     if (t === null) throw new Error('OracleBatchVenue: no nominal time for round ' + round);

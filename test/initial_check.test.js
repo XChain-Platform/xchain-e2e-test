@@ -42,6 +42,8 @@ const Database = require('../src/db.js')
 const CryptoNetworks = require('../src/crypto_networks')
 const cryptoHelper = require('./helpers/core/cryptoHelper')
 const { hubNodePort } = require('./helpers/hub_node_port')
+const hubMirrorTopology = require('./helpers/hubMirrorTopology')
+const xchainPriceConstants = require('./helpers/xchainPriceConstants')
 const issueHelper = require('./helpers/issueHelper')
 const gasHelper = require('./helpers/gasHelper')
 const stakeHelper = require('./helpers/stakeHelper')
@@ -268,8 +270,33 @@ async function beforeAll() {
     await phase('stake-baseline', () => runtime.captureStakeBaseline(stakeTeardown))
 }
 
+async function afterAll() {
+    let teardownError = null
+    try {
+        await teardown.afterAll({ phase, gasHelper, stakeTeardown, stakeHelper })
+    } catch (error) {
+        teardownError = error
+    }
+
+    let priceCleanupError = null
+    try {
+        const removed = await xchainPriceConstants.clearRootHookPriceSeeds(
+            hubMirrorTopology.clearTargets())
+        if (removed > 0)
+            console.log('[e2e teardown] removed ' + removed + ' root-hook price seed row(s)')
+    } catch (error) {
+        priceCleanupError = error
+    }
+
+    if (teardownError && priceCleanupError)
+        throw new AggregateError([teardownError, priceCleanupError],
+            'E2E teardown and root-hook price cleanup both failed')
+    if (teardownError) throw teardownError
+    if (priceCleanupError) throw priceCleanupError
+}
+
 exports.mochaHooks = {
     beforeAll,
     afterEach: teardown.afterEachBarrier,
-    afterAll: () => teardown.afterAll({ phase, gasHelper, stakeTeardown, stakeHelper })
+    afterAll
 }

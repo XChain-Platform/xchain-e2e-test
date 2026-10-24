@@ -98,3 +98,33 @@ describe('RegtestMinerConnector.getIdleMineInterval', function () {
         await assert.rejects(() => connector.getIdleMineInterval(), /Method not found/);
     });
 });
+
+describe('RegtestMinerConnector.getIdleMineIntervalBoot', function () {
+
+    let connector, axiosPostStub;
+
+    beforeEach(function () {
+        axiosPostStub = sinon.stub(axios, 'post');
+        connector = new RegtestMinerConnector('localhost', 18444);
+    });
+
+    afterEach(function () {
+        sinon.restore();
+    });
+
+    it('reads idle_mine_interval_boot_ms from the miner status method', async function () {
+        axiosPostStub.resolves({ data: { result: { idle_mine_interval_ms: 0, idle_mine_interval_boot_ms: 60000 } } });
+        assert.strictEqual(await connector.getIdleMineIntervalBoot(), 60000);
+        assert.strictEqual(axiosPostStub.firstCall.args[1].method, 'status');
+    });
+
+    it('reports an explicit boot value of 0', async function () {
+        axiosPostStub.resolves({ data: { result: { idle_mine_interval_boot_ms: 0 } } });
+        assert.strictEqual(await connector.getIdleMineIntervalBoot(), 0);
+    });
+
+    it('returns null when an older miner omits the field', async function () {
+        axiosPostStub.resolves({ data: { result: { idle_mine_interval_ms: 60000 } } });
+        assert.strictEqual(await connector.getIdleMineIntervalBoot(), null);
+    });
+});
