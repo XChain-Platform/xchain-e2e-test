@@ -1,3 +1,5 @@
+'use strict';
+
 /*********************************************************************
  *
  * Copyright © 2025–2026 Dankest, LLC
@@ -10,144 +12,99 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- * L3 integration: the oracle publish rail, end to end, on today's PRICE v0.
- *
- * This is the venue smoke test for `test/helpers/oracleBatchVenue.js`. It drives
- * the whole rail with nothing stubbed between the federation and the chain:
- *
- *   real PBFT price round on N in-process validators
- *     -> real OraclePublisher leader rotation
- *     -> real PRICE wire
- *     -> real encoder build + signature + node broadcast on DOGE regtest
- *     -> real block
- *     -> real decoder + indexer parse
- *     -> the `prices` row read back off the landing chain's own database
- *
- * WHY v0 WHEN THE POINT IS v2. PRICE v0 does not exist yet. Proving the rig on
- * the version that DOES exist is what makes the v2 drills a small addition
- * (finalize a window, assert one wire covers six rounds) rather than a second
- * venue build. Nothing here matches on `PRICE|0|`: the venue reports the version
- * it observed on the wire and this suite asserts against that, so the same rig
- * carries a v2 publisher unchanged.
- *
- * WHAT THE LANDED VERDICT CAN AND CANNOT BE, measured 2026-08-26. The indexer
- * resolves the `price` capability set from its own `stakes` table on every
- * chain, capability staking is BTC-only (`CAPABILITIES: {}` in
- * xchain-indexer/src/coins/DOGE.js), and the hub-mirrored capability_snapshots
- * fallback covers only `cross_chain` and `oracle_publish`. So a PRICE landing on
- * DOGE qualifies zero signers and records `invalid: insufficient signer stake`
- * no matter how good the federation's quorum was. That is a property of the
- * indexer, not of this venue, so the verdict assertion below accepts either that
- * exact string or a clean `valid`, and fails on anything else: a parse error, an
- * unknown version, a fee rejection are all real regressions this suite must
- * catch.
+ **********************************************************************
+ * L3 integration: one complete oracle batch window, end to end.
  ********************************************************************/
-
-'use strict';
 
 const dotenv = require('dotenv');
 dotenv.config();
 
 const assert = require('assert');
 const { OracleBatchVenue, ValidatorIdentity } = require('../helpers/oracleBatchVenue');
+const drive = require('../helpers/oracleBatchDrive');
 
-// Three rounds over four validators: enough that the publisher's
-// `round % publisherCount` rotation must elect three DIFFERENT leaders, which is
-// the property that distinguishes a working rail from one hub doing all the work.
 const VALIDATORS = 4;
-const ROUNDS     = 3;
-
-// PBFT quorum for N=4 under the seeded weight snapshot: every source carries
-// equal weight, so 3*tally > 2*S needs three of the four.
+const WINDOW_ROUNDS = 3;
 const MIN_SIGNATURES = 3;
-
-// OraclePublisher's own pre-enqueue ceiling, and the encoder's data-payload
-// limit it mirrors. A wire above this is dropped before it is ever queued.
+const GRACE_MS = 4000;
 const PRICE_WIRE_MAX_BYTES = 8189;
 
-// The one verdict the landing chain can legitimately give a well-formed PRICE
-// today, besides accepting it. See the header.
-const KNOWN_CAPABILITY_GAP_STATUS = 'invalid: insufficient signer stake';
-
-// Split a PRICE v0 wire back into its fields, so the assertion is "the indexer
-// stored what the publisher put on the wire" rather than "the indexer stored
-// what the test expected". Only reached when the observed wire version is 0.
-function parsePriceV0Wire(wire) {
-    const p = wire.split('|');
-    const pairCount = parseInt(p[5], 10);
-    let idx = 6;
-    const pairs = [];
-    for (let i = 0; i < pairCount; i++) pairs.push({ pair: p[idx++], price: p[idx++] });
-    const sigCount = parseInt(p[idx++], 10);
-    const sigs = [];
-    for (let i = 0; i < sigCount; i++) sigs.push({ pubkey: p[idx++].toLowerCase(), sig: p[idx++].toLowerCase() });
-    return {
-        version:        parseInt(p[1], 10),
-        round:          parseInt(p[2], 10),
-        timestamp:      parseInt(p[3], 10),
-        btcBlockHeight: parseInt(p[4], 10),
-        pairs:          pairs,
-        sigs:           sigs
-    };
-}
-
 let venue = null;
+let pinned = null;
+let signerSet = null;
 let rounds = [];
-const indexed = [];   // [{ publication, row, block }]
+let parsed = null;
+let indexed = null;
+let block = null;
+let settle = null;
 let venueSetup = null;
 let venueFailure = null;
 
 async function initializeVenue() {
+    pinned = drive.pinBatchWindow({ windowRounds: WINDOW_ROUNDS, graceMs: GRACE_MS });
     venue = new OracleBatchVenue({
-        coin:            'dogecoin',
-        network:         'regtest',
-        validatorCount:  VALIDATORS,
-        basePort:        33800,
-        expectWireVersion: 0
+        coin: 'dogecoin',
+        network: 'regtest',
+        validatorCount: VALIDATORS,
+        basePort: 33800,
+        roundBase: drive.alignedRoundBase(WINDOW_ROUNDS),
+        expectWireVersion: 0,
+        expectValidationStatus: 'valid'
     });
+
     let up = false;
     try {
         up = await venue.up();
     } catch (err) {
-        // A venue that cannot be built is a skip, not a red test, but the
-        // reason has to be printed or the skip is indistinguishable from a
-        // pass that proved nothing.
         console.log('Oracle publish venue unavailable: ' + (err && err.message));
         await venue.down();
         venue = null;
+        pinned.restore();
+        pinned = null;
         return false;
     }
     if (!up) {
         console.log('Oracle publish venue unavailable: ' + venue.unavailable);
         await venue.down();
         venue = null;
+        pinned.restore();
+        pinned = null;
         return false;
     }
 
-    rounds = await venue.finalizeRounds(ROUNDS);
+    venue.anchorTimeBase = venue.anchorTimeFor(0);
+    signerSet = drive.attachBatchSigners(venue);
+    rounds = await drive.finalizeRoundsNoWait(venue, WINDOW_ROUNDS);
+    settle = await drive.waitForPublications(venue, {
+        min: 1,
+        quietMs: 25_000,
+        timeoutMs: 300_000
+    });
 
-    for (const pub of venue.publications) {
-        const row   = await venue.readIndexedPrice(pub.txid);
-        const block = await venue.blockOf(pub.txid);
-        indexed.push({ publication: pub, row: row, block: block });
+    if (venue.publications.length > 0) {
+        parsed = drive.parsePriceBatchWire(venue.publications[0].wire);
+        indexed = await venue.readIndexedPrice(venue.publications[0].txid);
+        block = await venue.blockOf(venue.publications[0].txid);
     }
 
-    // The run's evidence, printed once: this is a live-venue suite, and a
-    // green tick with no txids proves nothing to an operator reading CI.
-    console.log('\n  --- oracle publish venue: what actually landed ---');
-    for (const r of rounds) {
-        const p = r.publication;
-        console.log('  round ' + r.round + '  leader hub ' + p.hubIndex + '  v' + p.wireVersion +
-            '  ' + p.wireBytes + 'B  ' + p.encoding + '  quorum ' + r.signatures.length + '/' +
-            VALIDATORS + '  validator_count ' + r.validatorCount + '  tx ' + p.txid);
+    console.log('\n  --- oracle batch venue: what actually landed ---');
+    console.log('  rounds driven: ' + rounds.map((r) => r.round).join(', '));
+    console.log('  publications:  ' + venue.publications.length);
+    for (const p of venue.publications) {
+        console.log('    leader hub ' + p.hubIndex + '  v' + p.wireVersion + '  ' + p.wireBytes +
+            'B  ' + p.encoding + '  tx ' + p.txid);
     }
-    for (const i of indexed) {
-        console.log('  tx ' + i.publication.txid.slice(0, 16) + '...  block ' +
-            (i.block ? i.block.height : '?') + '  action ' + i.row.action_index +
-            '  round ' + i.row.round_number + '  sigs ' + i.row.sig_count +
-            '  -> ' + i.row.status);
+    if (parsed && parsed.ok) {
+        console.log('  wire: rounds [' + parsed.firstRound + '..' + parsed.lastRound + '] count ' +
+            parsed.roundCount + '  sigs ' + parsed.sigs.length + '  anchor ' + parsed.anchor);
     }
-    console.log('  -------------------------------------------------\n');
+    if (indexed) {
+        console.log('  indexed: action ' + indexed.action_index + '  batch [' +
+            indexed.batch_first_round + '..' + indexed.batch_last_round + '] count ' +
+            indexed.round_count + '  block ' + (block ? block.height : '?') + '  -> ' + indexed.status);
+    }
+    console.log(drive.railDiagnosis(venue, signerSet));
+    console.log('  ----------------------------------------------------\n');
     return true;
 }
 
@@ -163,138 +120,123 @@ async function setUpVenue() {
 }
 
 async function tearDownVenue() {
+    if (signerSet) signerSet.stop();
     if (venue) await venue.down();
+    if (pinned) pinned.restore();
 }
 
-describe('Oracle publish venue: quorum federation on the live DOGE regtest publish rail (L3)', function () {
-    // Every round is a full PBFT round plus an encoder build, a signature, a
-    // broadcast and a confirmation on a real chain, so the budget is per-suite
-    // rather than per-round; the venue's own waits are polls that return early.
+describe('Oracle publish venue: one batch window on the live DOGE regtest rail (L3)', function () {
     this.timeout(30 * 60 * 1000);
-
     before(setUpVenue);
 
-    it('every round finalizes on a real multi-signature quorum across the whole federation', function () {
-        assert.strictEqual(rounds.length, ROUNDS, 'expected ' + ROUNDS + ' finalized rounds');
+    it('finalizes every round on a real multi-signature quorum', function () {
+        assert.strictEqual(rounds.length, WINDOW_ROUNDS,
+            'expected ' + WINDOW_ROUNDS + ' finalized rounds, got ' + rounds.length);
         for (const r of rounds) {
             const pubkeys = new Set(r.signatures.map((s) => String(s.pubkey).toLowerCase()));
             assert.ok(pubkeys.size >= MIN_SIGNATURES,
-                'round ' + r.round + ' finalized on only ' + pubkeys.size + ' distinct signer(s); ' +
-                'a weighted quorum over ' + VALIDATORS + ' equal sources needs ' + MIN_SIGNATURES);
-            assert.ok(r.validatorCount >= MIN_SIGNATURES,
-                'round ' + r.round + ' persisted validator_count ' + r.validatorCount +
-                ', below the quorum it claims to have finalized on');
-            // Deliberately NOT asserted: r.commitSet (price_snapshots.consensus_proof).
-            // Under a weighted quorum the round finalizes on the SIGNATURE tally, so a
-            // hub can store the round with only its own address in the commit set while
-            // holding all four signatures. The signature set above is the one that
-            // reaches the chain and the one an indexer re-verifies.
+                'round ' + r.round + ' finalized on only ' + pubkeys.size + ' distinct signer(s)' +
+                drive.railDiagnosis(venue, signerSet));
+            assert.strictEqual(r.anchorTime, venue.anchorTimeFor(r.round - venue.roundBase),
+                'round ' + r.round + ' did not use its nominal hub-clock timestamp');
         }
     });
 
-    it('the signatures on the wire verify against the canonical every hub signed', function () {
-        for (const r of rounds) {
-            if (r.publication.wireVersion !== 0) this.skip();
-            const parsed = parsePriceV0Wire(r.publication.wire);
-            // The canonical is built from the wire's OWN fields by the hub's own
-            // producer, so this asserts that the signatures on the wire cover the
-            // body on the wire. A wire whose signatures do not is the failure an
-            // indexer later reports as a quorum miss with no explanation.
-            const payload = venue.priceCanonical(
-                parsed.round, parsed.timestamp, parsed.pairs, parsed.btcBlockHeight);
-            let verified = 0;
-            for (const s of parsed.sigs) {
-                if (ValidatorIdentity.verify(payload, s.sig, s.pubkey)) verified++;
-            }
-            assert.ok(verified >= MIN_SIGNATURES,
-                'round ' + r.round + ': only ' + verified + '/' + parsed.sigs.length +
-                ' wire signatures verify against the round canonical');
-            assert.strictEqual(parsed.sigs.length, r.signatures.length,
-                'round ' + r.round + ': the publisher put ' + parsed.sigs.length + ' signature(s) on ' +
-                'the wire but the federation finalized on ' + r.signatures.length);
-        }
+    it('publishes exactly once after the complete window and stays settled', function () {
+        assert.ok(settle.reached,
+            'the completed window never reached the broadcast hook' + drive.railDiagnosis(venue, signerSet));
+        assert.strictEqual(venue.publications.length, 1,
+            WINDOW_ROUNDS + ' rounds produced ' + venue.publications.length + ' publications' +
+            drive.railDiagnosis(venue, signerSet));
+        assert.ok(settle.settled,
+            'the publication count did not remain stable' + drive.railDiagnosis(venue, signerSet));
+        const publishedWindows = venue.publisherStats()
+            .reduce((sum, stats) => sum + Number(stats.batchWindowsPublished || 0), 0);
+        assert.strictEqual(publishedWindows, 1,
+            'publisher stats recorded ' + publishedWindows + ' published windows');
     });
 });
 
-describe('Oracle publish venue: quorum federation on the live DOGE regtest publish rail (L3)', function () {
+describe('Oracle publish venue: one batch window on the live DOGE regtest rail (L3)', function () {
     this.timeout(30 * 60 * 1000);
     before(setUpVenue);
 
-    it('each finalized round produced exactly one publish, inside the wire ceiling', function () {
-        assert.strictEqual(venue.publications.length, ROUNDS,
-            'expected one publish per finalized round, got ' + venue.publications.length);
-        const versions = new Set();
-        for (const p of venue.publications) {
-            assert.ok(p.wireVersion !== null, 'a publish carried something that is not a PRICE wire');
-            versions.add(p.wireVersion);
-            assert.ok(p.wireBytes <= PRICE_WIRE_MAX_BYTES,
-                'wire for hub ' + p.hubIndex + ' is ' + p.wireBytes + ' bytes, over the ' +
-                PRICE_WIRE_MAX_BYTES + ' ceiling; OraclePublisher would have dead-lettered it');
-            assert.ok(/^[0-9a-f]{64}$/.test(String(p.txid)),
-                'publish did not return a real transaction id: ' + p.txid);
+    it('puts every driven round and its full price body in the single wire', function () {
+        assert.ok(parsed && parsed.ok,
+            'the publication does not parse as a PRICE batch: ' + (parsed && parsed.reason));
+        const driven = rounds.map((r) => r.round);
+        assert.deepStrictEqual(parsed.rounds.map((r) => r.round), driven);
+        assert.strictEqual(parsed.firstRound, driven[0]);
+        assert.strictEqual(parsed.lastRound, driven[driven.length - 1]);
+        assert.strictEqual(parsed.roundCount, WINDOW_ROUNDS);
+
+        for (let i = 0; i < parsed.rounds.length; i++) {
+            const expectedPairs = rounds[i].prices
+                .map((p) => ({ pair: p.coinPair, price: Number(p.price) }))
+                .sort((a, b) => (a.pair < b.pair ? -1 : a.pair > b.pair ? 1 : 0));
+            const wirePairs = parsed.rounds[i].pairs
+                .map((p) => ({ pair: p.pair, price: Number(p.price) }));
+            assert.deepStrictEqual(wirePairs, expectedPairs,
+                'wire pair data differs for round ' + rounds[i].round);
+            assert.strictEqual(parsed.rounds[i].timestamp, rounds[i].anchorTime);
         }
-        assert.strictEqual(versions.size, 1, 'the run mixed PRICE wire versions: ' + [...versions].join(', '));
+        assert.strictEqual(parsed.anchor, parsed.rounds[parsed.rounds.length - 1].btcBlockHeight);
     });
 
-    it('leader rotation spread the publishes across distinct validators', function () {
-        const leaders = new Set(venue.publications.map((p) => p.hubIndex));
-        assert.strictEqual(leaders.size, ROUNDS,
-            'expected ' + ROUNDS + ' distinct publishing validators over ' + ROUNDS +
-            ' consecutive rounds, saw hub(s) ' + [...leaders].join(', ') +
-            '; a single publisher doing every round means the rotation is not being read');
+    it('carries a distinct quorum over the batch canonical', function () {
+        const distinct = new Set(parsed.sigs.map((s) => s.pubkey));
+        assert.strictEqual(distinct.size, parsed.sigs.length, 'the batch carries a duplicate signer');
+        assert.ok(distinct.size >= MIN_SIGNATURES,
+            'the batch carries only ' + distinct.size + ' distinct signer(s)' +
+            drive.railDiagnosis(venue, signerSet));
+
+        const proposal = signerSet.proposals.find((p) => p.met === true);
+        assert.ok(proposal && proposal.canonical,
+            'no batch signing round reached quorum' + drive.railDiagnosis(venue, signerSet));
+        let verified = 0;
+        for (const sig of parsed.sigs) {
+            if (ValidatorIdentity.verify(proposal.canonical, sig.sig, sig.pubkey)) verified++;
+        }
+        assert.strictEqual(verified, parsed.sigs.length,
+            'only ' + verified + '/' + parsed.sigs.length + ' batch signatures verified');
+    });
+
+    it('keeps the one publish inside the wire ceiling', function () {
+        const publication = venue.publications[0];
+        assert.strictEqual(publication.wireVersion, 0);
+        assert.ok(publication.wireBytes <= PRICE_WIRE_MAX_BYTES,
+            'batch wire is ' + publication.wireBytes + ' bytes, over the ' + PRICE_WIRE_MAX_BYTES + ' ceiling');
+        assert.ok(/^[0-9a-f]{64}$/.test(String(publication.txid)),
+            'publish returned an invalid transaction id: ' + publication.txid);
     });
 });
 
-describe('Oracle publish venue: quorum federation on the live DOGE regtest publish rail (L3)', function () {
-    this.timeout(30 * 60 * 1000);
-    before(setUpVenue);
-
-    it('every publish was mined into a real block on the landing chain', function () {
-        for (const i of indexed) {
-            assert.ok(i.block && Number.isFinite(Number(i.block.height)),
-                'transaction ' + i.publication.txid + ' is not in a block on the ' +
-                venue.rail.code + ' node');
-        }
-    });
-
-    it('the landing chain decoded and indexed each wire byte-for-byte', function () {
-        for (const i of indexed) {
-            const p = i.publication;
-            if (p.wireVersion !== 0) this.skip();
-            const parsed = parsePriceV0Wire(p.wire);
-            assert.strictEqual(Number(i.row.version), parsed.version,
-                'indexer recorded a different PRICE version than the publisher emitted');
-            assert.strictEqual(Number(i.row.round_number), parsed.round);
-            assert.strictEqual(Number(i.row.round_timestamp), parsed.timestamp);
-            assert.strictEqual(Number(i.row.pair_count), parsed.pairs.length);
-            assert.strictEqual(Number(i.row.sig_count), parsed.sigs.length);
-            assert.deepStrictEqual(JSON.parse(i.row.pairs_json), parsed.pairs,
-                'the pairs the indexer stored are not the pairs on the wire');
-            assert.deepStrictEqual(JSON.parse(i.row.sigs_json), parsed.sigs,
-                'the signatures the indexer stored are not the signatures on the wire');
-        }
-    });
-});
-
-describe('Oracle publish venue: quorum federation on the live DOGE regtest publish rail (L3)', function () {
+describe('Oracle publish venue: one batch window on the live DOGE regtest rail (L3)', function () {
     this.timeout(30 * 60 * 1000);
     before(setUpVenue);
     after(tearDownVenue);
 
-    it('the landing chain reached a verdict that is either an accept or the known capability gap', function () {
-        for (const i of indexed) {
-            const status = String(i.row.status);
-            const ok = status === 'valid' || status === KNOWN_CAPABILITY_GAP_STATUS;
-            assert.ok(ok,
-                'tx ' + i.publication.txid + ' indexed as "' + status + '". Only two verdicts are ' +
-                'expected here: "valid", or "' + KNOWN_CAPABILITY_GAP_STATUS + '" (the ' +
-                venue.rail.code + ' indexer has no price-capability set at all, because capability ' +
-                'staking is BTC-only and the hub-mirrored capability_snapshots fallback covers only ' +
-                'cross_chain and oracle_publish). Anything else is a parse, fee or wire regression.');
-            if (status !== 'valid') {
-                console.log('  NOTE: round ' + i.row.round_number + ' landed but did not validate: ' +
-                    status + '. PRICE cannot validate on a non-BTC indexer today; see the suite header.');
-            }
-        }
+    it('mines and indexes the full batch from the wire', function () {
+        assert.ok(block && Number.isFinite(Number(block.height)),
+            'transaction ' + venue.publications[0].txid + ' is not in a block');
+        assert.strictEqual(Number(indexed.version), 0);
+        assert.strictEqual(Number(indexed.round_number), parsed.firstRound);
+        assert.strictEqual(Number(indexed.batch_first_round), parsed.firstRound);
+        assert.strictEqual(Number(indexed.batch_last_round), parsed.lastRound);
+        assert.strictEqual(Number(indexed.round_count), WINDOW_ROUNDS);
+        const storedRounds = JSON.parse(indexed.rounds_json || '[]').map((r) => ({
+            round: r.round,
+            timestamp: r.timestamp,
+            btcBlockHeight: r.btc_block_height,
+            pairs: r.pairs
+        }));
+        assert.deepStrictEqual(storedRounds, parsed.rounds);
+        assert.deepStrictEqual(JSON.parse(indexed.sigs_json || '[]'), parsed.sigs);
+    });
+
+    it('accepts the quorum-signed batch', function () {
+        assert.strictEqual(String(indexed.status), 'valid',
+            'landing chain indexed the batch as "' + indexed.status + '"' +
+            drive.railDiagnosis(venue, signerSet));
     });
 });

@@ -150,3 +150,31 @@ describe('oracleBatchVenue round anchor time', function () {
         assert.throws(() => roundAnchorTime({ epochStart: 0, roundInterval: 0 }, 3), /no nominal time/)
     })
 })
+
+describe('oracleBatchDrive window alignment', function () {
+    const { alignedRoundBase } = require('../../helpers/oracleBatchDrive')
+
+    it('starts at the current window boundary so the last round closes it', function () {
+        const originalNow = Date.now
+        Date.now = () => 1792866594000
+        try {
+            const base = alignedRoundBase(6)
+            assert.strictEqual(base % 6, 0)
+            assert.strictEqual((base + 5) % 6, 5)
+            assert.ok(Math.floor(Date.now() / 1000) - base < 6)
+        } finally {
+            Date.now = originalNow
+        }
+    })
+
+    it('clamps invalid and zero-sized windows to one round', function () {
+        const originalNow = Date.now
+        Date.now = () => 1792866594000
+        try {
+            assert.strictEqual(alignedRoundBase(0), 1792866594)
+            assert.strictEqual(alignedRoundBase('not-a-number'), 1792866594)
+        } finally {
+            Date.now = originalNow
+        }
+    })
+})
