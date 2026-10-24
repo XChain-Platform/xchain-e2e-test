@@ -85,6 +85,7 @@ const OracleConsensus  = loadHubModule('src/oracle/consensus.js');
 const OracleRound      = loadHubModule('src/oracle/round.js');
 const OraclePublisher  = loadHubModule('src/oracle/publisher.js');
 const ValidatorIdentity = loadHubModule('src/validators/identity.js');
+const { nominalRoundSeconds } = loadHubModule('src/oracle/consensus/round_time/round_time.js');
 
 // A deadline, not a settle: waitForMesh returns on the first fully-peered poll.
 const MESH_WAIT_MS = 60_000;
@@ -357,7 +358,9 @@ class OracleBatchVenue {
      * @param opts.roundBase            first round number; defaults to a run-scoped value so a
      *                                  rerun never collides with a previous run's rounds
      * @param opts.anchorHeight         BTC anchor height the rounds lock their snapshot at
-     * @param opts.anchorTimeBase       BTC block time (seconds) of the first round
+     * @param opts.anchorTimeBase       nominal BTC block time (seconds) of the first round for
+     *                                  synthetic payloads only; a driven round carries its
+     *                                  nominal start (anchorTimeFor)
      * @param opts.fundAmount           coin funded to the shared publisher wallet
      * @param opts.expectWireVersion    sharpens the failure message only; nothing branches on it
      * @param opts.expectValidationStatus  indexer verdict a drill expects, or null to record
@@ -643,6 +646,13 @@ class OracleBatchVenue {
 
     // ---- driving rounds -------------------------------------------------
 
+    // The BTC block time a driven round carries: since xchain-hub 51ab8aee a follower
+    // drops a PROPOSE not at the round's nominal start, so a fixed base never finalizes.
+    // The venue hubs share one OracleRound clock, so the first hub answers for all.
+    anchorTimeFor(index) {
+        return roundAnchorTime(this['_oracles'][0].round, this.roundBase + index);
+    }
+
     // Finalize `count` rounds, one at a time, each one carried all the way to a
     // landed transaction before the next begins.
     //
@@ -663,7 +673,7 @@ class OracleBatchVenue {
     // signatures the federation actually collected.
     async finalizeRound(index) {
         const round      = this.roundBase + index;
-        const anchorTime = this.anchorTimeBase + index * 600;
+        const anchorTime = this.anchorTimeFor(index);
         const prices     = submissionsForRound(this.pairs, index);
         const before     = this.publications.length;
 
@@ -865,8 +875,16 @@ class OracleBatchVenue {
     }
 }
 
+// The nominal start of `round` on an OracleRound clock, through the hub's own helper.
+function roundAnchorTime(oracleRound, round) {
+    const t = nominalRoundSeconds(round, oracleRound.epochStart, oracleRound.roundInterval);
+    if (t === null) throw new Error('OracleBatchVenue: no nominal time for round ' + round);
+    return t;
+}
+
 module.exports = {
     OracleBatchVenue,
+    roundAnchorTime,
     ValidatorIdentity,
     wireVersionOf,
     submissionsForRound,

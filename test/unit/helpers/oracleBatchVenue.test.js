@@ -125,3 +125,28 @@ describe('oracleBatchVenue price capability stakes', function () {
         ])
     })
 })
+
+describe('oracleBatchVenue round anchor time', function () {
+    const { roundAnchorTime } = require('../../helpers/oracleBatchVenue')
+    const { loadHubModule } = require('../../helpers/multiValidatorHubHelper')
+    const { roundTimeMatches } = loadHubModule('src/oracle/consensus/round_time/round_time.js')
+
+    it('is the nominal round start a follower accepts under the round-time gate', function () {
+        const clock = { epochStart: 1700000000000, roundInterval: 600000 }
+        for (const round of [0, 1, 1792866594]) {
+            const t = roundAnchorTime(clock, round)
+            assert.strictEqual(t, Math.floor((clock.epochStart + round * clock.roundInterval) / 1000))
+            assert.ok(roundTimeMatches(t, round, clock.epochStart, clock.roundInterval))
+        }
+    })
+
+    it('never answers the old fixed base, which the gate drops', function () {
+        const clock = { epochStart: 1700000000000, roundInterval: 600000 }
+        assert.ok(!roundTimeMatches(1700000000, 1792866594, clock.epochStart, clock.roundInterval))
+        assert.notStrictEqual(roundAnchorTime(clock, 1792866594), 1700000000)
+    })
+
+    it('refuses a round the hub clock has no time for', function () {
+        assert.throws(() => roundAnchorTime({ epochStart: 0, roundInterval: 0 }, 3), /no nominal time/)
+    })
+})
