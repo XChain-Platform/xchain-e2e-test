@@ -125,3 +125,56 @@ describe('oracleBatchVenue price capability stakes', function () {
         ])
     })
 })
+
+describe('oracleBatchVenue round anchor time', function () {
+    const { roundAnchorTime } = require('../../helpers/oracleBatchVenue')
+    const { loadHubModule } = require('../../helpers/multiValidatorHubHelper')
+    const { roundTimeMatches } = loadHubModule('src/oracle/consensus/round_time/round_time.js')
+
+    it('is the nominal round start accepted by the hub round-time gate', function () {
+        const clock = { epochStart: 1700000000000, roundInterval: 600000 }
+        for (const round of [0, 1, 1792866594]) {
+            const t = roundAnchorTime(clock, round)
+            assert.strictEqual(t, Math.floor((clock.epochStart + round * clock.roundInterval) / 1000))
+            assert.ok(roundTimeMatches(t, round, clock.epochStart, clock.roundInterval))
+        }
+    })
+
+    it('does not reuse a fixed anchor time across distant windows', function () {
+        const clock = { epochStart: 1700000000000, roundInterval: 600000 }
+        assert.ok(!roundTimeMatches(1700000000, 1792866594, clock.epochStart, clock.roundInterval))
+        assert.notStrictEqual(roundAnchorTime(clock, 1792866594), 1700000000)
+    })
+
+    it('refuses a round the hub clock has no time for', function () {
+        assert.throws(() => roundAnchorTime({ epochStart: 0, roundInterval: 0 }, 3), /no nominal time/)
+    })
+})
+
+describe('oracleBatchDrive window alignment', function () {
+    const { alignedRoundBase } = require('../../helpers/oracleBatchDrive')
+
+    it('starts at the current window boundary so the last round closes it', function () {
+        const originalNow = Date.now
+        Date.now = () => 1792866594000
+        try {
+            const base = alignedRoundBase(6)
+            assert.strictEqual(base % 6, 0)
+            assert.strictEqual((base + 5) % 6, 5)
+            assert.ok(Math.floor(Date.now() / 1000) - base < 6)
+        } finally {
+            Date.now = originalNow
+        }
+    })
+
+    it('clamps invalid and zero-sized windows to one round', function () {
+        const originalNow = Date.now
+        Date.now = () => 1792866594000
+        try {
+            assert.strictEqual(alignedRoundBase(0), 1792866594)
+            assert.strictEqual(alignedRoundBase('not-a-number'), 1792866594)
+        } finally {
+            Date.now = originalNow
+        }
+    })
+})
