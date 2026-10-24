@@ -106,6 +106,11 @@ function hubBootstrapConstant() {
 // so a retune on the hub side cannot land without this repo noticing.
 const HUB_BOOTSTRAP_SATS = '1000'
 
+const ROOT_HOOK_PRICE_SEED_ROUNDS = Object.freeze([
+    888100001, 888100002,
+    888100011, 888100012,
+])
+
 // Every synthetic round number any seeding site in the tree writes, in
 // ONE place. These used to be declared twice - the values in nativeFeeHelper and
 // a hand-maintained copy in nativeFeeOracleLive's SEED_SENTINELS - with a comment
@@ -132,8 +137,7 @@ const HUB_BOOTSTRAP_SATS = '1000'
 const SEED_SENTINEL_ROUNDS = Object.freeze([
     990001, 990002,          // dexDogeSetup + xcallDogeSetup + _ctlseed + the nativeFeeOracleLive sidecar
     990011, 990012,          // _ctlseed's wall-clock anchor (written only when the chain trails)
-    888100001, 888100002,    // nativeFeeHelper XCHAIN_ROUND / COIN_ROUND (chain-time anchor)
-    888100011, 888100012,    // nativeFeeHelper *_ROUND_NOW (wall-clock anchor, seeded when the chain clock trails)
+    ...ROOT_HOOK_PRICE_SEED_ROUNDS,
     999000000,               // dispenser FIAT Mode 1: the settlement-price seed before the create
     999000001, 999000002,    // dispenser FIAT Mode 1 / legacy Mode 2 sentinel
     999000102,               // dispenser FIAT Mode 2 cross-conversion
@@ -151,6 +155,33 @@ const SEED_SENTINEL_ROUNDS = Object.freeze([
                              // reveal (§3.5 evaluation-height rule)
 ])
 
+async function clearRootHookPriceSeeds(targets, createConnection){
+    const connect = createConnection || require('mariadb').createConnection
+    const placeholders = ROOT_HOOK_PRICE_SEED_ROUNDS.map(() => '?').join(',')
+    const sql = 'DELETE FROM price_snapshots WHERE round_number IN (' + placeholders +
+        ') AND coin_pair = ?'
+    const params = ROOT_HOOK_PRICE_SEED_ROUNDS.concat('XCHAIN/USD')
+    let removed = 0
+    const failures = []
+    for (const target of targets || []) {
+        let conn = null
+        try {
+            conn = await connect(target)
+            const result = await conn.query(sql, params)
+            removed += Number(result && result.affectedRows ? result.affectedRows : 0)
+        } catch (error) {
+            failures.push(error)
+        } finally {
+            if (conn && typeof conn.end === 'function') {
+                try { await conn.end() } catch (error) { failures.push(error) }
+            }
+        }
+    }
+    if (failures.length) throw new AggregateError(failures, 'Could not remove root-hook price seeds')
+    return removed
+}
+
 module.exports = { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM, hubBootstrapConstant,
                    HUB_BOOTSTRAP_SATS, HUB_CONSTANT_MISSING,
-                   NO_PRICE_SEED, refuseSeedIfSuppressed, SEED_SENTINEL_ROUNDS }
+                   NO_PRICE_SEED, refuseSeedIfSuppressed, SEED_SENTINEL_ROUNDS,
+                   ROOT_HOOK_PRICE_SEED_ROUNDS, clearRootHookPriceSeeds }
