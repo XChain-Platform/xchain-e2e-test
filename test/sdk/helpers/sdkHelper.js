@@ -51,6 +51,7 @@ function loadSDK() {
 
 const { XChainSDK } = loadSDK();
 const gasHelper = require('../../helpers/gasHelper');
+const { isNoUtxosRefusal } = require('../../helpers/core/no_utxos_refusal');
 
 // global.COIN / global.NETWORK are set by the initialCheck beforeAll hook;
 // fall back to raw env for standalone use.
@@ -109,9 +110,12 @@ async function fundedSdkAddress(sdk, amountToFund = 1, addressType = 'p2pkh') {
 // retries: stale/spent UTXOs, tracker lag, mempool chain limits). These are
 // timing characteristics of a fast regtest stack, not action-level failures
 // (a genuinely invalid action is rejected later by the indexer, not here).
+// Tracker lag is the encoder's NO_UTXOS reason, never the generic -32603
+// "Internal encoder error" an unrelated encoder fault also returns.
 function isTransientStackError(err) {
     const msg = (err && err.message) || '';
-    return /missingorspent|missing\s*or\s*spent|missing\s+inputs|bad-txns-inputs|no utxos|Internal encoder error|txn-mempool-conflict|too-long-mempool-chain|insufficient priority|min relay fee/i.test(msg);
+    return isNoUtxosRefusal(err) ||
+        /missingorspent|missing\s*or\s*spent|missing\s+inputs|bad-txns-inputs|txn-mempool-conflict|too-long-mempool-chain|insufficient priority|min relay fee/i.test(msg);
 }
 
 // Submit through the SDK with a quiesce+retry barrier around transient stack races.

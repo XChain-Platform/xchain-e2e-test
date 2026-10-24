@@ -36,6 +36,19 @@ function transportDetail(err) {
     return refusal ? 'encoder refused (' + refusal + '; ' + message + ')' : message
 }
 
+// The Error for a JSON-RPC error body. It keeps the encoder's code and reason
+// (rpcCode, rpcReason, rpcData) beside the message, so a caller branches on the
+// encoder's stable reason (NO_UTXOS: code -32010, data.reason) rather than on its
+// wording or on the generic -32603 every unrelated fault also returns.
+function rpcBodyError(prefix, rpcErr) {
+    const detail = rpcErr ? (rpcErr.message || JSON.stringify(rpcErr)) : 'no result and no error returned'
+    const error = new Error(prefix + detail)
+    error.rpcCode = rpcErr && typeof rpcErr.code === 'number' ? rpcErr.code : null
+    error.rpcData = rpcErr && rpcErr.data && typeof rpcErr.data === 'object' ? rpcErr.data : null
+    error.rpcReason = error.rpcData && typeof error.rpcData.reason === 'string' ? error.rpcData.reason : null
+    return error
+}
+
 class XChainEncoderConnector {
     constructor(url, port, apiKey = null) {
         this.url = "http://"+url+":"+port
@@ -103,9 +116,7 @@ class XChainEncoderConnector {
         }
 
         if (response.data.result) return response.data.result
-        const rpcErr = response.data && response.data.error
-        throw new Error('Error trying to create an envelope cancel tx: ' +
-            (rpcErr ? (rpcErr.message || JSON.stringify(rpcErr)) : 'no result and no error returned'))
+        throw rpcBodyError('Error trying to create an envelope cancel tx: ', response.data && response.data.error)
     }
 
     // `compress` is TRI-STATE and deliberately last: null/undefined leaves the
@@ -153,12 +164,9 @@ class XChainEncoderConnector {
         if (response.data.result) {
             return response.data.result;
         } else {
-            // Surface the JSON-RPC error so callers (e.g. the stale-UTXO
-            // retry helper) can pattern-match on the underlying cause.
-            // Common transient: "no utxos were provided and no utxos found".
-            const rpcErr = response.data && response.data.error;
-            const detail = rpcErr ? (rpcErr.message || JSON.stringify(rpcErr)) : 'no result and no error returned';
-            throw new Error('Error trying to create a tx with the encoder module: ' + detail);
+            // The stale-UTXO retry helpers key on rpcReason NO_UTXOS: the tracker
+            // had not yet indexed the change output the previous tx left.
+            throw rpcBodyError('Error trying to create a tx with the encoder module: ', response.data && response.data.error);
         }
     }
 }

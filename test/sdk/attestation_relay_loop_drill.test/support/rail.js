@@ -14,6 +14,8 @@
 
 'use strict';
 
+const { isNoUtxosRefusal } = require('../../../helpers/core/no_utxos_refusal');
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Raw JSON-RPC against an indexer, used for the reads the e2e Database class has
@@ -65,8 +67,13 @@ async function railQuery(rail, sql, args) {
 // encoder builds from the tracker's view, so a broadcast can reference an input
 // bitcoind has already spent or (the one that bit this drill) collide with the
 // still-unconfirmed predecessor it chained onto, which the node reports as an
-// RBF replacement at the same feerate.
-const TRANSIENT_SEND = /insufficient fee, rejecting replacement|txn-mempool-conflict|missingorspent|missing inputs|bad-txns-inputs|too-long-mempool-chain|no utxos|didn't appear in the blockchain|Internal encoder error|min relay fee/i;
+// RBF replacement at the same feerate. Tracker lag is the encoder's NO_UTXOS reason
+// (isNoUtxosRefusal), never the generic -32603 "Internal encoder error".
+const TRANSIENT_SEND = /insufficient fee, rejecting replacement|txn-mempool-conflict|missingorspent|missing inputs|bad-txns-inputs|too-long-mempool-chain|didn't appear in the blockchain|min relay fee/i;
+
+function isTransientSend(err) {
+    return isNoUtxosRefusal(err) || TRANSIENT_SEND.test(String(err && err.message));
+}
 
 // Send with a quiesce+mine barrier around those races. Must run inside withRail:
 // the connectors come from the rail so it works on either chain.
@@ -76,7 +83,7 @@ async function resilientSend(label, rail, fn, attempts = 6) {
         try { return await fn(); }
         catch (err) {
             lastErr = err;
-            if (attempt === attempts || !TRANSIENT_SEND.test(String(err && err.message))) throw err;
+            if (attempt === attempts || !isTransientSend(err)) throw err;
             console.log('    [relay-loop] ' + label + ' attempt ' + attempt + '/' + attempts +
                         ' hit a stack race (' + String(err.message).slice(0, 110) + '); quiescing');
             try {
