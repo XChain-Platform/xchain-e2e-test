@@ -270,6 +270,42 @@ async function beforeAll() {
     await phase('stake-baseline', () => runtime.captureStakeBaseline(stakeTeardown))
 }
 
+async function clearRootHookPriceSeeds(targets, coinCode, createConnection) {
+    const connect = createConnection || require('mariadb').createConnection
+    const rounds = xchainPriceConstants.ROOT_HOOK_PRICE_SEED_ROUNDS
+    const fixtures = [
+        { rounds: [rounds[0], rounds[2]], pair: 'XCHAIN/USD' },
+        { rounds: [rounds[1], rounds[3]], pair: coinCode + '/USD' },
+    ]
+    const sql = 'DELETE FROM price_snapshots WHERE round_number IN (?,?) AND coin_pair = ?'
+    let removed = 0
+    const failures = []
+
+    for (const target of targets || []) {
+        let conn = null
+        try {
+            conn = await connect(target)
+            for (const fixture of fixtures) {
+                try {
+                    const result = await conn.query(sql, fixture.rounds.concat(fixture.pair))
+                    removed += Number(result && result.affectedRows ? result.affectedRows : 0)
+                } catch (error) {
+                    failures.push(error)
+                }
+            }
+        } catch (error) {
+            failures.push(error)
+        } finally {
+            if (conn && typeof conn.end === 'function') {
+                try { await conn.end() } catch (error) { failures.push(error) }
+            }
+        }
+    }
+
+    if (failures.length) throw new AggregateError(failures, 'Could not remove root-hook price seeds')
+    return removed
+}
+
 async function afterAll() {
     let teardownError = null
     try {
@@ -280,8 +316,8 @@ async function afterAll() {
 
     let priceCleanupError = null
     try {
-        const removed = await xchainPriceConstants.clearRootHookPriceSeeds(
-            hubMirrorTopology.clearTargets())
+        const removed = await clearRootHookPriceSeeds(
+            hubMirrorTopology.clearTargets(), global.COIN_CODE)
         if (removed > 0)
             console.log('[e2e teardown] removed ' + removed + ' root-hook price seed row(s)')
     } catch (error) {
