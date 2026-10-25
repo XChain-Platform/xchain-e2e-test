@@ -125,6 +125,7 @@ async function drillDispenseLeg(ctx, rate1Btc) {
         getCoin: COIN_CODE, status: 'valid'
     }, 120000)
     assert(dispRow, 'drill dispense should index valid')
+    return dispRow
 }
 
 async function placeOppositeOrders(dexBuyer, dexSeller, coinTotal, expiration) {
@@ -171,6 +172,7 @@ async function drillDexLeg(ctx, db, rate2Btc) {
         actionIndex: Number(match.action_index), coinpayStatus: 'fulfilled'
     }, 60000)
     assert(paid, 'opposite-orientation COINPAY should fulfill')
+    return match
 }
 
 // 5. Clear the confirmation buffer, then freeze the tip. From here to
@@ -179,7 +181,7 @@ async function drillDexLeg(ctx, db, rate2Btc) {
 // 6. The frozen window must contain exactly the two drill fills, and
 //    the reproduction over them must not be winsorized (they were
 //    priced in band by construction).
-async function frozenWindowFills(ctx, db) {
+async function frozenWindowFills(ctx, db, drill) {
     const tip = await venue.mineAndIndex(db, CONFIRMATION_BUFFER + 1, 120000)
     const selection = await venue.windowFills(ctx, db, {
         referenceHeight: tip,
@@ -187,9 +189,22 @@ async function frozenWindowFills(ctx, db) {
         windowLength: WINDOW_BLOCKS
     })
     assert.strictEqual(selection.ok, true, 'reproduction selection must succeed: ' + selection.error)
-    assert.strictEqual(selection.fills.length, 2,
-        'the frozen window must contain exactly the two drill fills, got ' + selection.fills.length)
+    assert.strictEqual(selection.fills.length, 2, describeFrozenWindow(selection, tip, drill || {}))
     return selection.fills
+}
+
+// Names which drill leg the window lacks and what it holds instead, so a
+// count mismatch says whether a leg fell out of the window, never indexed
+// as a fill, or shares the window with a fill this drill did not make.
+function describeFrozenWindow(selection, tip, drill) {
+    const legs = { dispense: drill.dispenseActionIndex, dex: drill.matchActionIndex }
+    const missing = Object.entries(legs)
+        .filter(([v, ai]) => ai !== undefined && !selection.fills.some(f => f.venue === v && f.actionIndex === Number(ai)))
+        .map(([v, ai]) => v + '#' + ai)
+    const held = selection.fills.map(f => f.venue + '#' + f.actionIndex + '@' + f.blockIndex)
+    return 'the frozen window must contain exactly the two drill fills, got ' + selection.fills.length +
+        ' at tip ' + tip + ' (window ' + JSON.stringify(selection.window) + '; held [' + held.join(', ') +
+        ']; drill legs missing [' + missing.join(', ') + '])'
 }
 
 // One published round against the reproduction of ITS OWN round, or null
@@ -241,5 +256,5 @@ async function matchFreshRound(ctx, fills, cf, cfRound) {
 
 module.exports = {
     buryOldFills, awaitCarryForward, priceDrillRates, drillDispenseLeg,
-    drillDexLeg, frozenWindowFills, matchFreshRound
+    drillDexLeg, frozenWindowFills, describeFrozenWindow, matchFreshRound
 }

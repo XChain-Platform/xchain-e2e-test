@@ -57,14 +57,24 @@ const CONFIRMATION_BUFFER = 6
 // at a ten-minute cadence to reach six digits.
 const SEED_ROUND_FLOOR = 990000
 
+// The finalized rows a hub actually published. The root hook's fee seeds land in
+// the same table the snapshot route serves, at rounds above SEED_ROUND_FLOOR, so
+// sorted by round they outrank every hub round: read unfiltered, the carry-forward
+// "stabilized" on the seed (XCHAIN/USD 2.00000000) and the drill priced off a
+// seeded BTC/USD. The hub itself never sees them either, since its reference is
+// the newest finalized row strictly below its own small round number.
+function hubRounds(rows) {
+    return rows.filter(r => r.status === 'finalized' && Number(r.round_number) < SEED_ROUND_FLOOR)
+}
+
 // Page to exhaustion: this venue finalizes 37 pairs a minute, so a single
 // since_id=0 fetch stops covering the NEWEST rounds within hours of venue
 // uptime, and every consumer below reasons about the newest rounds.
-async function hubPriceSnapshots() {
+async function hubPriceSnapshots(fetchImpl = fetch) {
     const all = []
     let since = 0
     for (;;) {
-        const res = await fetch(HUB_API_URL + '/hub-db/snapshot/price_snapshots?since_id=' + since + '&limit=5000')
+        const res = await fetchImpl(HUB_API_URL + '/hub-db/snapshot/price_snapshots?since_id=' + since + '&limit=5000')
         if (!res.ok) throw new Error('hub snapshot endpoint HTTP ' + res.status)
         const body = await res.json()
         const rows = body.rows || []
@@ -73,7 +83,7 @@ async function hubPriceSnapshots() {
         since = rows[rows.length - 1].id
         if (rows.length < 5000) break
     }
-    return all.filter(r => r.status === 'finalized')
+    return hubRounds(all)
 }
 
 // Finalized rows for a pair, ascending by round. The reference reads mirror the
@@ -189,6 +199,6 @@ function skipUnlessBtc(suite) {
 module.exports = {
     COIN_CODE, QUERY_PATH, PRICE_PATH, GAS_TICK,
     WINDOW_BLOCKS, CONFIRMATION_BUFFER, SEED_ROUND_FLOOR,
-    hubPriceSnapshots, pairRows, lastBelow, minerRpc, indexerLag, mineAndIndex,
+    hubRounds, hubPriceSnapshots, pairRows, lastBelow, minerRpc, indexerLag, mineAndIndex,
     queryAdapter, loadBcmath, actionTip, chainExpiration, windowFills, skipUnlessBtc
 }

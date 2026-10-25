@@ -74,10 +74,12 @@ async function proveSupersession(ctx) {
     console.log('carry-forward stabilized at ' + cf + ' (round ' + cfRound + ')')
 
     const { rate1Btc, rate2Btc } = await steps.priceDrillRates(ctx, cf)
-    await steps.drillDispenseLeg(ctx, rate1Btc)
-    await steps.drillDexLeg(ctx, db, rate2Btc)
+    const dispRow = await steps.drillDispenseLeg(ctx, rate1Btc)
+    const match = await steps.drillDexLeg(ctx, db, rate2Btc)
 
-    const fills = await steps.frozenWindowFills(ctx, db)
+    const fills = await steps.frozenWindowFills(ctx, db, {
+        dispenseActionIndex: dispRow.action_index, matchActionIndex: match.action_index
+    })
     const matched = await steps.matchFreshRound(ctx, fills, cf, cfRound)
     console.log('supersession proven at round ' + matched.round + ': ' + cf + ' -> '
         + matched.published + ' == reproduction ' + matched.expected + ' (clamped=0)')
