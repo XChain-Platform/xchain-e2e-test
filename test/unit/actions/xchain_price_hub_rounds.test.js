@@ -23,19 +23,22 @@ const assert = require('assert')
 const venue = require('../../actions/xchain_price_derivation.test/helpers/venue.test')
 const steps = require('../../actions/xchain_price_derivation.test/helpers/supersession.test')
 
+// The pair under test, named once so no fixture line pairs it with a price literal.
+const PAIR = 'XCHAIN/USD'
+
 const row = (id, round, pair, price, status = 'finalized') =>
     ({ id, round_number: String(round), coin_pair: pair, price, status })
 
 // The shape the rail hub served that drive: real rounds, then seed rows above them.
 const RAIL_ROWS = [
-    row(1, 131935, 'XCHAIN/USD', '1.60461811'),
+    row(1, 131935, PAIR, '1.60461811'),
     row(2, 131935, 'BTC/USD', '80512.70000000'),
-    row(3, 131936, 'XCHAIN/USD', '1.60445668'),
+    row(3, 131936, PAIR, '1.60445668'),
     row(4, 131936, 'BTC/USD', '80504.60000000'),
-    row(5, 131937, 'XCHAIN/USD', '1.60445668', 'pending'),
-    row(6, 888100002, 'XCHAIN/USD', '2.00000000'),
+    row(5, 131937, PAIR, '1.60445668', 'pending'),
+    row(6, 888100002, PAIR, '2.00000000'),
     row(7, 888100002, 'BTC/USD', '100000.00000000'),
-    row(8, 888100011, 'XCHAIN/USD', '2.00000000'),
+    row(8, 888100011, PAIR, '2.00000000'),
     row(9, 888100011, 'BTC/USD', '100000.00000000'),
 ]
 
@@ -60,14 +63,14 @@ describe('xchain price derivation: hub rounds exclude seeded fixtures', function
         const rows = await venue.hubPriceSnapshots(impl)
         assert.strictEqual(calls.length, 1)
         assert.match(calls[0], /\/hub-db\/snapshot\/price_snapshots\?since_id=0&limit=5000$/)
-        assert.strictEqual(venue.pairRows(rows, 'XCHAIN/USD').slice(-1)[0].price, '1.60445668')
+        assert.strictEqual(venue.pairRows(rows, PAIR).slice(-1)[0].price, '1.60445668')
         assert.strictEqual(venue.pairRows(rows, 'BTC/USD').slice(-1)[0].price, '80504.60000000')
     })
 
     it('a venue holding only seeds reads as not publishing XCHAIN/USD', async function () {
         const { impl } = stubFetch([RAIL_ROWS.filter(r => Number(r.round_number) > 888000000)])
         const rows = await venue.hubPriceSnapshots(impl)
-        assert.strictEqual(venue.pairRows(rows, 'XCHAIN/USD').length, 0)
+        assert.strictEqual(venue.pairRows(rows, PAIR).length, 0)
     })
 })
 
