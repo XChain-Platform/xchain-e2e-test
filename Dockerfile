@@ -1,8 +1,10 @@
 # Pin Node 22 (bookworm, not alpine) by digest: the platform requires Node 22
 # exactly, and this digest's V8/ICU build matches xchain-vm's consensus runtime
 # pin, which a floating tag can drift past and fail. node:latest resolves to
-# Node 24+, which can't build isolated-vm, and alpine's musl breaks native
-# addon builds. Matches xchain-indexer's base image.
+# Node 24+, whose ABI fails checkConsensusRuntime() even though isolated-vm
+# installs there from a prebuilt binding. Not alpine: consensus parity is
+# confirmed only on glibc, and the runtime check does not detect libc.
+# Matches xchain-indexer's base image.
 FROM node:22.23.4-bookworm@sha256:2bd396628eceb5c999a6e43731fab69d5fb98b94ba9d9d90b5f64575c5178765
 
 RUN mkdir /XChainE2ETest/

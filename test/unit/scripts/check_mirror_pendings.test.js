@@ -26,7 +26,7 @@ function run (input) {
 function registerSkipReasonCases () {
     it('reports and accepts an it.skip with a stated reason', function () {
         const root = fixture({
-            'at1-example.test.js': "describe('AT1', () => { it.skip('covers the slow edge (needs 257 rounds)', () => {}) })",
+            'at1-example.test.js': "describe('AT1', () => { it.skip('covers the slow edge (needs 257 rounds to mine)', () => {}) })",
         })
         const result = run(root)
         assert.strictEqual(result.status, 0, result.stderr)
@@ -119,13 +119,13 @@ function registerCensusLineCases () {
         const root = fixture({
             'at5.test.js': [
                 "describe('AT5', function () {",
-                "  it.skip('dead-letters the window (needs 257 rounds)', function () {})",
+                "  it.skip('dead-letters the window (needs 257 rounds to mine)', function () {})",
                 '})',
             ].join('\n'),
         })
         const result = run(root)
         assert.strictEqual(result.status, 0, result.stderr)
-        assert.match(result.stdout, /PENDING .*at5\.test\.js:2 \| title: AT5 > dead-letters the window \(needs 257 rounds\) \| reason: needs 257 rounds/)
+        assert.match(result.stdout, /PENDING .*at5\.test\.js:2 \| title: AT5 > dead-letters the window \(needs 257 rounds to mine\) \| reason: needs 257 rounds to mine/)
     })
 
 }
@@ -162,6 +162,33 @@ function registerReasonSourceCases () {
         const reasoned = withComment('Regtest arms at genesis.')
         assert.strictEqual(reasoned.status, 0, reasoned.stderr)
         assert.match(reasoned.stdout, /reason: Regtest arms at genesis\./)
+    })
+
+    it('refuses a title that only contains a reason keyword, outside any parenthetical', function () {
+        const result = run(fixture({
+            'at1.test.js': "describe('AT1', () => { it.skip('holds the barrier until the window closes', () => {}) })",
+        }))
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /unreasoned pending: .*holds the barrier until the window closes/)
+    })
+
+    it('refuses a keyword parenthetical shorter than the shared three-word reason rule', function () {
+        const result = run(fixture({ 'at1.test.js': "describe('AT1', () => { it.skip('covers the slow edge (needs)', () => {}) })" }))
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /unreasoned pending: .*covers the slow edge/)
+    })
+
+    it('falls through a too-short parenthetical to the attached comment', function () {
+        const result = run(fixture({
+            'at1.test.js': [
+                "describe('AT1', () => {",
+                '  // Regtest cannot mine the 257 rounds this case waits on.',
+                "  it.skip('covers the slow edge (needs rounds)', () => {})",
+                '})',
+            ].join('\n'),
+        }))
+        assert.strictEqual(result.status, 0, result.stderr)
+        assert.match(result.stdout, /reason: Regtest cannot mine the 257 rounds/)
     })
 
     it('does not count the standard unavailable-venue hook as a pending claim', function () {
@@ -306,9 +333,9 @@ describe('check-mirror-pendings: a cross-reference names its target case', funct
 
 function registerSkipFormCases () {
     it('reports a skipped suite with a reason and refuses one without', function () {
-        const reasoned = run(fixture({ 'at3.test.js': "describe.skip('AT3 deadline (needs 257 rounds)', () => { it('a', () => {}); it('b', () => {}) })" }))
+        const reasoned = run(fixture({ 'at3.test.js': "describe.skip('AT3 deadline (needs 257 rounds to mine)', () => { it('a', () => {}); it('b', () => {}) })" }))
         assert.strictEqual(reasoned.status, 0, reasoned.stderr)
-        assert.match(reasoned.stdout, /AT3 deadline \(needs 257 rounds\) \[skipped suite, 2 cases\]/)
+        assert.match(reasoned.stdout, /AT3 deadline \(needs 257 rounds to mine\) \[skipped suite, 2 cases\]/)
         const bare = run(fixture({ 'at3.test.js': "context.skip('AT3 deadline', () => { it('a', () => {}) })" }))
         assert.strictEqual(bare.status, 1)
         assert.match(bare.stderr, /unreasoned pending: .*AT3 deadline/)
@@ -412,7 +439,7 @@ function registerCallbacklessCases () {
         const bare = run(fixture({ 'at11.test.js': "describe('AT11', () => { it('claim awaiting a lever') })" }))
         assert.strictEqual(bare.status, 1)
         assert.match(bare.stderr, /unreasoned pending: .*claim awaiting a lever/)
-        const reasoned = run(fixture({ 'at11.test.js': "describe('AT11', () => { it('claim awaiting a lever (needs 257 rounds)') })" }))
+        const reasoned = run(fixture({ 'at11.test.js': "describe('AT11', () => { it('claim awaiting a lever (needs 257 rounds to mine)') })" }))
         assert.strictEqual(reasoned.status, 0, reasoned.stderr)
         assert.match(reasoned.stdout, /PENDING .*claim awaiting a lever/)
     })
@@ -523,7 +550,7 @@ function registerHelperSkipCases () {
 function registerHelperModuleCases () {
     it('reads a helper module that is not a test file', function () {
         const root = fixture({
-            'at1.test.js': "describe('AT1', () => { it.skip('slow edge (needs 257 rounds)', () => {}) })",
+            'at1.test.js': "describe('AT1', () => { it.skip('slow edge (needs 257 rounds to mine)', () => {}) })",
             'helpers/fixture.js': 'function bootFixture (ctx, mocha) {\n    mocha.skip()\n}\n',
         })
         const result = run(root)

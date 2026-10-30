@@ -80,6 +80,7 @@ describe('AT4 corpus prologue: the seated roster is adoptable, seeded only when 
             return
         }
         console.log('AT4 corpus: the seated roster is already adoptable; the seeder is skipped')
+        // Skip the seeder case: the seated roster is already adoptable, so no reseed is needed.
         this.skip()
     })
 

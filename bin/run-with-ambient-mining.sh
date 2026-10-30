@@ -24,20 +24,35 @@ set -u
 
 INTERVAL_S="${AMBIENT_MINING_INTERVAL_S:-20}"
 
-mine_loop() { # $1 miner port, $2 pause file
+mine_loop() { # $1 coin label, $2 miner port, $3 pause file, $4 miner API key (empty when unkeyed)
+    local args out rc status body
+    args=(-s -m 10 -w '\n%{http_code}' -X POST -H 'Content-Type: application/json'
+        -d '{"jsonrpc":"2.0","id":1,"method":"generate_blocks","params":{"count":1}}')
+    # Read the key header from stdin so the key never shows in the process list.
+    if [ -n "$4" ]; then args+=(-H @-); fi
     while true; do
-        if [ ! -e "$2" ]; then
-            curl -s -m 10 -X POST -H 'Content-Type: application/json' \
-                -d '{"jsonrpc":"2.0","id":1,"method":"generate_blocks","params":{"count":1}}' \
-                "http://127.0.0.1:$1/" > /dev/null 2>&1
+        if [ ! -e "$3" ]; then
+            out=$(curl "${args[@]}" "http://127.0.0.1:$2/" <<< "x-api-key: $4")
+            rc=$?
+            status=${out##*$'\n'}
+            body=${out%$'\n'*}
+            # Log every mine that did not land (transport, non-2xx, or an error member) and keep looping.
+            if [ "$rc" -ne 0 ]; then
+                echo "run-with-ambient-mining: $1 mine failed: curl exit $rc" >&2
+            elif [ "${status#2}" = "$status" ] || [ "${#status}" -ne 3 ]; then
+                echo "run-with-ambient-mining: $1 mine refused (http $status): ${body:0:300}" >&2
+            elif [[ "$body" == *'"error"'* ]]; then
+                echo "run-with-ambient-mining: $1 mine refused: ${body:0:300}" >&2
+            fi
         fi
         sleep "$INTERVAL_S"
     done
 }
 
-mine_loop "$REGTEST_MINER_API_PORT" "$BRIDGE_RAIL_MINER_PAUSE_FILE" &
+# Resolve each miner's key as the repo's other miner clients do: <CODE>_MINER_API_KEY, then MINER_API_KEY.
+mine_loop BTC "$REGTEST_MINER_API_PORT" "$BRIDGE_RAIL_MINER_PAUSE_FILE" "${BTC_MINER_API_KEY:-${MINER_API_KEY:-}}" &
 btc_loop=$!
-mine_loop "$DOGE_REGTEST_MINER_API_PORT" "$BRIDGE_RAIL_DOGE_MINER_PAUSE_FILE" &
+mine_loop DOGE "$DOGE_REGTEST_MINER_API_PORT" "$BRIDGE_RAIL_DOGE_MINER_PAUSE_FILE" "${DOGE_MINER_API_KEY:-${MINER_API_KEY:-}}" &
 doge_loop=$!
 trap 'kill "$btc_loop" "$doge_loop" 2> /dev/null' EXIT
 

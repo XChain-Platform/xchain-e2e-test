@@ -226,13 +226,11 @@ function attachedComment (source, line) {
         .trim()
 }
 
+// Take a reason only from a keyword parenthetical in the title or an attached comment, never the bare title.
 function reasonFrom (title, comment) {
     const parenthetical = /\(([^()]*(?:driven|needs?|not\s+drivable|because|reason|see\s+comment)[^()]*)\)/i.exec(title || '')
-    if (parenthetical) return parenthetical[1].trim()
-    if (/\b(?:because|needs?|not\s+drivable|only\s+when|unless|until|driven\s+in)\b/i.test(title || '')) {
-        return title.trim()
-    }
-    // Hold an attached comment to the reason rule every check-* gate shares, not a length floor.
+    // Hold both sources to the reason rule every check-* gate shares, not a length floor.
+    if (parenthetical && reasonWords(parenthetical[1]) >= MIN_REASON_WORDS) return parenthetical[1].trim()
     return comment && reasonWords(comment) >= MIN_REASON_WORDS ? comment : ''
 }
 
