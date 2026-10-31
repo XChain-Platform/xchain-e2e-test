@@ -175,7 +175,7 @@ async function bootBothCoins (ctx) {
   ctx.ltcVenue = await withRail(ctx.ltc, async () => {
     const built = fixture.buildFamilyVenue({
       repoRoot: BUILD_ROOT, armed: ARMED, label: 'bf8ltc',
-      venue: attachedCoinVenueOpts(ctx.venue, { coin: SECOND_COIN, indexerCount: 2 }),
+      venue: { ...attachedCoinVenueOpts(ctx.venue, { coin: SECOND_COIN, indexerCount: 2 }), freshIndexers: true },
     })
     assert.strictEqual(built.venue.useEnvDecoderCredential, false, 'the LTC venue must not take the harness decoder credential')
     assert.strictEqual(built.venue.attachHubs, ctx.venue.hubs, 'the LTC indexers must follow the BTC venue\'s hubs')

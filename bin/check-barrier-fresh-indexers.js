@@ -18,7 +18,8 @@ const { optOutMarker } = require('./lib/opt_out_marker')
 
 const ROOT = path.join(__dirname, '..')
 const SCAN_DIR = path.join(ROOT, 'test', 'attestMirror', 'barrier_family')
-const BOOT = 'bootFamilyVenue'
+const CALL_BOOTS = new Set(['bootFamilyVenue', 'buildFamilyVenue'])
+const CONSTRUCTOR_BOOT = 'AttestMirrorVenue'
 const isOptOut = optOutMarker('fresh-indexers-ok', { commentText: true })
 
 // Parse the file and keep each line comment by line, so text inside strings never reads as a comment.
@@ -42,25 +43,39 @@ function forEachNode (node, visit) {
     }
 }
 
-// Return the callee name node of a bootFamilyVenue(...) or x.bootFamilyVenue(...) call, else null.
+function calleeNameNode (callee) {
+    if (callee.type === 'Identifier') return callee
+    if (callee.type === 'MemberExpression' && !callee.computed && callee.property.type === 'Identifier') return callee.property
+    return null
+}
+
+// Identify helper calls and direct constructor calls, including non-computed member forms.
 function bootCallee (node) {
-    if (node.type !== 'CallExpression') return null
-    const callee = node.callee
-    if (callee.type === 'Identifier' && callee.name === BOOT) return callee
-    if (callee.type === 'MemberExpression' && !callee.computed && callee.property.name === BOOT) return callee.property
+    if (node.type !== 'CallExpression' && node.type !== 'NewExpression') return null
+    const callee = calleeNameNode(node.callee)
+    if (!callee) return null
+    if (node.type === 'CallExpression' && CALL_BOOTS.has(callee.name)) return { callee, venueNested: true }
+    if (node.type === 'NewExpression' && callee.name === CONSTRUCTOR_BOOT) return { callee, venueNested: false }
     return null
 }
 
 function objectProperty (object, name) {
     if (!object || object.type !== 'ObjectExpression') return undefined
-    const found = object.properties.find((p) => p.type === 'Property' && !p.computed &&
-        (p.key.name === name || p.key.value === name))
-    return found ? found.value : undefined
+    let value
+    for (const property of object.properties) {
+        // A later spread can replace any earlier value. A later explicit property makes it knowable again.
+        if (property.type === 'SpreadElement') value = undefined
+        else if (property.type === 'Property' && !property.computed &&
+            (property.key.name === name || property.key.value === name)) value = property.value
+    }
+    return value
 }
 
-// Count a boot as fresh only where the helper reads the flag: venue.freshIndexers set to the literal true.
-function bootsFresh (call) {
-    const flag = objectProperty(objectProperty(call.arguments[0], 'venue'), 'freshIndexers')
+// Helper calls read venue.freshIndexers; the constructor reads freshIndexers at the top level.
+function bootsFresh (call, boot) {
+    const options = call.arguments[0]
+    const flagParent = boot.venueNested ? objectProperty(options, 'venue') : options
+    const flag = objectProperty(flagParent, 'freshIndexers')
     return !!flag && flag.type === 'Literal' && flag.value === true
 }
 
@@ -89,10 +104,10 @@ function findReusedLabelBoots (source) {
     const lines = source.split('\n')
     const findings = []
     forEachNode(parsed.ast, (node) => {
-        const callee = bootCallee(node)
-        if (!callee || bootsFresh(node)) return
-        const line = callee.loc.start.line
-        if (!hasOptOut(lines, parsed.comments, line)) findings.push({ line, label: bootLabel(node), at: callee.start })
+        const boot = bootCallee(node)
+        if (!boot || bootsFresh(node, boot)) return
+        const line = boot.callee.loc.start.line
+        if (!hasOptOut(lines, parsed.comments, line)) findings.push({ line, label: bootLabel(node), at: boot.callee.start })
     })
     return findings.sort((a, b) => a.at - b.at).map(({ line, label }) => ({ line, label }))
 }

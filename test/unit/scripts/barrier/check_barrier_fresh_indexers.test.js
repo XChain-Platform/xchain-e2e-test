@@ -82,6 +82,53 @@ describe('check-barrier-fresh-indexers labels', function () {
     })
 })
 
+describe('check-barrier-fresh-indexers direct venue boots', function () {
+    it('reports member and bare buildFamilyVenue calls without a fresh flag', function () {
+        const member = "fixture.buildFamilyVenue({ label: 'bf6mix', venue: { hubCount: 2 } })"
+        const bare = "buildFamilyVenue({ label: 'x' })"
+
+        assert.deepStrictEqual(findReusedLabelBoots(member), [{ line: 1, label: 'bf6mix' }])
+        assert.deepStrictEqual(findReusedLabelBoots(bare), [{ line: 1, label: 'x' }])
+    })
+
+    it('accepts buildFamilyVenue only when the effective nested flag is literal true', function () {
+        const fresh = "buildFamilyVenue({ label: 'x', venue: { ...venueOpts, freshIndexers: true } })"
+        const hidden = "buildFamilyVenue({ label: 'x', venue: { freshIndexers: true, ...venueOpts } })"
+        const opaque = "buildFamilyVenue({ label: 'x', venue: attachedCoinVenueOpts(owner, {}) })"
+
+        assert.deepStrictEqual(findReusedLabelBoots(fresh), [])
+        assert.deepStrictEqual(findReusedLabelBoots(hidden), [{ line: 1, label: 'x' }])
+        assert.deepStrictEqual(findReusedLabelBoots(opaque), [{ line: 1, label: 'x' }])
+    })
+
+    it('finds a direct build nested inside an async callback', function () {
+        const source = "withRail(rail, async () => { fixture.buildFamilyVenue({ label: 'nested', venue: {} }) })"
+
+        assert.deepStrictEqual(findReusedLabelBoots(source), [{ line: 1, label: 'nested' }])
+    })
+
+    it('accepts a reasoned opt-out above a direct build', function () {
+        const source = [
+            '// fresh-indexers-ok: shares the owner venue on purpose',
+            "fixture.buildFamilyVenue({ label: 'shared' })",
+        ].join('\n')
+
+        assert.deepStrictEqual(findReusedLabelBoots(source), [])
+    })
+
+    it('checks the constructor flag at the top level for bare and member forms', function () {
+        const missing = "new AttestMirrorVenue({ label: 'bare' })"
+        const member = "new venueModule.AttestMirrorVenue({ label: 'member' })"
+        const nested = "new AttestMirrorVenue({ label: 'nested', venue: { freshIndexers: true } })"
+        const fresh = "new AttestMirrorVenue({ label: 'fresh', freshIndexers: true })"
+
+        assert.deepStrictEqual(findReusedLabelBoots(missing), [{ line: 1, label: 'bare' }])
+        assert.deepStrictEqual(findReusedLabelBoots(member), [{ line: 1, label: 'member' }])
+        assert.deepStrictEqual(findReusedLabelBoots(nested), [{ line: 1, label: 'nested' }])
+        assert.deepStrictEqual(findReusedLabelBoots(fresh), [])
+    })
+})
+
 describe('check-barrier-fresh-indexers reads code, not text', function () {
     it('does not accept freshIndexers written in a comment inside the call', function () {
         const source = [
@@ -193,5 +240,10 @@ describe('check-barrier-fresh-indexers exit codes', function () {
         write('a.test.js', "bootFamilyVenue({ label: 'x' })")
         assert.strictEqual(run([]), 1)
         assert.strictEqual(run(['--report']), 0)
+    })
+
+    it('fails a direct buildFamilyVenue boot without a fresh flag', function () {
+        write('a.test.js', "fixture.buildFamilyVenue({ label: 'x' })")
+        assert.strictEqual(run([]), 1)
     })
 })

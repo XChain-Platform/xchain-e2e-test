@@ -235,7 +235,8 @@ describe('BF6 mixed-version pair: a v7 mirror parks on an older hub, and the fed
         assert.ok(ctx.states, 'the precondition did not run')
         const identities = await seatedPairIdentities()
         const built = fixture.buildFamilyVenue({
-            repoRoot: BUILD_ROOT, label: 'bf6mix', hubRepoRoots: { [OLD]: ctx.states.old.root }, venue: { hubCount: 2, indexerCount: 2, identities },
+            repoRoot: BUILD_ROOT, label: 'bf6mix', hubRepoRoots: { [OLD]: ctx.states.old.root },
+            venue: { hubCount: 2, indexerCount: 2, identities, freshIndexers: true },
         })
         ctx.venue = built.venue
         console.log('BF EVIDENCE ' + JSON.stringify(Object.assign(built.evidence, { states: ctx.states })))
