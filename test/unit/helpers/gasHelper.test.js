@@ -529,17 +529,37 @@ describe('gasHelper', () => {
     })
 
     describe('bridgeCreditWaitMs', () => {
-        it('is the destination relay margin plus the slack, read from the hub table, so it always exceeds the margin', () => {
+        it('is the destination relay margin plus checkpoint coverage and slack, read from the hub table, so it always exceeds the margin', () => {
             for (const coin of ['LTC', 'DOGE', 'BTC']) {
                 const wait = helper.bridgeCreditWaitMs(coin)
-                assert.strictEqual(wait, relay.relayMarginFloorS(coin) * 1000 + helper.BRIDGE_CREDIT_SLACK_MS, coin)
+                assert.strictEqual(wait, relay.relayMarginFloorS(coin) * 1000 +
+                    helper.CHECKPOINT_COVERAGE_MS + helper.BRIDGE_CREDIT_SLACK_MS, coin)
                 assert.ok(wait > relay.relayMarginFloorS(coin) * 1000, coin + ': the wait must exceed the margin')
             }
         })
 
-        it('lands on the margins the hub stamps, LTC 600 s and DOGE 240 s, plus 180 s slack', () => {
-            assert.strictEqual(helper.bridgeCreditWaitMs('LTC'), 780000)
-            assert.strictEqual(helper.bridgeCreditWaitMs('DOGE'), 420000)
+        it('lands on the margins the hub stamps, LTC 600 s and DOGE 240 s, plus checkpoint coverage and slack', () => {
+            assert.strictEqual(helper.bridgeCreditWaitMs('LTC'), 1020000)
+            assert.strictEqual(helper.bridgeCreditWaitMs('DOGE'), 660000)
+        })
+
+        // Release matrix run 41267102555: the hub held the BTC lock ("no finalized BTC
+        // checkpoint at or above the source block") for 180 s, finalized the transfer at
+        // +185 s, and the destination settles it once its median-time-past (about 60 s
+        // behind the wall clock at the 10 s idle cadence) passes effective_time, so the
+        // credit needed about 185 + margin + 60 s and every 780 s / 420 s wait gave up.
+        it('covers the longest proof-ready checkpoint hold seen on the regtest matrix', () => {
+            const finalizedAfterMs = 185000
+            const destinationClockLagMs = 60000
+            for (const coin of ['LTC', 'DOGE']) {
+                const needed = finalizedAfterMs + relay.relayMarginFloorS(coin) * 1000 + destinationClockLagMs
+                assert.ok(helper.bridgeCreditWaitMs(coin) > needed,
+                    coin + ': a ' + helper.bridgeCreditWaitMs(coin) + ' ms wait cannot see a credit that needs ' + needed + ' ms')
+            }
+        })
+
+        it('budgets the checkpoint coverage from the regtest cadence: confirmations plus one interval of idle blocks and two polls', () => {
+            assert.strictEqual(helper.CHECKPOINT_COVERAGE_MS, (6 + 6) * helper.IDLE_MINE_INTERVAL_MS + 2 * 60000)
         })
     })
 
