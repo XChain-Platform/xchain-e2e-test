@@ -119,13 +119,24 @@ const BRIDGE_CREDIT_SLACK_MS = 180000
 // "not proposing BTC:3 (below depth 6)" until the credit wait gave up).
 const IDLE_MINE_INTERVAL_MS = 10000
 
+// How long the hub may hold the lock before it proposes the transfer at all. A BTC leg
+// past BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION (regtest 0) is stamped with the first
+// finalized BTC checkpoint at or above its block, and the hub checkpoints the tip less
+// CHECKPOINT_CONFIRMATIONS (6) once per CHECKPOINT_INTERVAL_BLOCKS (6), judged on a
+// CHECKPOINT_POLL_MS (60 s) tick. That is 12 idle blocks of chain, plus one tick of
+// phase, plus one tick the interval latch drops when the 10 s miner lands its sixth
+// block just after the tick. Release matrix run 41267102555 held four shards 180 s
+// here and none of it was in the slack, so every credit wait gave up seconds short.
+const CHECKPOINT_COVERAGE_MS = (6 + 6) * IDLE_MINE_INTERVAL_MS + 2 * 60000
+
 // Wall-clock budget for the bridged credit on `destCoin`: the hub stamps the
 // finalized transfer with effective_time = now + relayMarginFloorS(dest)
 // (transfer_poll.js), and the destination indexer settles it at the first block
 // whose protocol time reaches that instant, so no wait shorter than the margin
-// itself can ever see the credit (LTC 600 s, DOGE 240 s).
+// itself can ever see the credit (LTC 600 s, DOGE 240 s). The margin clock starts
+// only once a checkpoint covers the lock, so the coverage wait comes first.
 function bridgeCreditWaitMs(destCoin){
-    return relayMarginFloorS(destCoin) * 1000 + BRIDGE_CREDIT_SLACK_MS
+    return relayMarginFloorS(destCoin) * 1000 + CHECKPOINT_COVERAGE_MS + BRIDGE_CREDIT_SLACK_MS
 }
 
 // The interval each miner had before the run first touched it (null = unknown), keyed
@@ -210,6 +221,7 @@ async function faucetHolder(record){
 
 module.exports = {
     BRIDGE_CREDIT_SLACK_MS,
+    CHECKPOINT_COVERAGE_MS,
     IDLE_MINE_INTERVAL_MS,
     GAS_MAX_MINT,
     RESERVOIR_BRIDGE_AMOUNT,
@@ -327,7 +339,8 @@ module.exports = {
             // slack (bridgeCreditWaitMs): the credit cannot settle before the
             // destination's protocol clock passes effective_time, which the hub
             // stamps a full margin ahead, and the idle heartbeat above is what moves
-            // that clock while nothing else is being mined.
+            // that clock while nothing else is being mined. The budget also covers
+            // the hub holding the lock until a BTC checkpoint covers it.
             const waitMs = bridgeCreditWaitMs(destCoin)
             console.log("Waiting for the bridged " + GAS_TICK + " credit on " + destCoin
                 + " (up to " + Math.round(waitMs / 1000) + " s: relay margin "
