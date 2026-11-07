@@ -180,6 +180,50 @@ describe('check-stake-teardown gate: unresolved transaction payloads', () => {
     })
 })
 
+describe('check-stake-teardown gate: unresolved transaction payload heads', () => {
+    const scanPayload = (payload) => gate.scanLines([
+        `await transactionHelper.createAndSendTransaction(tx, ${payload})`,
+    ], 'test/actions/unresolved_head.test.js')
+
+    for (const payload of [
+        "verb + '|1|' + amount",
+        '`${verb}|1|${amount}`',
+        '`${verb}|${version}|${amount}|${pk}`',
+        "(isStake ? 'STAKE' : 'UNSTAKE') + '|1|' + amount + '|' + pk",
+        "[verb, '1', amount, pk].join('|')",
+    ]) {
+        it(`flags an unresolved payload head: ${payload}`, () => {
+            const hits = scanPayload(payload)
+            assert.deepStrictEqual(hits.map(hit => hit.line), [1])
+        })
+    }
+
+    it('flags a bound payload whose head is unresolved', () => {
+        const hits = gate.scanLines([
+            "const msg = verb + '|1|' + amount",
+            'await transactionHelper.createAndSendTransaction(tx, msg)',
+        ], 'test/actions/unresolved_head.test.js')
+        assert.deepStrictEqual(hits.map(hit => hit.line), [1])
+    })
+
+    it('keeps literal non-stake heads clean', () => {
+        for (const payload of [
+            "'SEND|1|' + amount",
+            '`ISSUE|${x}`',
+            "'UNSTAKE|1|' + pk",
+            "['SEND', '1', amount].join('|')",
+        ]) assert.strictEqual(scanPayload(payload).length, 0, payload)
+    })
+
+    it('accepts a documented unresolved head that cannot be a stake', () => {
+        const hits = gate.scanLines([
+            '// stake-teardown-ok: this runtime action is restricted to non-stake fixtures.',
+            "await transactionHelper.createAndSendTransaction(tx, verb + '|1|' + amount)",
+        ], 'test/actions/unresolved_head.test.js')
+        assert.strictEqual(hits.length, 0)
+    })
+})
+
 const markedPayload = (reason) => scan([
     '// stake-teardown-ok:' + reason,
     "let msg = 'STAKE|1|1000|' + pubkey"

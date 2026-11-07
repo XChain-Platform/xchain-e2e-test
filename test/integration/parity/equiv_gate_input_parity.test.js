@@ -56,10 +56,8 @@
  * module bytes on both sides (the gate function itself), then drive each engine's
  * gate input through BOTH copies and assert they produce the IDENTICAL active/
  * inactive verdict for the same logical action at the same height, AND that the
- * gate input each side uses is a BTC block HEIGHT (not a counter). The oracle
- * case is marked PENDING so it does not red CI, while the
- * other six engines assert green. Flip the oracle `xit` to `it` once the oracle
- * gate feeds the BTC block height instead of the round counter.
+ * gate input each side uses is a BTC block HEIGHT (not a counter). All seven
+ * engines, including oracle, assert green on the BTC block-height contract.
  *
  * Spec: cross-chain quorum security spec s4.1.1.
  ********************************************************************/
@@ -127,16 +125,24 @@ it('the isEquivHeaderActive gate + activation map are byte-equal on both service
 });
 }
 
-// Shared height fixture: pick a regtest threshold and probe one block below and
-// one at/above. Both services, fed the SAME height, must return the SAME verdict.
-// (Regtest activation is 0 by default => use a synthetic threshold via direct
-// numeric comparison through both copies, since the map is shared and equal.)
-function assertHeightParity(label, height) {
-    const net = 'testnet'; // map value 0 => any finite height is "active"; semantics shared
-    const hubVerdict = hubEq.isEquivHeaderActive(height, net);
-    const idxVerdict = idxEq.isEquivHeaderActive(height, net);
-    assert.strictEqual(hubVerdict, idxVerdict,
-        label + ': hub and indexer must agree on the gate verdict for height ' + height);
+// Probe the mainnet edge and an unknown network through both service copies.
+function assertHeightParity(label) {
+    const threshold = hubEq.EQUIV_HEADER_ACTIVATION.mainnet;
+    assert.ok(Number.isInteger(threshold) && threshold > 0,
+        label + ': mainnet activation height must be a positive integer');
+    const probes = [
+        { height: threshold - 1, network: 'mainnet', expected: false },
+        { height: threshold, network: 'mainnet', expected: true },
+        { height: threshold, network: 'unknown-net', expected: false }
+    ];
+    for(const probe of probes){
+        const context = label + ': ' + probe.network + ' at height ' + probe.height;
+        const hubVerdict = hubEq.isEquivHeaderActive(probe.height, probe.network);
+        const idxVerdict = idxEq.isEquivHeaderActive(probe.height, probe.network);
+        assert.strictEqual(hubVerdict, probe.expected, context + ' hub verdict');
+        assert.strictEqual(idxVerdict, probe.expected, context + ' indexer verdict');
+        assert.strictEqual(hubVerdict, idxVerdict, context + ' service parity');
+    }
 }
 
 function registerCheckpointCase() {
@@ -149,7 +155,7 @@ function registerCheckpointCase() {
         assert.ok(idxArg, 'indexer checkpoint gate input not found');
         assert.match(hubArg, /snapshot_block/, 'hub checkpoint gate input must be snapshot_block');
         assert.match(idxArg, /SNAPSHOT_BLOCK/, 'indexer checkpoint gate input must be SNAPSHOT_BLOCK');
-        assertHeightParity('CHECKPOINT', 500);
+        assertHeightParity('CHECKPOINT');
     });
 }
 
@@ -162,7 +168,7 @@ function registerDexCase() {
         assert.ok(hubArg && idxArg, 'DEX gate inputs must be found on both sides');
         assert.match(hubArg, /snapshot_block/);
         assert.match(idxArg, /snapshot_block/);
-        assertHeightParity('DEX', 500);
+        assertHeightParity('DEX');
     });
 }
 
@@ -179,7 +185,7 @@ function registerXcallCase() {
         assert.match(hubArg, /snapshot_block/);
         assert.match(idxArgExec, /snapshot_block/);
         assert.match(idxArgCall, /snapshot_block/);
-        assertHeightParity('XCALL', 500);
+        assertHeightParity('XCALL');
     });
 }
 
@@ -210,7 +216,7 @@ function registerAttestCase() {
         assert.match(idxArg, /declaredBlock/);
         assert.match(idxSrc, /declaredBlock\s*=\s*request\s*\?\s*Number\(request\.block_index\)/,
             'indexer ATTEST declaredBlock must derive from the REQUEST block_index (height)');
-        assertHeightParity('ATTEST', 500);
+        assertHeightParity('ATTEST');
     });
 }
 
@@ -225,7 +231,7 @@ function registerNodeproofCase() {
         const idxBody = srcOf('xchain-indexer/src/actions/nodeproof.js');
         assert.match(idxBody, /snapshotBlock\s*=\s*epochHeight/,
             'indexer nodeproof snapshotBlock must be the epoch HEIGHT');
-        assertHeightParity('NODEPROOF', 500);
+        assertHeightParity('NODEPROOF');
     });
 }
 
@@ -244,7 +250,7 @@ function registerConfigCase() {
         const slashBody = srcOf('xchain-indexer/src/actions/slash.js');
         assert.match(slashBody, /XCONFIG content = snapshot_block\|config_digest/,
             'indexer CONFIG must carry the block height in-content (contract-level parity)');
-        assertHeightParity('CONFIG', 500);
+        assertHeightParity('CONFIG');
     });
 }
 
@@ -308,7 +314,7 @@ function registerOracleHeightCase() {
         assert.match(priceSrc, /buildPriceBatchPayload\((?:batch\.)?firstRound,\s*(?:batch\.)?lastRound,\s*(?:batch\.)?btcBlockHeight,\s*(?:batch\.)?rounds(,\s*[^)]+)?\)/,
             'indexer must feed the parsed btcBlockHeight into the batch canonical builder');
 
-        assertHeightParity('ORACLE', 500);
+        assertHeightParity('ORACLE');
     });
 }
 

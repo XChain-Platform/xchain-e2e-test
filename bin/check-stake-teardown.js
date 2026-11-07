@@ -467,11 +467,14 @@ function scanLines(lines, rel){
         if (args.length < 2) continue
         const payload = args[1]
         const value = expressionValue(tokens, bindings, payload.start, payload.end)
+        const joined = tokens[payload.start]?.value === '['
+            ? joinedStake(tokens, bindings, payload.start) : null
         if (isStake(value))
             add(originFor(tokens, bindings, payload.start, payload.end))
-        else if (tokens[payload.start]?.value === '[')
-            add(joinedStake(tokens, bindings, payload.start))
-        else if (value === UNKNOWN &&
+        else if (joined)
+            add(joined)
+        // Treat an unresolved head as unresolved even when the payload tail is literal.
+        else if (value.startsWith(UNKNOWN) &&
             !isStakeHelperBuilt(tokens, bindings, payload.start, payload.end) &&
             !isKnownNonStakePayload(tokens, rel, payload.start, payload.end)){
             const builder = calledBuilder(tokens, bindings, payload.start, payload.end)
