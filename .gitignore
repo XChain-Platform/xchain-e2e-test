@@ -23,6 +23,11 @@ coverage/
 reports/mutation/*.html
 reports/mutation/*.json
 
+# Stryker sandbox and log. cleanTempDir removes the sandbox on a normal exit, but a
+# killed or interrupted run leaves a full instrumented copy of src/ and test/ behind.
+.stryker-tmp/
+stryker.log
+
 # seed-contract-state.js resume files. Public facts only (contract index, txids),
 # but they are per-run per-chain state, not source.
 .seed-*.json

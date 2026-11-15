@@ -64,7 +64,7 @@ async function blockOfAction(actionIndex) {
     return rows.length ? Number(rows[0].b) : null
 }
 async function tip() { const r = await q(`SELECT MAX(block_index) h FROM blocks`, []); return Number(r[0].h) }
-async function mine(n) { try { await regtestMinerConnector.generateBlocks(n) } catch (e) {} }
+async function mine(n) { await regtestMinerConnector.generateBlocks(n) }
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
 // Seller ISSUEs and lists 100 tokens for 0.001 coin; buyer posts the matching coin

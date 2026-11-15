@@ -82,7 +82,7 @@ async function contractExists(ci) {
 function randTick(p) { let s = p; for (let i = 0; i < 6; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 const j = (x) => JSON.stringify(x, (k, v) => typeof v === 'bigint' ? Number(v) : v)
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
-async function mine(n) { try { await regtestMinerConnector.generateBlocks(n) } catch (e) {} }
+async function mine(n) { await regtestMinerConnector.generateBlocks(n) }
 function issueBindWire(tick, ctrl, cls, cooldown, unbind) {
     return `ISSUE|6|${tick}|${ctrl}|${cls}|${cooldown}|${unbind}|creorg`
 }

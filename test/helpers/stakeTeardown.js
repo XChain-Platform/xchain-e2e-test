@@ -457,6 +457,8 @@ function formatReport(state){
         lines.push('[stake teardown] no baseline was captured: the leak check did not run')
     else if(state.current && state.current.error)
         lines.push('[stake teardown] final read failed (' + state.current.error + '): the leak check did not run')
+    else if(state.finalReadAttempted && !state.current)
+        lines.push('[stake teardown] final read returned nothing (the venue could not answer): the leak check did not run')
     else if(state.diff){
         lines.push('[stake teardown] ' + cap + ': ' + state.diff.beforeCount + ' -> ' + state.diff.afterCount + ' member(s)')
         if(state.diff.grew){
@@ -538,6 +540,7 @@ async function runTeardown(opts){
     }
 
     if(pol.check && o.indexer && state.baseline && !state.baseline.error){
+        state.finalReadAttempted = true
         state.current = await readCapabilitySet({ indexer: o.indexer, capability: pol.capability })
         state.diff    = diffAgainstBaseline(state.baseline, state.current)
     }

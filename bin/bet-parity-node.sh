@@ -102,6 +102,19 @@ resolve_src_db() {
     fi
 }
 
+# Node B's database is dropped and recreated by clone_database, so it must never
+# be node A's. Names are compared case-insensitively: a case variant is the same
+# schema on a case-insensitive filesystem. Runs before any destructive step.
+refuse_when_parity_db_is_source() {
+    local want have
+    want=$(printf '%s' "$PARITY_DB" | tr '[:upper:]' '[:lower:]')
+    have=$(printf '%s' "$SRC_DB" | tr '[:upper:]' '[:lower:]')
+    if [ "$want" = "$have" ]; then
+        echo "   REFUSING: PARITY_DB ($PARITY_DB) equals node A's INDEXER_DB_NAME ($SRC_DB); up would drop node A's live database" >&2
+        exit 1
+    fi
+}
+
 # Write a 0600 client options file inside the database container, sourced from
 # the live indexer's own environment. Nothing is printed.
 write_client_cnf() {
@@ -151,6 +164,7 @@ clone_database() {
 
 cmd_up() {
     resolve_src_db
+    refuse_when_parity_db_is_source
     mkdir -p "$WORK"
     write_client_cnf
 

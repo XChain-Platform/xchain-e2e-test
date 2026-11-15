@@ -1,3 +1,13 @@
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 'use strict'
 
 const assert = require('assert')
@@ -8,6 +18,7 @@ const { EventEmitter } = require('events')
 const {
     createConfig,
     hubIdFromAddress,
+    mine,
     normalizeIndexer,
     prepare,
     quoteSql,
@@ -154,10 +165,56 @@ function registerValidationAndMappingTests () {
     })
 }
 
+function registerMineTests () {
+    const confirming = (calls) => async (url, method, params, opts) => {
+        calls.push({ url, method, params, opts })
+        return { count: params.count, hashes: [] }
+    }
+
+    it('mines every chain through the shared miner client and keeps the requested count', async function () {
+        const calls = []
+        const result = await mine(createConfig({}), 2, { minerRpc: confirming(calls) })
+        assert.deepStrictEqual(result, { blocks: 2 })
+        assert.deepStrictEqual(calls.map((call) => call.url), [
+            'http://127.0.0.1:64206', 'http://127.0.0.1:64215', 'http://127.0.0.1:64225',
+        ])
+        assert.ok(calls.every((call) => call.method === 'generate_blocks' && call.params.count === 2))
+    })
+
+    it('sends the per-chain miner key before the shared one, and none when unset', async function () {
+        const calls = []
+        await mine(createConfig({ MINER_API_KEY: 'shared', LTC_MINER_API_KEY: 'ltc-only' }), 1,
+            { minerRpc: confirming(calls) })
+        assert.deepStrictEqual(calls.map((call) => call.opts.apiKey), ['shared', 'ltc-only', 'shared'])
+        const bare = []
+        await mine(createConfig({}), 1, { minerRpc: confirming(bare) })
+        assert.ok(bare.every((call) => call.opts.apiKey === null))
+    })
+
+    it('refuses a miner reply that confirms fewer blocks than requested', async function () {
+        await assert.rejects(mine(createConfig({}), 2, {
+            minerRpc: async (url, method, params) => ({ count: params.count - 1, hashes: [] }),
+        }), /confirmed 1 of 2/)
+        await assert.rejects(mine(createConfig({}), 2, { minerRpc: async () => ({}) }), /confirmed undefined of 2/)
+    })
+
+    it('treats a reply with no result as a refusal when the real client reads it', async function () {
+        const axios = require('axios')
+        const original = axios.post
+        axios.post = async () => ({ data: { jsonrpc: '2.0', id: 1 } })
+        try {
+            await assert.rejects(mine(createConfig({}), 2), /no result/)
+        } finally {
+            axios.post = original
+        }
+    })
+}
+
 describe('two-hub failover stack driver', function () {
     registerDefaultTargetTests()
     registerIndexerStatusTests()
     registerPrepareTests()
     registerReadyFrameTests()
     registerValidationAndMappingTests()
+    registerMineTests()
 })

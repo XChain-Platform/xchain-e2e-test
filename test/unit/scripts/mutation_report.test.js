@@ -175,11 +175,20 @@ function registerRankingTests() {
             const built = script.buildReport({
                 files: {
                     'src/none.js': { language: 'javascript', source: SOURCE, mutants: [mutant({ status: 'Ignored' })] },
-                    'src/db.js':   { language: 'javascript', source: SOURCE, mutants: [mutant({ status: 'Killed' })] },
+                    'src/db/core.js': { language: 'javascript', source: SOURCE, mutants: [mutant({ status: 'Killed' })] },
                 },
             })
-            assert.strictEqual(built.perFile[0].file, 'src/db.js')
+            assert.strictEqual(built.perFile[0].file, 'src/db/core.js')
             assert.strictEqual(built.perFile[0].critical, true)
+        })
+
+        it('recognizes the database directory without matching neighboring names', () => {
+            assert.strictEqual(script.isCriticalPath('src/db/core.js'), true)
+            assert.strictEqual(script.isCriticalPath('src/db/orders.js'), true)
+            assert.strictEqual(script.isCriticalPath('src/db.js'), true)
+            assert.strictEqual(script.isCriticalPath('test/helpers/poll.js'), true)
+            assert.strictEqual(script.isCriticalPath('src/dbutils.js'), false)
+            assert.strictEqual(script.isCriticalPath('src/other.js'), false)
         })
     })
 }

@@ -7,6 +7,7 @@ const path = require('path')
 const { spawn } = require('child_process')
 const axios = require('axios')
 const WebSocket = require('ws')
+const { minerRpc } = require('../test/helpers/minerRpc')
 
 const REPO_ROOT = path.resolve(__dirname, '..')
 const HUBS = Object.freeze({
@@ -25,9 +26,9 @@ const INDEXERS = Object.freeze([
         database: 'XChain_BTC_Regtest_Control_Indexer' },
 ])
 const MINERS = Object.freeze([
-    { portEnv: 'BTC_MINER_HOST_PORT', port: 64206 },
-    { portEnv: 'LTC_MINER_HOST_PORT', port: 64215 },
-    { portEnv: 'DOGE_MINER_HOST_PORT', port: 64225 },
+    { code: 'BTC', portEnv: 'BTC_MINER_HOST_PORT', port: 64206 },
+    { code: 'LTC', portEnv: 'LTC_MINER_HOST_PORT', port: 64215 },
+    { code: 'DOGE', portEnv: 'DOGE_MINER_HOST_PORT', port: 64225 },
 ])
 const MAX_OUTPUT_BYTES = 1024 * 1024
 const PREPARE_ATTEMPTS = 15
@@ -374,18 +375,19 @@ async function queueReport (config) {
     return { reportId: state.reportId, table: 'oracle_prices', rowKey }
 }
 
-async function postMiner (config, miner, blocks, id) {
-    const response = await axios.post('http://127.0.0.1:' + hostPort(config.env, miner), {
-        jsonrpc: '2.0', id, method: 'generate_blocks', params: { count: blocks },
-    }, { timeout: 120000 })
-    const error = response.data && (response.data.error || (response.data.result && response.data.result.error))
-    if (error) throw new Error('miner rejected generate_blocks: ' + JSON.stringify(error))
+async function postMiner (config, miner, blocks, dependencies = {}) {
+    const rpc = dependencies.minerRpc || minerRpc
+    const apiKey = setting(config.env, miner.code + '_MINER_API_KEY', setting(config.env, 'MINER_API_KEY', null))
+    const result = await rpc('http://127.0.0.1:' + hostPort(config.env, miner), 'generate_blocks',
+        { count: blocks }, { timeout: 120000, apiKey })
+    if (!result || Number(result.count) !== blocks)
+        throw new Error('miner confirmed ' + (result && result.count) + ' of ' + blocks + ' ' + miner.code + ' blocks')
 }
 
-async function mine (config, rawBlocks) {
+async function mine (config, rawBlocks, dependencies) {
     const blocks = Number(rawBlocks)
     if (!Number.isInteger(blocks) || blocks < 1) throw new Error('mine requires a positive block count')
-    await Promise.all(MINERS.map((miner, index) => postMiner(config, miner, blocks, index + 1)))
+    await Promise.all(MINERS.map((miner) => postMiner(config, miner, blocks, dependencies)))
     return { blocks }
 }
 
@@ -434,7 +436,7 @@ async function main () {
 
 module.exports = {
     HUBS, INDEXERS, MINERS, createConfig, followedValue, hubIdFromAddress,
-    normalizeIndexer, reportsForHub, quoteSql, readReadyFrame, prepare, dispatch,
+    normalizeIndexer, reportsForHub, quoteSql, readReadyFrame, prepare, dispatch, mine,
 }
 
 if (require.main === module) {

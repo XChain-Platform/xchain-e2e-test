@@ -71,6 +71,27 @@ describe('cryptoHelper getNewFundedAddress funding retry', () => {
         assert.strictEqual(sendFunds.callCount, 1)
     })
 
+    it('fails at once on the miner refusals no retry can change', async () => {
+        const refusals = [
+            'There was a problem sending funds: send_funds amount 500 exceeds the configured per-call maximum of 100 coins (MINER_SEND_FUNDS_MAX_AMOUNT)',
+            'There was a problem sending funds: Invalid address: must be a non-empty string',
+            'There was a problem sending funds: Invalid amount: must be a positive finite number',
+        ]
+        for (const message of refusals) {
+            sendFunds.resetHistory()
+            sendFunds.rejects(new Error(message))
+            await assert.rejects(fund, (err) => err.message === message)
+            assert.strictEqual(sendFunds.callCount, 1, message)
+        }
+    })
+
+    it('still retries the miner node-send failure that carries a cause', async () => {
+        sendFunds.onCall(0).rejects(new Error('There was a problem sending funds: Error sending funds to address'))
+        sendFunds.onCall(1).resolves('tx2')
+        await fund()
+        assert.strictEqual(sendFunds.callCount, 2)
+    })
+
     it('backs off with doubling delays', async () => {
         cryptoHelper.fundingRetryBaseDelayMs = 20
         const clock = sinon.spy(global, 'setTimeout')

@@ -91,7 +91,7 @@ async function slashEvents(contractIndex){
         FROM slash_events se WHERE se.target_contract_index=? ORDER BY se.id`, [contractIndex])
 }
 async function tip(){ const r = await q(`SELECT MAX(block_index) h FROM blocks`, []); return Number(r[0].h) }
-async function mine(n){ try { await regtestMinerConnector.generateBlocks(n) } catch(e){} }
+async function mine(n) { await regtestMinerConnector.generateBlocks(n) }
 async function sleep(ms){ return new Promise(r => setTimeout(r, ms)) }
 const num = (x) => Number(x)
 // Sum of still-active stake (not deactivated as of `atTip`).

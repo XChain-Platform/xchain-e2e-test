@@ -31,6 +31,8 @@
 // Hermetic: the scanner reads source text, so no regtest venue is involved.
 
 const assert  = require('assert')
+const fs = require('fs')
+const path = require('path')
 const scanner = require('../../../bin/check-sleep-flake')
 
 const linesOf = (src) => scanner.scanSource(src, 'fixture.js').hits.map((h) => h.line)
@@ -363,4 +365,20 @@ describe('check-sleep-flake scanner', function () {
     registerRatchetTests()
     registerLocalHelperTests()
     registerMemberFormTests()
+})
+
+describe('wait remediation guidance', function () {
+    it('points all live guidance at the split wait implementation', function () {
+        const root = path.join(__dirname, '../../..')
+        const files = [
+            'bin/check-sleep-flake.js',
+            'bin/check-wait-swallow.js',
+            'CONTRIBUTING.md',
+        ]
+        const sources = files.map((file) => fs.readFileSync(path.join(root, file), 'utf8'))
+        const combined = sources.join('\n')
+        assert.doesNotMatch(combined, /src\/db\.js[^\n]*\b(?:_waitFor|waitForX)\b/)
+        assert.strictEqual((combined.match(/src\/db\/wait\.js/g) || []).length, 4)
+        assert.strictEqual((combined.match(/src\/db\/\*\.js/g) || []).length, 4)
+    })
 })

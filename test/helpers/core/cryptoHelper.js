@@ -86,15 +86,20 @@ module.exports = {
     // 60s matches every other waitForTx caller.
     fundingTxWaitMs: 60000,
 
-    // The regtest miner occasionally answers send_funds with a transient
-    // "problem sending funds" error. Retry only that, up to three attempts
-    // with exponential backoff; any other error propagates immediately.
+    // The regtest miner wraps every send_funds failure in a "problem sending
+    // funds" error. Retry those, up to three attempts with exponential backoff,
+    // except the refusals the miner makes by rule (per-call maximum, invalid
+    // address or amount): they cannot succeed on a later attempt. Any other
+    // error propagates immediately. A send that timed out on the node but still
+    // landed is retried too, so a retried address may be funded twice.
+    deterministicFundingRefusal: /exceeds the configured per-call maximum|Invalid (address|amount)/i,
     async sendFundsWithRetry(address, amount){
         for (let attempt = 1; ; attempt++){
             try {
                 return await regtestMinerConnector.sendFunds(address, amount)
             } catch (err) {
-                const transient = /problem sending funds/i.test((err && err.message) || String(err))
+                const message = (err && err.message) || String(err)
+                const transient = /problem sending funds/i.test(message) && !this.deterministicFundingRefusal.test(message)
                 if (!transient || attempt >= this.fundingMaxAttempts){
                     throw err
                 }

@@ -105,7 +105,7 @@ function mochaArgsFor(script) {
 }
 
 function notRunReason(name, script) {
-    if (script.includes('./test/initialCheck.test.js') || LIVE_RAIL_WITHOUT_INITIAL_CHECK.has(name)) {
+    if (script.includes('./test/initial_check.test.js') || LIVE_RAIL_WITHOUT_INITIAL_CHECK.has(name)) {
         return 'drives a live rail';
     }
     return null;

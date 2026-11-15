@@ -32,6 +32,7 @@ const fs   = require('fs')
 const path = require('path')
 
 const CRITICAL_PATH_PATTERNS = [
+  'src/db/',
   'src/db.js',
   'test/helpers/',
 ]
