@@ -118,6 +118,14 @@ async function rawFile(actionIndex) {
     return await global.explorerConnector.getFileRaw(coinPrefix(), actionIndex);
 }
 
+async function actionDetail(sdk, actionIndex) {
+    const response = await sdk.getAction(actionIndex);
+    let detail = response && response.data !== undefined ? response.data : response;
+    if (Array.isArray(detail)) detail = detail[0];
+    if (detail && detail.action && typeof detail.action === 'object') detail = detail.action;
+    return detail;
+}
+
 function planParts(plan) {
     if (!plan || !Array.isArray(plan.parts)) throw new Error('multipart plan has no parts array');
     return plan.parts;
@@ -213,13 +221,13 @@ describe('[sdk rail] multipart FILE', function () {
     });
 
     after(function () {
-        if (completed !== 4) return;
+        if (completed !== 5) return;
         fs.mkdirSync(path.dirname(REPORT_FILE), { recursive: true });
         fs.writeFileSync(REPORT_FILE, [
             '# Multipart file rail drive',
             '',
             'multipart file drive: PASS',
-            'passing=4',
+            'passing=5',
             'failing=0',
             '',
         ].join('\n'));
@@ -238,6 +246,28 @@ describe('[sdk rail] multipart FILE', function () {
             expect(served.status).to.equal(200);
             expect(served.body).to.have.length(source.length);
             expect(sha256(served.body)).to.equal(sha256(source));
+        });
+        completed++;
+    });
+
+    it('publishes a three-part envelope file from a P2PKH source with manifest ownership preserved', async function () {
+        await chainRail.withRail(bitcoinRail, async () => {
+            const sdk = makeSdk({ network: 'bitcoin-regtest', compactAddresses: false });
+            const owner = await fundedSdkAddress(sdk, 5, 'p2pkh');
+            const source = crypto.randomBytes(THREE_PART_BYTES);
+            const meta = { name: 'p2pkh-random.bin', type: 'application/octet-stream' };
+            const result = await publishAndComplete(sdk, owner, source, meta);
+
+            expect(planParts(result.plan)).to.have.length(3);
+            const served = await rawFile(result.actionIndex);
+            expect(served.status).to.equal(200);
+            expect(sha256(served.body)).to.equal(sha256(source));
+
+            const manifest = await actionDetail(sdk, result.actionIndex);
+            expect(manifest).to.be.an('object');
+            expect(manifest.action).to.equal('FILE');
+            expect(Number(manifest.action_format)).to.equal(1);
+            expect(manifest.source).to.equal(owner.address);
         });
         completed++;
     });
