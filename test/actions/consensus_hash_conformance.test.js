@@ -249,13 +249,17 @@ function requireRootsOrSkip(context, { rootRows, rootsRequired, tip }) {
 }
 
 // Light-client state-commitment conformance (SPV spec sec.4-5). The follower
-// recomputes block_merkle_root from src/stateCommitment.js + db.getBlockLeafRows
-// (a copy of BlockHasher's 10 content queries) and HALTs if it disagrees with the
-// indexer's committed root. The unit golden locks the leaf serialization, but only
-// THIS test exercises getBlockLeafRows + computeBlockMerkleRoot against REAL
-// indexer-produced rows. Read-only: it never writes the indexer DB. (balances_root
-// is covered by the persistent-vs-reference unit fuzz + the live regtest follower
-// halt drill; stakes_root/state_root verification are deferred in Phase 1.)
+// recomputes block_merkle_root with src/state_commitment/index.js over
+// db.getBlockLeafRows, a copy of BlockHasher's 10 content queries, and HALTs if
+// it disagrees with the indexer's committed root. The unit golden locks the leaf
+// serialization, but only THIS test exercises getBlockLeafRows plus
+// computeBlockMerkleRoot against REAL indexer-produced rows. Read-only: it never
+// writes the indexer DB.
+//
+// Scope: this file compares the three block hashes and block_merkle_root only.
+// It does not compare balances_root, stakes_root, or state_root. Those roots are
+// checked live by the follower's apply-time VERIFY_STATE_COMMITMENT halt, where
+// state_root folds stakes_root.
 describe('state commitment conformance: sync block_merkle_root == indexer committed roots @regression', function () {
     this.timeout(0);
     let fixture;
