@@ -72,11 +72,13 @@ const TICKS = { A: 'MPTA', B: 'MPTB' };
 
 // A far-future expiration so the MATCHED orders + the DISPENSER never expire
 // during the run (only the one deliberately-unmatchable order does; see below).
-// Kept UNDER the MySQL TIMESTAMP / Y2038 ceiling (2147483647): the decoder's
-// `dispensers` expiration column is a unixtime TIMESTAMP and truncates larger
-// values ("Truncated incorrect unixtime value"): a real Y2038 schema limit in
-// the decoder (the `orders` column tolerates bigger). 2033 is far above every
-// pinned corpus block time, so nothing but the unmatchable order expires.
+// Both the decoder and indexer store `dispensers.expiration` as BIGINT
+// UNSIGNED, so no Y2038 ceiling applies. The decoder's migration check refuses
+// to run on a TIMESTAMP, DATETIME or narrower column, so no venue can still
+// truncate a larger value. FAR_FUTURE stays a fixed literal because every chain
+// must store the same expiration for the parity compare to hold. 2033 is far
+// above every pinned corpus block time, so nothing but the unmatchable order
+// expires.
 const FAR_FUTURE = 2000000000; // 2033-05-18 UTC, fixed (not Date.now()).
 
 // Pinned block-timestamp schedule for the corpus phase. Each corpus step i is

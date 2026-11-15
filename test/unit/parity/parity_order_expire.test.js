@@ -23,8 +23,7 @@
 //      identical block on every chain;
 //   3. the order is BORN OPEN (its own block time < ORDER_EXPIRE_AT);
 //   4. the matched orders + the DISPENSER use FAR_FUTURE, which stays above
-//      every pinned block time AND under the decoder's Y2038 ceiling, so only
-//      the unmatchable order ever expires;
+//      every pinned block time, so only the unmatchable order ever expires;
 //   5. pinned times are the fixed PIN_T0 + i*PIN_STEP schedule (identical
 //      constants -> byte-identical block_time across chains), monotonic, and
 //      PIN_T0 sits above the current wall-clock era (a forward jump).
@@ -34,9 +33,6 @@ const {
     FAR_FUTURE, PIN_T0, PIN_STEP, ORDER_EXPIRE_AT, UNMATCHABLE_ORDER_INDEX, corpus,
 } = require('../../parity/helpers/parityCorpus');
 
-// The decoder's `dispensers.expiration` is a unixtime TIMESTAMP column; values
-// above this truncate. FAR_FUTURE must stay under it (mirrors parityCorpus).
-const Y2038_CEILING = 2147483647;
 // A loose wall-clock floor: PIN_T0 must be a genuinely future timestamp so the
 // jump off the real-time baseline is forward. 2026-01-01 UTC.
 const WALLCLOCK_FLOOR = 1767225600;
@@ -60,8 +56,10 @@ describe('parity corpus ORDER_EXPIRE determinism contract', function () {
         const lastTime = steps[steps.length - 1].time;
         expect(lastTime, 'the last pinned block must stay below FAR_FUTURE so the dispenser survives')
             .to.be.lessThan(FAR_FUTURE);
-        expect(FAR_FUTURE, 'FAR_FUTURE must stay under the decoder Y2038 ceiling')
-            .to.be.at.most(Y2038_CEILING);
+        // No upper bound applies to FAR_FUTURE: the decoder and indexer both
+        // store dispensers.expiration as BIGINT UNSIGNED, and the decoder's
+        // migration check refuses to run on a TIMESTAMP or narrower column, so
+        // no value this corpus could pick is truncated on any venue.
     });
 });
 
