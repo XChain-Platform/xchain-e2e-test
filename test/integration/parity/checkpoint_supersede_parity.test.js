@@ -133,3 +133,53 @@ describe('checkpoint supersession segment: every checkpoint builder agrees', fun
             assert.strictEqual(s, WRAP + RAW, name + ' drifted from the spec bytes for a plain checkpoint');
     });
 });
+
+// Each builder on its own, so one throw cannot hide whether the next one throws.
+const BUILDERS = {
+    hub:         (cp) => StateCheckpointEngine.canonicalCheckpoint(cp),
+    sdk:         (cp) => sdkCheckpoint.canonicalCheckpoint(cp),
+    sync:        (cp) => syncCheckpoint.canonicalCheckpoint(cp),
+    explorer:    (cp) => explorerProofs.canonicalCheckpointString(cp),
+    recovery:    (cp) => recoveryCheckpointCanonical(cp),
+    mirroredRow: (cp) => checkpointSource.checkpointCanonical(cp)
+};
+
+// The last BTC:testnet height before CHECKPOINT_SUPERSEDE arms, per the shared vectors.
+const BELOW_GATE = { network: 'testnet', snapshot_block: 158556 };
+const BELOW_GATE_RAW = RAW.replace('|regtest|', '|testnet|').replace('|7|100|', '|7|158556|');
+const BELOW_GATE_WRAP = WRAP.replace('|regtest|', '|testnet|');
+
+describe('checkpoint supersession segment: every builder refuses it below the gate', function () {
+    it('testnet holds the supersede gate off at 158556 and arms it at 158557', function () {
+        assert.strictEqual(idxRegistry.activeAt(SUPERSEDE_KEY, 'testnet', 'BTC', 158556, null), false,
+            'premise: the supersede gate must be off at testnet@158556 or the refusal cases pin nothing');
+        assert.strictEqual(idxRegistry.activeAt(SUPERSEDE_KEY, 'testnet', 'BTC', 158557, null), true,
+            'premise: the supersede gate must arm at testnet@158557');
+    });
+
+    it('each builder throws on a row carrying supersession fields below the gate', function () {
+        for (const [name, build] of Object.entries(BUILDERS)) {
+            const cp = row(Object.assign({}, BELOW_GATE, { supersedes_from: 400, rules_digest: DIGEST }));
+            assert.throws(() => build(cp), /not active/,
+                name + ' signed supersession fields below the CHECKPOINT_SUPERSEDE gate');
+        }
+    });
+
+    // A plain row at this height still yields a canonical, so a null one is the refusal itself.
+    it('the SDK and sync verifiers build no canonical for that row and reject it', function () {
+        const cp = () => row(Object.assign({}, BELOW_GATE, { supersedes_from: 400, rules_digest: DIGEST }));
+        for (const [name, mod] of [['sdk', sdkCheckpoint], ['sync', syncCheckpoint]]) {
+            const plain = mod.verifyCheckpoint(row(BELOW_GATE), []);
+            assert.strictEqual(plain.canonical, BELOW_GATE_WRAP + BELOW_GATE_RAW, name + ' premise: a plain row builds');
+            const refused = mod.verifyCheckpoint(cp(), []);
+            assert.strictEqual(refused.canonical, null, name + ' built a canonical for a below-gate superseding row');
+            assert.strictEqual(refused.valid, false, name + ' verified a below-gate superseding row');
+        }
+    });
+
+    it('a plain row at the same height builds identical bytes in every builder', function () {
+        for (const [name, build] of Object.entries(BUILDERS))
+            assert.strictEqual(build(row(BELOW_GATE)), BELOW_GATE_WRAP + BELOW_GATE_RAW,
+                name + ' drifted from the spec bytes for a plain checkpoint below the supersede gate');
+    });
+});
