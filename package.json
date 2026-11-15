@@ -51,6 +51,7 @@
     "test:cpbridge": "mocha --timeout 0 --exit --require ./test/initial_check.test.js test/contracts/counterparty_bridge.test.js",
     "test:codec": "mocha --no-config --timeout 30000 --exit 'test/codec/**/*.test.js'",
     "test:sdk": "mocha --timeout 0 --exit --require ./test/initial_check.test.js 'test/sdk/**/*.sdk.test.js'",
+    "test:sdk:multipart-file": "COIN=bitcoin NETWORK=regtest mocha --timeout 0 --exit --require ./test/initial_check.test.js test/sdk/multipartFile.rail.js",
     "test:sdk:chunked": "mocha --timeout 0 --exit --require ./test/initial_check.test.js test/sdk/chunkedDeploy.sdk.test.js",
     "test:sdk:chunked-reorg": "mocha --timeout 0 --exit --require ./test/initial_check.test.js test/sdk/chunkedDeployReorgDrill.sdk.test.js test/sdk/chunkedDeployReorgDrill.sdk.test/01_orphan_and_replay.test.js test/sdk/chunkedDeployReorgDrill.sdk.test/02_reassembled_contract.test.js",
     "test:sdk:chunked-deferred": "mocha --timeout 0 --exit --require ./test/initial_check.test.js test/sdk/chunkedDeployDeferred.sdk.test.js test/sdk/chunkedDeployDeferred.sdk.test/01_at2_reverse_block_order.test.js test/sdk/chunkedDeployDeferred.sdk.test/02_at4_duplicate_pieces.test.js test/sdk/chunkedDeployDeferred.sdk.test/03_at5_reordered_replay.test.js",
