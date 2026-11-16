@@ -22,6 +22,7 @@ const {
     makeSdk, submit, fundedSdkAddress, fundedGasAddress, uniqueTick, submitOpts,
 } = require('./helpers/sdkHelper');
 const chainRail = require('../helpers/chainRail');
+const { orphanWithEmptyBlocks } = require('../helpers/bridge_rail_venue/reorg_controls');
 
 const REPORT_FILE = path.resolve(process.cwd(), '../tmp/logs/rail-drives/multipart-file-drive.md');
 const CARRIER = 'TAPROOT';
@@ -308,55 +309,6 @@ describe('[sdk rail] multipart FILE', function () {
         completed++;
     });
 
-    it('keeps a reverse, duplicate, withheld bitcoin file pending and follows its last part through a reorg', async function () {
-        await chainRail.withRail(bitcoinRail, async () => {
-            const sdk = makeSdk({ network: 'bitcoin-regtest', compactAddresses: false });
-            const owner = await fundedSdkAddress(sdk, 5, 'p2wpkh');
-            const source = crypto.randomBytes(FOUR_PART_BYTES);
-            const meta = { name: 'reverse-duplicate.bin', type: 'application/octet-stream' };
-            const plan = await sdk.planMultipartFile(source, meta, { carrier: CARRIER });
-            expect(planParts(plan)).to.have.length(4);
-
-            const manifest = await sendManifest(sdk, owner, plan, meta);
-            const actionIndex = actionIndexOf(manifest.indexed);
-            expect(actionIndex).to.be.a('number');
-
-            for (const partIndex of [3, 2, 3, 0]) {
-                const sent = await sendPart(sdk, owner, plan, partIndex);
-                expect(sent.indexed.status).to.equal('valid');
-            }
-
-            const pending = await readAssembly(sdk, actionIndex);
-            expect(assemblyStatus(pending)).to.equal('pending');
-            expect((await rawFile(actionIndex)).status).to.equal(409);
-
-            const lastPart = await sendPart(sdk, owner, plan, 1);
-            expect(lastPart.indexed.status).to.equal('valid');
-            await mineUntilComplete(sdk, actionIndex);
-            expect((await rawFile(actionIndex)).status).to.equal(200);
-
-            const lastPartBlock = Number(lastPart.indexed.block_index);
-            expect(lastPartBlock).to.be.a('number').and.greaterThan(0);
-            const lastPartHash = await global.nodeConnector.getBlockHash(lastPartBlock);
-            await global.regtestMinerConnector.pauseMining();
-            try {
-                await global.nodeConnector.invalidateBlock(lastPartHash);
-                await waitForAssemblyStatus(sdk, actionIndex, 'pending');
-                expect((await rawFile(actionIndex)).status).to.equal(409);
-
-                await global.nodeConnector.reconsiderBlock(lastPartHash);
-                await waitForAssemblyStatus(sdk, actionIndex, 'complete');
-                const restored = await rawFile(actionIndex);
-                expect(restored.status).to.equal(200);
-                expect(sha256(restored.body)).to.equal(sha256(source));
-            } finally {
-                await global.regtestMinerConnector.resumeMining();
-                await waitForIndexerTip();
-            }
-        });
-        completed++;
-    });
-
     it('publishes a three-part gated bitcoin file whose ciphertext decrypts to the source', async function () {
         await chainRail.withRail(bitcoinRail, async () => {
             const sdk = makeSdk({ network: 'bitcoin-regtest', compactAddresses: false });
@@ -411,6 +363,63 @@ describe('[sdk rail] multipart FILE', function () {
             const served = await rawFile(result.actionIndex);
             expect(served.status).to.equal(200);
             expect(sha256(served.body)).to.equal(sha256(source));
+        });
+        completed++;
+    });
+
+    // Last: each rollback stalls the bitcoin indexer's hub mirror for minutes, which
+    // starves a later case's gas mint.
+    it('keeps a reverse, duplicate, withheld bitcoin file pending and follows its last part through a reorg', async function () {
+        await chainRail.withRail(bitcoinRail, async () => {
+            const sdk = makeSdk({ network: 'bitcoin-regtest', compactAddresses: false });
+            const owner = await fundedSdkAddress(sdk, 5, 'p2wpkh');
+            const source = crypto.randomBytes(FOUR_PART_BYTES);
+            const meta = { name: 'reverse-duplicate.bin', type: 'application/octet-stream' };
+            const plan = await sdk.planMultipartFile(source, meta, { carrier: CARRIER });
+            expect(planParts(plan)).to.have.length(4);
+
+            const manifest = await sendManifest(sdk, owner, plan, meta);
+            const actionIndex = actionIndexOf(manifest.indexed);
+            expect(actionIndex).to.be.a('number');
+
+            for (const partIndex of [3, 2, 3, 0]) {
+                const sent = await sendPart(sdk, owner, plan, partIndex);
+                expect(sent.indexed.status).to.equal('valid');
+            }
+
+            const pending = await readAssembly(sdk, actionIndex);
+            expect(assemblyStatus(pending)).to.equal('pending');
+            expect((await rawFile(actionIndex)).status).to.equal(409);
+
+            const lastPart = await sendPart(sdk, owner, plan, 1);
+            expect(lastPart.indexed.status).to.equal('valid');
+            await mineUntilComplete(sdk, actionIndex);
+            expect((await rawFile(actionIndex)).status).to.equal(200);
+
+            const lastPartBlock = Number(lastPart.indexed.block_index);
+            expect(lastPartBlock).to.be.a('number').and.greaterThan(0);
+            const lastPartHash = await global.nodeConnector.getBlockHash(lastPartBlock);
+            await global.regtestMinerConnector.pauseMining();
+            try {
+                // A lower node tip reads to the decoder as node lag, not a reorg, so the
+                // orphaned branch is replaced by a longer chain of empty blocks: the last
+                // part goes back to the mempool and stays there while the miner is paused.
+                const orphan = await orphanWithEmptyBlocks(global.nodeConnector,
+                    { height: lastPartBlock, coinbase: owner.address });
+                expect(orphan.hash).to.equal(lastPartHash);
+                await waitForAssemblyStatus(sdk, actionIndex, 'pending');
+                expect((await rawFile(actionIndex)).status).to.equal(409);
+
+                // Resuming the miner confirms the returned part at a new height.
+                await global.regtestMinerConnector.resumeMining();
+                await waitForAssemblyStatus(sdk, actionIndex, 'complete');
+                const restored = await rawFile(actionIndex);
+                expect(restored.status).to.equal(200);
+                expect(sha256(restored.body)).to.equal(sha256(source));
+            } finally {
+                await global.regtestMinerConnector.resumeMining();
+                await waitForIndexerTip();
+            }
         });
         completed++;
     });
