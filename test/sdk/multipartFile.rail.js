@@ -30,7 +30,10 @@ const FOUR_PART_BYTES = 1_200_000;
 const THREE_PART_BYTES = 900_000;
 const MAX_COMPLETION_BLOCKS = 10;
 const POLL_MS = 1000;
-const POLL_ATTEMPTS = 90;
+// A reorg case needs about 3 minutes on the rail: the decoder holds 90 s before it
+// rolls back and the indexer rollback takes as long again.
+const POLL_ATTEMPTS = 300;
+const INDEXER_TIP_WAIT_MS = 360000;
 
 function sha256(bytes) {
     return crypto.createHash('sha256').update(bytes).digest('hex');
@@ -198,12 +201,36 @@ async function sendPart(sdk, owner, plan, partIndex) {
     );
 }
 
+// The wallet quotes a pair from its upload method; the rail suite passes a conservative
+// estimate instead, which only over-funds a piece and never under-pays its fee.
+const RAIL_PAIR_SIZES = {
+    pairSizeFor: piece => (piece.lane === 'envelope'
+        ? Math.ceil(piece.payloadBytes / 4) + 400
+        : Math.ceil(piece.payloadBytes * 1.1) + 600),
+};
+
+// After a rollback the indexer may sit behind its decoder for minutes; a case that
+// starts then reads a stale tip, so wait until /status says it is processing at tip.
+async function waitForIndexerTip() {
+    const url = 'http://' + (process.env.INDEXER_URL || '127.0.0.1') + ':' + (process.env.INDEXER_API_PORT || '3024') + '/status';
+    const deadline = Date.now() + INDEXER_TIP_WAIT_MS;
+    while (Date.now() < deadline) {
+        try {
+            const body = await (await fetch(url)).json();
+            if (body && body.atProcessableTip === true && Number(body.lag) === 0) return body;
+        } catch (error) { /* the indexer restarts during a rollback; keep polling */ }
+        await sleep(POLL_MS * 5);
+    }
+    throw new Error('indexer did not return to tip within ' + INDEXER_TIP_WAIT_MS + ' ms at ' + url);
+}
+
 async function publishAndComplete(sdk, owner, bytes, meta, extra = {}) {
     const plan = await sdk.planMultipartFile(bytes, meta, { carrier: CARRIER, ...(extra.plan || {}) });
     const published = await sdk.publishMultipartFile(owner.wif, bytes, meta, {
         carrier: CARRIER,
         sourceAddress: owner.address,
         change: owner.address,
+        sizes: RAIL_PAIR_SIZES,
         ...(extra.publish || {}),
     });
     const actionIndex = manifestActionIndex(published);
@@ -324,6 +351,7 @@ describe('[sdk rail] multipart FILE', function () {
                 expect(sha256(restored.body)).to.equal(sha256(source));
             } finally {
                 await global.regtestMinerConnector.resumeMining();
+                await waitForIndexerTip();
             }
         });
         completed++;
