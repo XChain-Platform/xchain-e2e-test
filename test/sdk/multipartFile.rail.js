@@ -166,10 +166,18 @@ function manifestParams(plan, meta) {
     };
 }
 
+// A TAPROOT envelope needs the source's public key as its internal key, as
+// batchHelper passes it; the funded owner carries it from generateKeyPair.
+function compressedPubKeyHex(owner) {
+    const key = owner && owner.publicKey;
+    return Buffer.isBuffer(key) || key instanceof Uint8Array ? Buffer.from(key).toString('hex') : key;
+}
+
 async function sendManifest(sdk, owner, plan, meta) {
     return await submit(sdk,
         { action: 'FILE', params: manifestParams(plan, meta) },
-        { pubkey: owner.address, change: owner.address, encoding: CARRIER, compress: false },
+        { pubkey: owner.address, change: owner.address, encoding: CARRIER, compress: false,
+          compressedPubKey: compressedPubKeyHex(owner) },
         submitOpts({ wif: owner.wif })
     );
 }
@@ -183,6 +191,7 @@ async function sendPart(sdk, owner, plan, partIndex) {
             change: owner.address,
             encoding: CARRIER,
             compress: false,
+            compressedPubKey: compressedPubKeyHex(owner),
             rawData: bytes.toString('binary'),
         },
         submitOpts({ wif: owner.wif })
