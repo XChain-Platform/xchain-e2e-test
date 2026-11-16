@@ -30,6 +30,7 @@ describe('Protocol size-limit drift guard', () => {
     require('./protocol-size-limits.regression/xcall_return_bytes_and_vm_bounds.test')
     require('./protocol-size-limits.regression/vm_call_depth_bounds.test')
     require('./protocol-size-limits.regression/chunked_deploy_caps.test')
+    require('./protocol-size-limits.regression/multipart_file_caps.test')
     require('./protocol-size-limits.regression/family_b_attest_threshold_ticker.test')
     require('./protocol-size-limits.regression/family_b_envelope_orphan_grace.test')
     require('./protocol-size-limits.regression/family_b_compression_price_max.test')
