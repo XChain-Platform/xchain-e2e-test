@@ -29,7 +29,9 @@ const CARRIER = 'TAPROOT';
 const PUBLIC_BYTES = 10_000_000;
 const FOUR_PART_BYTES = 1_200_000;
 const THREE_PART_BYTES = 900_000;
-const STRESS_PART_BYTES = 389_920;
+// A 300-part file is sized for a three-digit part index, one byte less per
+// part than the two-digit 389,920 (sdk f95d2f6b).
+const STRESS_PART_BYTES = 389_919;
 const STRESS_PARTS = 300;
 const STRESS_BYTES = (STRESS_PARTS - 1) * STRESS_PART_BYTES + 1_000;
 const MAX_COMPLETION_BLOCKS = 10;
