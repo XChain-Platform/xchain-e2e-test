@@ -32,12 +32,8 @@ const lock = require(path.join(root, 'package-lock.json'));
 // @modelcontextprotocol/sdk, which xchain-sdk declares. Neither is a
 // dependency of this repo, so both are held down by overrides.
 //
-// @hono/node-server <1.19.15 (GHSA-frvp-7c67-39w9): serve-static resolves
-// an encoded backslash (%5C) as a path separator on Windows, so a request
-// escapes the served root. The platform serves nothing from Windows, which
-// is why this sat as a residual rather than a hotfix, but the fix is a
-// patch release inside the range @modelcontextprotocol/sdk already asks
-// for (^1.19.9), so there is no reason to keep carrying it.
+// @hono/node-server <2.1.8 has multiple serve-static path handling flaws.
+// @modelcontextprotocol/sdk already allows the patched 2.x series.
 //
 // hono <4.12.34 carries four at once: ReDoS in the CORS middleware via
 // Access-Control-Request-Headers (GHSA-8j4g-w8fx-2239), memo() retaining
@@ -53,7 +49,7 @@ const lock = require(path.join(root, 'package-lock.json'));
 // package-lock.json and installed, so assert the resolved version rather
 // than trusting the pin.
 const advisories = [
-    { name: '@hono/node-server', minSafe: [1, 19, 15], majorSeries: 1 },
+    { name: '@hono/node-server', minSafe: [2, 1, 8], majorSeries: 2 },
     { name: 'hono',              minSafe: [4, 12, 34], majorSeries: 4 }
 ];
 

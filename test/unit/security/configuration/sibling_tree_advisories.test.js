@@ -18,21 +18,10 @@ const path   = require('path');
 // that file is byte-identical across every sibling repo that carries it, while
 // this hazard is specific to xchain-e2e-test.
 //
-// This repo declares two of its dependencies as local paths (xchain-hub,
-// xchain-sdk). Those directories are gitignored and staged at build time, so
-// npm links rather than fetches them, and it installs their dependencies into a
-// node_modules INSIDE each staged directory. The trap: once a staged
-// directory loses its package.json, npm stops treating that nested tree as
-// something it owns, so the tree stops being reconciled and simply persists.
-// A tree installed before this repo's brace-expansion/minimatch overrides landed
-// therefore survived every later `npm ci` carrying brace-expansion 2.1.3 and
-// minimatch 9.0.9, and any lockfile regeneration that expanded it wrote those
-// versions back into package-lock.json, which is what held the Stryker bump at
-// ^8.7.1 for as long as it was held.
-//
-// The lockfile assertions in the companion file cannot see this: they describe
-// what a fresh install WOULD produce, and these trees are precisely the part of
-// the checkout a fresh install does not touch.
+// This repo declares two dependencies as local paths. npm packs them before
+// installation so their source checkouts and dev trees cannot enter this repo's
+// dependency graph. These guards cover both the installed packages and the
+// lockfile snapshots produced by that layout.
 const root = path.resolve(__dirname, '..', '..', '..', '..');
 const pkg  = require(path.join(root, 'package.json'));
 
@@ -45,7 +34,7 @@ const pkg  = require(path.join(root, 'package.json'));
 const floors = {
     'fast-uri':             [3, 1, 5],
     'brace-expansion':      [5, 0, 9],
-    'minimatch':            [10, 2, 5],
+    'minimatch':            [11, 0, 9],
     'axios':                [1, 18, 0],
     'js-yaml':              [4, 3, 1],
     'serialize-javascript': [7, 0, 5],
@@ -153,11 +142,8 @@ describe('Security: staged sibling trees carry no vulnerable copies @regression 
         it(`ADV-8: ${sibling.name}'s staged node_modules carries no package below its advisory floor`, function () {
             this.timeout(30000);
 
-            const nested = path.join(sibling.dir, 'node_modules');
-            // A checkout that has not staged this sibling yet has nothing to
-            // check. That is the normal state in CI, where the sibling is
-            // checked out beside the repo instead of inside it.
-            if (!fs.existsSync(nested)) return this.skip();
+            const nested = path.join(root, 'node_modules', sibling.name, 'node_modules');
+            if (!fs.existsSync(nested)) return;
 
             const offenders = [];
             for (const found of walkTree(nested, 0)) {
@@ -170,8 +156,7 @@ describe('Security: staged sibling trees carry no vulnerable copies @regression 
             }
 
             assert.deepStrictEqual(offenders, [],
-                `stale staged tree under ${sibling.name}: npm no longer manages it, so reinstalling will not `
-                + 'clear these. Delete the nested node_modules and re-run npm ci.\n  '
+                `installed package tree under ${sibling.name} contains dependencies below the advisory floor.\n  `
                 + offenders.join('\n  '));
         });
     });
@@ -191,7 +176,9 @@ describe('Security: staged sibling trees carry no vulnerable copies @regression 
     stagedSiblings().forEach(function (sibling) {
         it(`ADV-9: the lockfile snapshot of ${sibling.name} records the sibling repo's own version`, function () {
             const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
-            const key  = path.relative(root, sibling.dir).split(path.sep).join('/');
+            const linkedKey = path.relative(root, sibling.dir).split(path.sep).join('/');
+            const packedKey = `node_modules/${sibling.name}`;
+            const key = (lock.packages || {})[linkedKey] ? linkedKey : packedKey;
             const snap = (lock.packages || {})[key];
             assert.ok(snap, `package-lock.json has no packages["${key}"] entry for the staged ${sibling.name}; `
                 + 'the file: dependency layout changed and this guard needs re-pointing');
