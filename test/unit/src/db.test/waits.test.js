@@ -11,6 +11,7 @@
 'use strict'
 
 const { assert, sinon, registerHooks, state } = require('./setup.test')
+const perfCollector = require('../../../perf/helpers/perfCollector')
 
 registerHooks()
 
@@ -275,6 +276,23 @@ describe('waitForSend() inline polling', function () {
             assert.strictEqual(result, null)
         } finally {
             nowStub.restore()
+        }
+    })
+})
+
+// _recordPerfPoll reaches the collector through a computed path, so a moved
+// collector file only shows up as polls that silently stop being recorded.
+describe('_recordPerfPoll()', function () {
+    it('records a finished poll on the shared perf collector', function () {
+        perfCollector.reset()
+        try {
+            state.db['_recordPerfPoll']('waitForSend', 1000, 3, true)
+            assert.strictEqual(perfCollector.pollMetrics.length, 1)
+            assert.strictEqual(perfCollector.pollMetrics[0].method, 'waitForSend')
+            assert.strictEqual(perfCollector.pollMetrics[0].polls, 3)
+            assert.strictEqual(perfCollector.pollMetrics[0].resolved, true)
+        } finally {
+            perfCollector.reset()
         }
     })
 })

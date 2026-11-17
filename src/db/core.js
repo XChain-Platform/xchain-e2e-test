@@ -18,7 +18,7 @@
 const { config, logger } = require('./shared')
 const { mariadbDriver } = require('./driver')
 
-const PERF_COLLECTOR_MODULE = '../../test/perf/perfCollector';
+const PERF_COLLECTOR_MODULE = '../../test/perf/helpers/perfCollector';
 
 // Adaptive-wait tunables (see _waitFor). Extensions are bounded so a wedged
 // stack still fails. The lag threshold is ZERO: these waits ask "has MY row
