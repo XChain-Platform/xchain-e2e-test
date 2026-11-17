@@ -29,7 +29,14 @@ const CARRIER = 'TAPROOT';
 const PUBLIC_BYTES = 10_000_000;
 const FOUR_PART_BYTES = 1_200_000;
 const THREE_PART_BYTES = 900_000;
+const STRESS_PART_BYTES = 389_920;
+const STRESS_PARTS = 300;
+const STRESS_BYTES = (STRESS_PARTS - 1) * STRESS_PART_BYTES + 1_000;
 const MAX_COMPLETION_BLOCKS = 10;
+const STRESS_MAX_COMPLETION_BLOCKS = 150;
+const STRESS_RANGE = 'bytes=100000000-100000099';
+const STRESS_RANGE_START = 100_000_000;
+const STRESS_RANGE_END = 100_000_100;
 const POLL_MS = 1000;
 // A reorg case needs about 3 minutes on the rail: the decoder holds 90 s before it
 // rolls back and the indexer rollback takes as long again.
@@ -106,20 +113,37 @@ async function waitForAssemblyStatus(sdk, actionIndex, wanted) {
     throw new Error('file ' + actionIndex + ' did not become ' + wanted + '; last assembly=' + JSON.stringify(last));
 }
 
-async function mineUntilComplete(sdk, actionIndex) {
+async function mineUntilComplete(sdk, actionIndex, maxBlocks = MAX_COMPLETION_BLOCKS) {
     let last;
-    for (let mined = 0; mined <= MAX_COMPLETION_BLOCKS; mined++) {
+    for (let mined = 0; mined <= maxBlocks; mined++) {
         last = await readAssembly(sdk, actionIndex);
         if (assemblyStatus(last) === 'complete') return { assembly: last, mined };
-        if (mined < MAX_COMPLETION_BLOCKS)
+        if (mined < maxBlocks)
             await global.regtestMinerConnector.generateBlocks(1);
     }
-    throw new Error('file ' + actionIndex + ' incomplete after ' + MAX_COMPLETION_BLOCKS +
+    throw new Error('file ' + actionIndex + ' incomplete after ' + maxBlocks +
         ' blocks; last assembly=' + JSON.stringify(last));
 }
 
 async function rawFile(actionIndex) {
     return await global.explorerConnector.getFileRaw(coinPrefix(), actionIndex);
+}
+
+async function rawFileResponse(actionIndex, headers = {}) {
+    const base = global.explorerConnector.url.replace(/\/+$/, '');
+    const url = base + '/' + coinPrefix() + '/api/file/' + actionIndex + '/raw';
+    return await fetch(url, { headers });
+}
+
+async function streamedDigest(response) {
+    if (!response.body) throw new Error('raw file response has no body stream');
+    const digest = crypto.createHash('sha256');
+    let length = 0;
+    for await (const chunk of response.body) {
+        digest.update(chunk);
+        length += chunk.length;
+    }
+    return { sha256: digest.digest('hex'), length };
 }
 
 async function actionDetail(sdk, actionIndex) {
@@ -258,13 +282,14 @@ describe('[sdk rail] multipart FILE', function () {
     });
 
     after(function () {
-        if (completed !== 5) return;
+        if (completed !== 6) return;
         fs.mkdirSync(path.dirname(REPORT_FILE), { recursive: true });
         fs.writeFileSync(REPORT_FILE, [
             '# Multipart file rail drive',
             '',
             'multipart file drive: PASS',
-            'passing=5',
+            'multipart 300-part drive: PASS',
+            'passing=6',
             'failing=0',
             '',
         ].join('\n'));
@@ -363,6 +388,55 @@ describe('[sdk rail] multipart FILE', function () {
             const served = await rawFile(result.actionIndex);
             expect(served.status).to.equal(200);
             expect(sha256(served.body)).to.equal(sha256(source));
+        });
+        completed++;
+    });
+
+    it('publishes 300 envelope parts across four funding waves and the explorer streams them', async function () {
+        await chainRail.withRail(bitcoinRail, async () => {
+            const sdk = makeSdk({ network: 'bitcoin-regtest', compactAddresses: false });
+            const owner = await fundedSdkAddress(sdk, 5, 'p2wpkh');
+            const source = crypto.randomBytes(STRESS_BYTES);
+            const meta = { name: 'random-300-part.bin', type: 'application/octet-stream' };
+            const waveProgress = [];
+            const published = await sdk.publishMultipartFile(owner.wif, source, meta, {
+                carrier: CARRIER,
+                sourceAddress: owner.address,
+                change: owner.address,
+                sizes: RAIL_PAIR_SIZES,
+                timeout: 3_600_000,
+                pollInterval: POLL_MS,
+                onProgress(step, data) {
+                    if (step !== 'wave_funded' && step !== 'wave_confirmed') return;
+                    const event = { step, data: data || {} };
+                    waveProgress.push(event);
+                    console.log('multipart 300-part progress: ' + JSON.stringify(event));
+                },
+            });
+            const parts = planParts(published.plan);
+            expect(parts).to.have.length(STRESS_PARTS);
+            expect(parts.slice(0, -1).every(part => partBytes(part).length === STRESS_PART_BYTES)).to.equal(true);
+            expect(partBytes(parts[parts.length - 1])).to.have.length(1_000);
+            expect(waveProgress.filter(event => event.step === 'wave_funded')).to.have.length(4);
+            expect(waveProgress.filter(event => event.step === 'wave_confirmed')).to.have.length(4);
+
+            const actionIndex = manifestActionIndex(published);
+            const completion = await mineUntilComplete(sdk, actionIndex, STRESS_MAX_COMPLETION_BLOCKS);
+            expect(assemblyStatus(completion.assembly)).to.equal('complete');
+            expect(completion.mined).to.be.at.most(STRESS_MAX_COMPLETION_BLOCKS);
+
+            const response = await rawFileResponse(actionIndex);
+            expect(response.status).to.equal(200);
+            expect(response.headers.get('content-length')).to.equal(String(source.length));
+            const streamed = await streamedDigest(response);
+            expect(streamed.length).to.equal(source.length);
+            expect(streamed.sha256).to.equal(sha256(source));
+
+            const rangeResponse = await rawFileResponse(actionIndex, { Range: STRESS_RANGE });
+            expect(rangeResponse.status).to.equal(206);
+            expect(rangeResponse.headers.get('content-length')).to.equal(String(STRESS_RANGE_END - STRESS_RANGE_START));
+            const ranged = Buffer.from(await rangeResponse.arrayBuffer());
+            expect(ranged).to.deep.equal(source.subarray(STRESS_RANGE_START, STRESS_RANGE_END));
         });
         completed++;
     });
