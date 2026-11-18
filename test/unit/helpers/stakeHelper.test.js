@@ -132,6 +132,28 @@ describe('stakeHelper', () => {
             await helper.sendUnstakeV1(addressInfo, 'pubkeyTD4', 42, 'TOK')
             assert.strictEqual(stakeTeardown.outstanding().length, 0)
         })
+
+        it('undoes an expected-invalid contract stake booking after its row appears', async () => {
+            global.indexerDatabase.checkContractStake = sinon.stub().resolves({ status: 'invalid: not stakeable' })
+            await helper.sendStakeV3Invalid(addressInfo, '10', 'pubkeyTD5', 42, 'TOK', 10)
+            assert.strictEqual(stakeTeardown.outstanding().length, 0)
+            assert.strictEqual(global.indexerDatabase.checkContractStake.firstCall.args[0].txHash, 'abc123')
+        })
+
+        it('keeps an unexpectedly valid contract stake booked for release', async () => {
+            global.indexerDatabase.checkContractStake = sinon.stub().resolves({ status: 'valid' })
+            await helper.sendStakeV3Invalid(addressInfo, '10', 'pubkeyTD6', 42, 'TOK', 10)
+            const out = stakeTeardown.outstanding()
+            assert.strictEqual(out.length, 1)
+            assert.strictEqual(out[0].contractIndex, 42)
+            assert.strictEqual(out[0].tick, 'TOK')
+        })
+
+        it('keeps an unseen contract stake booked because it may still confirm', async () => {
+            global.indexerDatabase.checkContractStake = sinon.stub().resolves(null)
+            await helper.sendStakeV3Invalid(addressInfo, '10', 'pubkeyTD7', 42, 'TOK', 0)
+            assert.strictEqual(stakeTeardown.outstanding().length, 1)
+        })
     })
 
     // A broadcast STAKE can confirm after its wait gives up, so the booking is

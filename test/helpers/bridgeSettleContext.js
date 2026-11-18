@@ -94,7 +94,9 @@ const ROLE_ADDRESSES = {
  * @param opts.balances       { tick_id: amount } for whichever address is read (the escrow)
  * @param opts.settled        pre-existing '<id>|<kind>' settlement keys
  * @param opts.mirrorPolicies rows the policy seq-gap query sees
- * @param opts.chainId        this node's BTC_CHAIN_ID, for the chain-identity guard
+ * @param opts.chainId        a BTC_CHAIN_ID planted in config, which the settle pass must
+ *                            ignore: chain identity is the mirror apply fence's
+ *                            (refuseForeignChainRow), never a per-node settle compare
  * @param opts.blockIndex     the applying block
  * @param opts.blockTime      the block loop's PROTOCOL time; effective_time compares to it
  * @returns {{ctx: Object, state: Object, config: Object}}

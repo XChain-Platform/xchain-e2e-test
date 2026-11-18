@@ -8,10 +8,10 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const { execFileSync, spawnSync } = require('node:child_process')
-const { CONSENSUS, resolveBase, selectFastTests } = require('../../bin/ci_fast_select')
+const { ALWAYS, CONSENSUS, WIDEN, resolveBase, selectFastTests } = require('../../bin/ci_fast_select')
 
 const ROOT = path.resolve(__dirname, '..', '..')
-const ALWAYS = [
+const EXPECTED_ALWAYS = [
     'test/unit/coins_conformance.test.js',
     'test/unit/sibling_coverage.test.js',
     'test/unit/suite_parses.test.js',
@@ -67,7 +67,7 @@ function registerMappingCases(){
         assert.strictEqual(plan.consensus, false)
         assert.ok(files.includes('test/unit/helpers/addressHelper.test.js'))
         assert.ok(plan.tests.every(test => test.group === 'unit'))
-        for(const guard of ALWAYS) assert.ok(files.includes(guard), guard)
+        for(const guard of EXPECTED_ALWAYS) assert.ok(files.includes(guard), guard)
     })
 
     it('widens a changed consensus coin module', function(){
@@ -90,21 +90,34 @@ function registerMappingCases(){
 }
 
 function registerManifestCases(){
-    // Fail on a moved file, which would otherwise drop its consensus widening silently.
-    it('resolves every consensus prefix to a tracked file', function(){
+    // Fail on a moved file, which would otherwise drop its widening silently.
+    it('resolves every selector manifest entry to a tracked file', function(){
         const tracked = git(['ls-files']).split('\n').filter(Boolean)
-        for(const prefix of CONSENSUS){
+        for(const prefix of CONSENSUS.concat(WIDEN)){
             const resolves = prefix.endsWith('/')
                 ? tracked.some(file => file.startsWith(prefix))
                 : tracked.includes(prefix)
-            assert.ok(resolves, 'consensus prefix matches no tracked file: ' + prefix)
+            assert.ok(resolves, 'selector entry matches no tracked file: ' + prefix)
+        }
+        for(const file of ALWAYS)
+            assert.ok(tracked.includes(file), 'always-run entry is not tracked: ' + file)
+    })
+
+    it('widens changes to the root hook and its companion modules', function(){
+        for(const file of [
+            'test/initial_check.test.js',
+            'test/initial_check.test/teardown.test.js',
+        ]){
+            const plan = select([file])
+            assert.strictEqual(plan.consensus, true, file)
+            assert.ok(plan.reasons.includes('consensus: ' + file), file)
         }
     })
 
     it('keeps a documentation-only change to the always-run guards', function(){
         const plan = select(['README.md'])
         assert.strictEqual(plan.consensus, false)
-        assert.deepStrictEqual(plan.tests.map(test => test.file), ALWAYS)
+        assert.deepStrictEqual(plan.tests.map(test => test.file), EXPECTED_ALWAYS)
     })
 
     it('widens a package manifest change', function(){
@@ -124,10 +137,10 @@ function registerManifestCases(){
 
     it('does not select a changed unit path that no longer exists', function(){
         const plan = selectFastTests(['test/unit/deleted.test.js'], {
-            listTests: () => ALWAYS,
+            listTests: () => EXPECTED_ALWAYS,
             findRequirers: () => [],
         })
-        assert.deepStrictEqual(plan.tests.map(test => test.file), ALWAYS)
+        assert.deepStrictEqual(plan.tests.map(test => test.file), EXPECTED_ALWAYS)
     })
 }
 
@@ -196,7 +209,7 @@ describe('ci fast selector mappings', function(){
 describe('ci fast selector dependency widening', function(){
     it('widens when a consensus importer requires a changed source module', function(){
         const plan = selectFastTests(['src/lib/core.js'], {
-            listTests: () => ALWAYS,
+            listTests: () => EXPECTED_ALWAYS,
             findRequirers: needle => needle === 'core' ? ['src/coins/reader.js'] : [],
             readFile: file => file === 'src/coins/reader.js' ? "require('../lib/core')" : '',
         })

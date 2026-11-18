@@ -5,6 +5,7 @@
 const fs = require('fs')
 const path = require('path')
 const { MIN_REASON_WORDS, reasonWords } = require('./lib/opt_out_marker')
+const { scanNamed, templateLiteralEnd } = require('./lib/template_literal')
 
 const ROOT = path.resolve(__dirname, '..')
 const DEFAULT_INPUTS = [path.join(ROOT, 'test', 'attestMirror')]
@@ -46,7 +47,13 @@ function maskNonCode (source) {
             i = stop
             continue
         }
-        if (c === '"' || c === "'" || c === '`') {
+        if (c === '`') {
+            const end = templateLiteralEnd(source, i)
+            blank(i, end)
+            i = end
+            continue
+        }
+        if (c === '"' || c === "'") {
             const quote = c
             let end = i + 1
             while (end < source.length) {
@@ -69,8 +76,8 @@ function maskNonCode (source) {
             while (previous >= 0 && /\s/.test(out[previous])) previous--
             const prior = previous < 0 ? '' : out[previous]
             const word = source.slice(Math.max(0, previous - 9), previous + 1)
-            const canStartRegex = previous < 0 || '(,=:[!&|?{};+-*%^~'.includes(prior) ||
-                /\b(?:return|typeof|case|in|of|do|else|yield|await)$/.test(word)
+            const canStartRegex = previous < 0 || '(,=:[!&|?{};+-*%^~<>'.includes(prior) ||
+                /\b(?:return|typeof|case|in|of|do|else|yield|await|void|delete|new|instanceof|throw)$/.test(word)
             if (canStartRegex) {
                 let end = i + 1
                 let inClass = false
@@ -458,7 +465,7 @@ function scanPaths (inputs) {
     const pending = []
     for (const absolute of selected.files) {
         const shown = path.relative(process.cwd(), absolute).split(path.sep).join('/')
-        const parsed = parseSource(fs.readFileSync(absolute, 'utf8'), shown)
+        const parsed = scanNamed(shown, () => parseSource(fs.readFileSync(absolute, 'utf8'), shown))
         parsedFiles.set(absolute, parsed)
         pending.push(...parsed.pending)
     }

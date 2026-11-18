@@ -340,6 +340,16 @@ describe('live integration tier roster', () => {
             assert.strictEqual(pkg.scripts['lint:mirror-pendings'], 'node bin/check-mirror-pendings.js')
         })
 
+        it('runs the protocol size-limit regression as a full-gate tier', () => {
+            const fullGate = fs.readFileSync(path.resolve(__dirname, '../../../bin/ci-full.sh'), 'utf8')
+            const regression = path.resolve(__dirname, '../../regression/protocol-size-limits.regression.js')
+            assert.match(fullGate, /^run_tier "[^"]*" \\\n[\s\S]*?mocha[^\n]*test\/regression\/protocol-size-limits\.regression\.js/m,
+                'the full gate must run the cross-service size-cap guard')
+            assert.match(fullGate, /XCHAIN_SIZE_CAPS_ONLY=1/,
+                'the gate must not absorb the broader full-export roster')
+            assert.strictEqual(fs.existsSync(regression), true)
+        })
+
         // A fast run may not select the unit files that also scan the real tree, so each gate runs as its own tier.
         for (const [lint, script] of [['stake-teardown', 'check-stake-teardown.js'], ['wait-swallow', 'check-wait-swallow.js']]) {
             it('runs the ' + lint + ' lint over the real tree as its own tier', () => {

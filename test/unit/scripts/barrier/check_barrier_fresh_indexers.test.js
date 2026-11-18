@@ -14,7 +14,7 @@ const assert = require('assert')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { findReusedLabelBoots, main } = require('../../../../bin/check-barrier-fresh-indexers')
+const { findReusedLabelBoots, scan, main } = require('../../../../bin/check-barrier-fresh-indexers')
 
 describe('check-barrier-fresh-indexers', function () {
     it('finds a one-line boot and reports its literal label and line', function () {
@@ -235,6 +235,23 @@ describe('check-barrier-fresh-indexers exit codes', function () {
     it('fails when the only leg file sits in a subdirectory the scan does not read', function () {
         write('nested/a.test.js', "bootFamilyVenue({ label: 'x', venue: { freshIndexers: true } })")
         assert.strictEqual(run([]), 1)
+    })
+
+    it('checks a reused-indexer boot in a split leg directory', function () {
+        write('a.test.js', "require('./a.test/steps.test.js')")
+        write('a.test/steps.test.js', "bootFamilyVenue({ label: 'x' })")
+        const result = scan(dir)
+        assert.strictEqual(run([]), 1)
+        assert.deepStrictEqual(result.findings.map((finding) => finding.file), [
+            path.relative(path.join(__dirname, '../../../..'), path.join(dir, 'a.test/steps.test.js'))
+                .split(path.sep).join('/'),
+        ])
+    })
+
+    it('accepts a fresh-indexer boot in a split leg directory', function () {
+        write('a.test.js', "require('./a.test/steps.test.js')")
+        write('a.test/steps.test.js', "bootFamilyVenue({ label: 'x', venue: { freshIndexers: true } })")
+        assert.strictEqual(run([]), 0)
     })
 
     it('fails a scan directory that does not exist', function () {

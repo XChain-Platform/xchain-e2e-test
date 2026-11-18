@@ -112,10 +112,19 @@ function findReusedLabelBoots (source) {
     return findings.sort((a, b) => a.at - b.at).map(({ line, label }) => ({ line, label }))
 }
 
+function collectJavaScriptFiles (dir, prefix = '') {
+    const files = []
+    for (const entry of fs.readdirSync(path.join(dir, prefix), { withFileTypes: true })) {
+        const relative = path.join(prefix, entry.name)
+        if (entry.isDirectory()) files.push(...collectJavaScriptFiles(dir, relative))
+        else if (entry.isFile() && entry.name.endsWith('.js')) files.push(relative.split(path.sep).join('/'))
+    }
+    return files
+}
+
 function scan (dir = SCAN_DIR) {
-    const files = fs.readdirSync(dir)
-        .filter((file) => file.endsWith('.test.js'))
-        .sort()
+    const files = collectJavaScriptFiles(dir).sort()
+    const entryFiles = files.filter((file) => !file.includes('/') && file.endsWith('.test.js'))
     const findings = []
     for (const file of files) {
         const absolute = path.join(dir, file)
@@ -124,7 +133,7 @@ function scan (dir = SCAN_DIR) {
             findings.push({ file: relative, ...finding })
         }
     }
-    return { files, findings }
+    return { files, entryFiles, findings }
 }
 
 // A scan that reads no leg file is a broken scan, not a clean corpus, so it fails even under --report.
@@ -138,9 +147,9 @@ function main (argv = process.argv.slice(2), dir = SCAN_DIR) {
         console.error(`check-barrier-fresh-indexers: scan directory does not exist: ${shown}`)
         return 1
     }
-    const { files, findings } = result
-    if (files.length === 0) {
-        console.error(`check-barrier-fresh-indexers: read zero files from ${shown}`)
+    const { files, entryFiles, findings } = result
+    if (entryFiles.length === 0) {
+        console.error(`check-barrier-fresh-indexers: read zero runnable leg files from ${shown}`)
         return 1
     }
     for (const finding of findings) {

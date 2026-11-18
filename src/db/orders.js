@@ -259,30 +259,6 @@ class OrderChecks {
         }
     }
 
-    // ─── ORDER_MATCH ──────────────────────────────────────────────────
-    async waitForOrderMatch(obj, timeMax = 60000){ return this['_waitFor'](this.checkOrderMatch, obj, timeMax) }
-
-    async checkOrderMatch({giveActionIndex, getActionIndex, status}){
-        const w = [], v = []
-        if (giveActionIndex != null){ w.push("m.give_action_index = ?"); v.push(giveActionIndex) }
-        if (getActionIndex != null){ w.push("m.get_action_index = ?"); v.push(getActionIndex) }
-        if (status != null){ w.push("ist.status = ?"); v.push(status) }
-        const query = `
-            SELECT m.*, ist.status AS status
-            FROM order_matches m
-            LEFT JOIN index_statuses ist ON ist.id = m.status_id
-        `+"WHERE "+w.join(" AND ");
-        const connection = await this.getConnection()
-        try {
-            const rows = await connection.query(query, v)
-            return rows.length > 0 ? rows[0] : null
-        } catch (err) {
-            logger.error('Error with database query (order_match):', err);
-            return rethrowInsideWait(err)
-        } finally {
-            await connection.release()
-        }
-    }
 }
 
 module.exports = OrderChecks

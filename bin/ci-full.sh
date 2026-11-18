@@ -52,12 +52,14 @@
 #     ../xchain-hub and ../xchain-indexer for the same reason.
 # Full sweeps skip no ci.yml work; fast runs name every deferred tier.
 #
-# The last seven tiers are LOCAL-ONLY additions rather than transcriptions, and
+# The last eight tiers are LOCAL-ONLY additions rather than transcriptions, and
 # are marked as such. Six lint tiers run their checkers over the real tree, so a
 # fast run grades them even when it selects none of their unit files. The
 # cross-repo parity suites are work no GitHub job runs, because GitHub would
 # need five more sibling deploy keys to run it. They cost seconds plus the
 # parity suites; ci:live is not repeated here, it is the live-tier job above.
+# The protocol size-limit guard also needs the encoder, decoder, vm and wallet
+# siblings that GitHub CI does not check out.
 #
 # All tiers run even after one fails (GitHub reports every red job, so this
 # reports every red tier); the exit code is red if any tier was.
@@ -201,6 +203,9 @@ run_tier "local: wait-swallow lint (lint:wait-swallow)" npm run lint:wait-swallo
 run_tier "local: cross-repo parity suites (siblings required)" \
   env XCHAIN_REQUIRE_SIBLINGS=1 \
   ./node_modules/.bin/mocha --no-config --timeout 30000 --exit 'test/integration/parity/**/*.test.js'
+run_tier "local: protocol size-limit drift guard (siblings required)" \
+  env XCHAIN_REQUIRE_SIBLINGS=1 XCHAIN_SIZE_CAPS_ONLY=1 \
+  ./node_modules/.bin/mocha --no-config --timeout 30000 --exit 'test/regression/protocol-size-limits.regression.js'
 
 echo
 if [ "${CI_TIER:-}" = "fast" ]; then

@@ -22,6 +22,8 @@ const {
 } = require('./lib/shared');
 const { falsificationCases } = require('./lib/falsification_cases');
 
+const CHAIN_IDENTITY = SETTLE.loadIndexerModule('src/hub/hub_db_sync/chain_identity.js');
+
 describe('XBRIDGE transfer: base AT4: falsification of a mirrored record', function(){
     this.timeout(240_000);
 
@@ -52,20 +54,31 @@ describe('XBRIDGE transfer: base AT4: falsification of a mirrored record', funct
         });
     });
 
+    // Chain identity is the mirror apply fence's: the real refuseForeignChainRow drops a dead
+    // chain's record before any settle pass reads it, and the pass reads no per-node identity,
+    // so a BTC_CHAIN_ID planted in its config must leave the outcome unchanged.
     it('applies nothing for a foreign btc_chain_id', async function(){
+        const own = '0'.repeat(64);
         const row = inLeg(ids, { btcChainId: 'f'.repeat(64) });
-        const { ctx, state } = SETTLE.makeSettleContext({
-            coin: 'DOGE', validators: validators, tokens: XCHAIN_ROW,
-            chainId: '0'.repeat(64),            // this node's own chain identity
-            blockIndex: BLOCK, blockTime: BLOCK_TIME,
-            proof: SETTLE.buildEscrowProof({ destChain: 'DOGE', tick: 'XCHAIN',
-                                             balance: '50', height: CP_HEIGHT })
-        });
+        const fence = Object.assign(Object.create(CHAIN_IDENTITY),
+                                    { _expectedBtcChainId: own, _refusedChainIdRows: new Map() });
+        assert.strictEqual(fence.refuseForeignChainRow('bridge_transfers', row), true,
+            'a record minted on a dead chain instance passed the mirror fence');
+        assert.strictEqual(fence.refuseForeignChainRow('bridge_transfers', inLeg(ids, { btcChainId: own })),
+            false, 'the mirror fence refused a record of its own chain');
 
-        const res = await BS.applyBridgeTransfer(row, ctx);
-
-        assert.strictEqual(res.applied, false, 'a record minted on a dead chain instance applied');
-        assert.deepStrictEqual(state.credits, []);
+        const settle = async (chainId) => {
+            const { ctx, state } = SETTLE.makeSettleContext({
+                coin: 'DOGE', validators: validators, tokens: XCHAIN_ROW, chainId: chainId,
+                blockIndex: BLOCK, blockTime: BLOCK_TIME,
+                proof: SETTLE.buildEscrowProof({ destChain: 'DOGE', tick: 'XCHAIN',
+                                                 balance: '50', height: CP_HEIGHT })
+            });
+            const res = await BS.applyBridgeTransfer(row, ctx);
+            return { applied: res.applied, reason: res.reason, credits: state.credits.length };
+        };
+        assert.deepStrictEqual(await settle(own), await settle(undefined),
+            'the settle pass compared the record against a per-node chain identity');
     });
 });
 

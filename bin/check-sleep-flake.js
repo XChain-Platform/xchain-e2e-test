@@ -47,6 +47,7 @@
 
 const fs   = require('fs')
 const path = require('path')
+const { scanNamed, templateLiteralEnd } = require('./lib/template_literal')
 
 const ROOT         = path.join(__dirname, '..')
 const SCAN_DIR     = path.join(ROOT, 'test')
@@ -122,7 +123,12 @@ function blankNonCode(src) {
                 if (closed) { blank(i + 1, j); i = j + 1; continue }
             }
         }
-        if (c === '"' || c === "'" || c === '`') {
+        if (c === '`') {
+            const end = templateLiteralEnd(src, i)
+            const close = src[end - 1] === '`' ? end - 1 : end
+            blank(i + 1, close); i = end; continue
+        }
+        if (c === '"' || c === "'") {
             let j = i + 1
             while (j < src.length) {
                 if (src[j] === '\\') { j += 2; continue }
@@ -352,7 +358,7 @@ function awaitHelperRe(code) {
 }
 
 function scanSource(src, name) {
-    const code = blankNonCode(src)
+    const code = scanNamed(name, () => blankNonCode(src))
     const { mask, balanced } = loopMask(code)
     const hits = []
     const lineStarts = [0]

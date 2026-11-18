@@ -84,7 +84,11 @@ describe('check-stake-teardown gate', () => {
     })
 
     it('exempts the registrar itself', () => {
-        assert.strictEqual(scan("let msg = 'STAKE|1|' + amount", 'test/helpers/stakeHelper.js').length, 0)
+        const source = [
+            "let msg = 'STAKE|1|' + amount",
+            'stakeTeardown.bookBroadcastStake({ addressInfo, signingPubkey, amount })',
+        ].join('\n')
+        assert.strictEqual(scan(source, 'test/helpers/stakeHelper.js').length, 0)
     })
 
     it('the repo is clean: every STAKE broadcast under test/ is tracked or explained', () => {

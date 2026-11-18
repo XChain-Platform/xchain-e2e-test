@@ -17,7 +17,7 @@ const CONSENSUS = [
     'test/parity/',
     'test/integration/parity/',
 ]
-const WIDEN = ['test/support/', 'test/initialCheck.test.js']
+const WIDEN = ['test/support/', 'test/initial_check.test.js', 'test/initial_check.test/']
 const GLOBAL_INPUTS = ['package.json', 'package-lock.json']
 const SOURCE_ROOTS = ['src/', 'test/helpers/', 'bin/']
 const ALWAYS = [
@@ -354,6 +354,6 @@ function main(){
     return runPlan(plan)
 }
 
-module.exports = { CONSENSUS, replayPlans, resolveBase, selectFastTests }
+module.exports = { ALWAYS, CONSENSUS, WIDEN, replayPlans, resolveBase, selectFastTests }
 
 if(require.main === module) process.exitCode = main()

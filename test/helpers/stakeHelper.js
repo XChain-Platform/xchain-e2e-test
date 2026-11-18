@@ -342,14 +342,15 @@ module.exports = {
     // observe an intentionally-invalid stake, so broadcast and poll the row
     // status-agnostically (invalid contract stakes still write a contract_stakes row
     // carrying the rejection status (see xchain-indexer stake.js parseContractStake,
-    // which calls createContractStake unconditionally). Filters on the unique
-    // (source, pubkey, target, tick) tuple, not txHash, so it stays robust to encoding.
+    // which calls createContractStake unconditionally). The transaction hash keeps
+    // an older row for the same stake tuple from satisfying this broadcast's wait.
     async sendStakeV3Invalid(addressInfo, amount, signingPubkey, contractIndex, tick, timeMax = 60000){
         const address = addressInfo["address"]
         const msg = "STAKE|3|" + amount + "|" + signingPubkey + "|" + contractIndex + "|" + tick
 
         console.log("Creating and sending (expected-invalid) STAKE V3 tx...")
         const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const booking = stakeTeardown.bookBroadcastStake({ addressInfo, signingPubkey, amount, contractIndex, tick })
 
         console.log("Waiting for the rejected contract_stakes row in the database...")
         const end = Date.now() + timeMax
@@ -359,11 +360,14 @@ module.exports = {
                 source:        address,
                 signingPubkey: signingPubkey,
                 contractIndex: contractIndex,
-                tick:          tick
+                tick:          tick,
+                txHash:        txHash
             }).catch(() => null)
             if(row) break
             await new Promise(r => setTimeout(r, 1000))
         }
+
+        if(row && /^invalid/.test(String(row.status))) booking.undo()
 
         return { txHash, stake: row }
     },

@@ -20,6 +20,31 @@ const assert = require('assert');
 const { SETTLE, BS, BLOCK, BLOCK_TIME, MEMBER_A, copyRow, snapshot, makeFixture } = require('./lib/shared');
 const { falsificationCases } = require('./lib/falsification_cases');
 
+const CHAIN_IDENTITY = SETTLE.loadIndexerModule('src/hub/hub_db_sync/chain_identity.js');
+
+// The real mirror apply fence, expecting `ownId`, refuses `row` and admits the same row
+// stamped with `ownId`.
+function assertFenceRefusesOnlyForeign(row, ownId){
+    const fence = Object.assign(Object.create(CHAIN_IDENTITY),
+                                { _expectedBtcChainId: ownId, _refusedChainIdRows: new Map() });
+    assert.strictEqual(fence.refuseForeignChainRow('policy_snapshots', row), true,
+        'a snapshot from a dead chain instance passed the mirror fence');
+    assert.strictEqual(fence.refuseForeignChainRow('policy_snapshots',
+        Object.assign({}, row, { btc_chain_id: ownId })), false,
+        'the mirror fence refused a snapshot of its own chain');
+}
+
+// The policy pass outcome for `row`, with `chainId` planted in config as BTC_CHAIN_ID.
+async function settleWithPlantedId(validators, row, chainId){
+    const { ctx, state } = SETTLE.makeSettleContext({
+        coin: 'DOGE', validators: validators, tokens: copyRow(), chainId: chainId,
+        blockIndex: BLOCK, blockTime: BLOCK_TIME
+    });
+    const res = await BS.applyPolicySnapshot(row, ctx);
+    return { applied: res.applied, reason: res.reason, terminal: res.terminal,
+             injected: state.injected.length };
+}
+
 describe('XPOLICY: policy AT4: falsification of a mirrored snapshot', function(){
     this.timeout(240_000);
 
@@ -50,19 +75,15 @@ describe('XPOLICY: policy AT4: falsification of a mirrored snapshot', function()
         });
     });
 
+    // Chain identity is the mirror apply fence's (the real refuseForeignChainRow), and the
+    // policy pass reads no per-node identity, so a planted BTC_CHAIN_ID changes nothing.
     it('applies nothing for a foreign btc_chain_id', async function(){
+        const own = '0'.repeat(64);
         const row = snapshot(ids, { block: [MEMBER_A], btcChainId: 'f'.repeat(64) });
-        const { ctx, state } = SETTLE.makeSettleContext({
-            coin: 'DOGE', validators: validators, tokens: copyRow(),
-            chainId: '0'.repeat(64),
-            blockIndex: BLOCK, blockTime: BLOCK_TIME
-        });
-
-        const res = await BS.applyPolicySnapshot(row, ctx);
-
-        assert.strictEqual(res.applied, false, 'a snapshot from a dead chain instance applied');
-        assert.strictEqual(res.terminal, true);
-        assert.deepStrictEqual(state.injected, []);
+        assertFenceRefusesOnlyForeign(row, own);
+        assert.deepStrictEqual(await settleWithPlantedId(validators, row, own),
+                               await settleWithPlantedId(validators, row, undefined),
+            'the policy pass compared the snapshot against a per-node chain identity');
     });
 
     it('refuses to inherit onto the ORIGIN chain itself', async function(){

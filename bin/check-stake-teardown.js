@@ -22,7 +22,7 @@
  * quorum that can no longer be reached. Every run passed while it happened.
  *
  * The release is automatic for stakes created through test/helpers/stakeHelper
- * (sendStakeV1 / sendStakeV2 / sendStakeV3), which register them with
+ * (sendStakeV1 / sendStakeV2 / sendStakeV3 / sendStakeV3Invalid), which register them with
  * test/helpers/stakeTeardown so the root afterAll can give them back. A suite
  * that hand-builds its own `STAKE|...` payload and broadcasts it directly
  * bypasses that ledger, and the leak comes straight back with nobody watching.
@@ -33,7 +33,8 @@
  * So every raw or SDK-form STAKE broadcast under test/ must do ONE of:
  *
  *   - go through stakeHelper, which registers the stake for release
- *   - register it itself (a stakeTeardown.registerStake call in the same file,
+ *   - register it itself (a stakeTeardown.registerStake or bookBroadcastStake
+ *     call in the same file,
  *     one live call per unmarked raw broadcast the file makes)
  *   - say why this one never becomes a member, on the payload's own line or in
  *     the comment block directly above it:
@@ -58,6 +59,7 @@
 const fs   = require('fs')
 const path = require('path')
 const { MIN_REASON_WORDS, optOutMarker } = require('./lib/opt_out_marker')
+const { interpolationEnd, scanNamed } = require('./lib/template_literal')
 
 const ROOT     = path.join(__dirname, '..')
 const SCAN_DIR = path.join(ROOT, 'test')
@@ -68,9 +70,6 @@ const SKIP_ANYWHERE = new Set(['node_modules'])
 // Skip only the top-level test/unit (helper coverage asserting STAKE payloads as
 // strings) and test/codec (offline round-trips); a nested unit/ or codec/ IS scanned.
 const SKIP_TOP_LEVEL = new Set(['unit', 'codec'])
-
-// The one file allowed to build STAKE payloads raw: it is the registrar.
-const REGISTRAR = path.join('test', 'helpers', 'stakeHelper.js')
 
 const COMMENT_LINE  = /^\s*(?:\/\/|\*)/
 const UNKNOWN       = '\u0000'
@@ -149,19 +148,23 @@ function quotedToken(source, start, quote, line){
 }
 
 function templateToken(source, start, line){
-    let i = start + 1, raw = '', tokenLine = line
+    let i = start + 1, value = '', tokenLine = line
     while (i < source.length){
-        if (source[i] === '`'){
-            const value = raw.replace(/\$\{[\s\S]*?\}/g, UNKNOWN)
-            return { end: i + 1, line: tokenLine, value }
+        if (source[i] === '`') return { end: i + 1, line: tokenLine, value }
+        if (source[i] === '$' && source[i + 1] === '{'){
+            const end = interpolationEnd(source, i + 2)
+            tokenLine += (source.slice(i, end).match(/\n/g) || []).length
+            value += UNKNOWN
+            i = end
+            continue
         }
         if (source[i] === '\n') tokenLine++
         if (source[i] === '\\' && i + 1 < source.length){
-            raw += source[i] + source[i + 1]
+            value += source[i] + source[i + 1]
             i += 2
-        } else raw += source[i++]
+        } else value += source[i++]
     }
-    return { end: i, line: tokenLine, value: raw }
+    return { end: i, line: tokenLine, value }
 }
 
 // Keywords after which a slash starts a regex literal rather than a division.
@@ -424,8 +427,9 @@ function isKnownNonStakePayload(tokens, rel, start, end){
 function registrationCount(tokens){
     let count = 0
     for (let i = 0; i + 3 < tokens.length; i++){
+        const method = tokens[i + 2].value
         if (tokens[i].value === 'stakeTeardown' && tokens[i + 1].value === '.' &&
-            tokens[i + 2].value === 'registerStake' && tokens[i + 3].value === '(') count++
+            (method === 'registerStake' || method === 'bookBroadcastStake') && tokens[i + 3].value === '(') count++
     }
     return count
 }
@@ -439,8 +443,7 @@ function actionValueSpan(tokens, i){
 }
 
 function scanLines(lines, rel){
-    if (rel === REGISTRAR || rel === REGISTRAR.split(path.sep).join('/')) return []
-    const tokens = tokensFor(lines.join('\n'))
+    const tokens = scanNamed(rel, () => tokensFor(lines.join('\n')))
     const bindings = bindingMap(tokens)
     const sitesByLine = new Map()
     const add = (token) => {
@@ -518,7 +521,8 @@ function main(){
     console.error('A stake nothing registers is a stake nothing gives back, and the shared venue keeps it')
     console.error('in its capability set for good.')
     console.error('Fix a site by staking through test/helpers/stakeHelper, or by calling')
-    console.error('stakeTeardown.registerStake() for the stake you broadcast. If this stake can never')
+    console.error('stakeTeardown.registerStake() or bookBroadcastStake() for the stake you broadcast.')
+    console.error('If this stake can never')
     console.error('become a capability member, say why on its own line or the one above,')
     console.error('in a reason of at least ' + MIN_REASON_WORDS + ' words on the marker line:')
     console.error('    // stake-teardown-ok: <reason>')

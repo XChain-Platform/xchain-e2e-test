@@ -39,5 +39,8 @@ describe('Protocol size-limit drift guard', () => {
     require('./protocol-size-limits.regression/family_b_batch_weight_budget.test')
     require('./protocol-size-limits.regression/family_b_settle_xpolicy_rollcall.test')
     require('./protocol-size-limits.regression/family_b_rollcall_gates.test')
-    require('./protocol-size-limits.regression/vendored_byte_identity.test')
+    // The CI size-cap tier excludes the broader export-roster guard, which has
+    // its own drift lifecycle and remains part of the full manual regression.
+    if (process.env.XCHAIN_SIZE_CAPS_ONLY !== '1')
+        require('./protocol-size-limits.regression/vendored_byte_identity.test')
 })

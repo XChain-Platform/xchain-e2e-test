@@ -34,6 +34,7 @@
 const fs   = require('fs')
 const path = require('path')
 const { optOutMarker } = require('./lib/opt_out_marker')
+const { scanNamed, templateLiteralEnd } = require('./lib/template_literal')
 
 const ROOT         = path.join(__dirname, '..')
 const DEFAULT_PATH = path.join(ROOT, 'test', 'attestMirror')
@@ -63,7 +64,11 @@ function blankNonCode (src) {
             const stop = end === -1 ? src.length : end + 2
             blank(i, stop); i = stop; continue
         }
-        if (c === '"' || c === "'" || c === '`') {
+        if (c === '`') {
+            const end = templateLiteralEnd(src, i)
+            blank(i, end); i = end; continue
+        }
+        if (c === '"' || c === "'") {
             let j = i + 1
             while (j < src.length) {
                 if (src[j] === '\\') { j += 2; continue }
@@ -227,7 +232,7 @@ function markerFor (lines, lineNumber) {
 }
 
 function scanSource (src, rel) {
-    const code = blankNonCode(src)
+    const code = scanNamed(rel, () => blankNonCode(src))
     const lines = src.split('\n')
     const blocks = blocksOf(code)
     const assignments = assignmentsOf(code)

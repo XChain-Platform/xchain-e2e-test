@@ -308,12 +308,12 @@ function registerNftTradingTest() {
             );
             expect(statusOf(buy), 'buy ORDER').to.equal('valid');
 
-            // DB-confirm the match settled exactly 3 NFT on the give side (an integer,
-            // not a fractional artifact; this is the order_match indivisibility guarantee).
+            // DB-confirm the match settled exactly 3 NFT. Match rows use the incoming
+            // order's side, and the buy arrived second, so the NFT is on the get side.
             const match = await global.indexerDatabase.waitForOrderMatch({
-                giveTick: tick, getTick: 'XCHAIN', giveAmount: '3', status: 'valid',
+                giveTick: 'XCHAIN', getTick: tick, getAmount: '3', status: 'valid',
             });
-            expect(match, 'order_match recorded with integer give_amount=3').to.exist;
+            expect(match, 'order_match recorded with integer get_amount=3').to.exist;
 
             const bal = String(rawBalance(await sdk.getBalances(other.address), tick));
             expect(bal, 'buyer holds integer NFT amount').to.equal('3');
