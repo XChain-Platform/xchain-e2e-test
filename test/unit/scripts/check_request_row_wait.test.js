@@ -117,6 +117,26 @@ function registerMarkerClassifications () {
         ])
         assert.strictEqual(hits[0].status, 'unguarded')
     })
+
+    it('does not accept marker text inside a string', function () {
+        const hits = scan([
+            'async function check(requestId) {',
+            "    const note = '// request-row-wait-ok: absence is deliberately observed here.'",
+            '    return readRequestRow(venue, 0, requestId)',
+            '}',
+        ])
+        assert.strictEqual(hits[0].status, 'unguarded')
+    })
+
+    it('accepts a real marker after a string containing double slashes', function () {
+        const hits = scan([
+            'async function check(requestId) {',
+            "    const ref = 'proto://value'; return readRequestRow(venue, 0, requestId) // " +
+                'request-row-wait-ok: absence is deliberately observed here.',
+            '}',
+        ])
+        assert.strictEqual(hits[0].status, 'exception')
+    })
 }
 
 describe('check-request-row-wait classifications', function () {

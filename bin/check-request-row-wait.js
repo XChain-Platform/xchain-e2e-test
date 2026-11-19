@@ -33,6 +33,7 @@
 
 const fs   = require('fs')
 const path = require('path')
+const { lineComments, markerFor } = require('./lib/line_comments')
 const { optOutMarker } = require('./lib/opt_out_marker')
 const { scanNamed, templateLiteralEnd } = require('./lib/template_literal')
 
@@ -222,18 +223,10 @@ function dominates (wait, read) {
     return wait.ancestry.every((b) => readIds.has(b.id))
 }
 
-function markerFor (lines, lineNumber) {
-    const own = lines[lineNumber - 1] || ''
-    if (isOptOut(own)) return own.trim()
-    for (let i = lineNumber - 2; i >= 0 && /^\s*\/\//.test(lines[i]); i--) {
-        if (isOptOut(lines[i])) return lines[i].trim()
-    }
-    return null
-}
-
 function scanSource (src, rel) {
     const code = scanNamed(rel, () => blankNonCode(src))
     const lines = src.split('\n')
+    const comments = scanNamed(rel, () => lineComments(src))
     const blocks = blocksOf(code)
     const assignments = assignmentsOf(code)
     const readAliases = aliasesFor(code, 'readRequestRow')
@@ -252,7 +245,7 @@ function scanSource (src, rel) {
     }))
 
     return reads.map((read) => {
-        const marker = markerFor(lines, read.line)
+        const marker = markerFor(lines, comments, read.line, isOptOut)
         if (marker) return { ...read, status: 'exception', reason: marker }
         const guard = waits.filter((wait) => dominates(wait, read) && sameIndexer(wait, read, src) &&
             requestRelatedHeight(wait.args[2], read.args[2], assignments, read.offset)).pop()

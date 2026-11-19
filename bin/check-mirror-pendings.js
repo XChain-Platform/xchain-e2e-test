@@ -22,13 +22,48 @@ const TESTS = new Set(['it', 'test'])
 const MOCHA_DECLARERS = new Set(['describe', 'context', 'it', 'specify', 'xdescribe', 'xcontext', 'xit', 'xspecify',
     'suite', 'test', 'before', 'beforeEach', 'setup'])
 
-function maskNonCode (source) {
-    const out = source.split('')
-    const blank = (from, to) => {
-        for (let i = from; i < to && i < out.length; i++) {
-            if (out[i] !== '\n') out[i] = ' '
-        }
+function blankRange (target, from, to) {
+    for (let i = from; i < to && i < target.length; i++) {
+        if (target[i] !== '\n') target[i] = ' '
     }
+}
+
+function quotedEnd (source, start, quote) {
+    let end = start + 1
+    while (end < source.length) {
+        if (source[end] === '\\') end += 2
+        else if (source[end++] === quote) break
+    }
+    return end
+}
+
+function slashStartsRegex (masked, source, index) {
+    let previous = index - 1
+    while (previous >= 0 && /\s/.test(masked[previous])) previous--
+    const prior = previous < 0 ? '' : masked[previous]
+    const word = source.slice(Math.max(0, previous - 9), previous + 1)
+    return previous < 0 || '(,=:[!&|?{};+-*%^~<>'.includes(prior) ||
+        /\b(?:return|typeof|case|in|of|do|else|yield|await|void|delete|new|instanceof|throw)$/.test(word)
+}
+
+function regexEnd (source, start) {
+    let end = start + 1, inClass = false
+    while (end < source.length && source[end] !== '\n') {
+        if (source[end] === '\\') end += 2
+        else if (source[end] === '[') { inClass = true; end++ }
+        else if (source[end] === ']') { inClass = false; end++ }
+        else if (source[end] === '/' && !inClass) {
+            end++
+            while (/[a-z]/i.test(source[end] || '')) end++
+            return end
+        } else end++
+    }
+    return -1
+}
+
+function maskNonCode (source) {
+    const masked = source.split('')
+    const uncommented = source.split('')
     let i = 0
     while (i < source.length) {
         const c = source[i]
@@ -36,77 +71,42 @@ function maskNonCode (source) {
         if (c === '/' && next === '/') {
             const end = source.indexOf('\n', i)
             const stop = end === -1 ? source.length : end
-            blank(i, stop)
+            blankRange(masked, i, stop)
+            blankRange(uncommented, i, stop)
             i = stop
             continue
         }
         if (c === '/' && next === '*') {
             const end = source.indexOf('*/', i + 2)
             const stop = end === -1 ? source.length : end + 2
-            blank(i, stop)
+            blankRange(masked, i, stop)
+            blankRange(uncommented, i, stop)
             i = stop
             continue
         }
         if (c === '`') {
             const end = templateLiteralEnd(source, i)
-            blank(i, end)
+            blankRange(masked, i, end)
             i = end
             continue
         }
         if (c === '"' || c === "'") {
-            const quote = c
-            let end = i + 1
-            while (end < source.length) {
-                if (source[end] === '\\') {
-                    end += 2
-                    continue
-                }
-                if (source[end] === quote) {
-                    end++
-                    break
-                }
-                end++
-            }
-            blank(i, end)
+            const end = quotedEnd(source, i, c)
+            blankRange(masked, i, end)
             i = end
             continue
         }
-        if (c === '/') {
-            let previous = i - 1
-            while (previous >= 0 && /\s/.test(out[previous])) previous--
-            const prior = previous < 0 ? '' : out[previous]
-            const word = source.slice(Math.max(0, previous - 9), previous + 1)
-            const canStartRegex = previous < 0 || '(,=:[!&|?{};+-*%^~<>'.includes(prior) ||
-                /\b(?:return|typeof|case|in|of|do|else|yield|await|void|delete|new|instanceof|throw)$/.test(word)
-            if (canStartRegex) {
-                let end = i + 1
-                let inClass = false
-                let closed = false
-                while (end < source.length && source[end] !== '\n') {
-                    if (source[end] === '\\') {
-                        end += 2
-                        continue
-                    }
-                    if (source[end] === '[') inClass = true
-                    else if (source[end] === ']') inClass = false
-                    else if (source[end] === '/' && !inClass) {
-                        end++
-                        while (/[a-z]/i.test(source[end] || '')) end++
-                        closed = true
-                        break
-                    }
-                    end++
-                }
-                if (closed) {
-                    blank(i, end)
-                    i = end
-                    continue
-                }
+        if (c === '/' && slashStartsRegex(masked, source, i)) {
+            const end = regexEnd(source, i)
+            if (end !== -1) {
+                blankRange(masked, i, end)
+                i = end
+                continue
             }
         }
         i++
     }
-    return out.join('')
+    return { masked: masked.join(''), uncommented: uncommented.join('') }
 }
 
 function closeBrace (masked, open) {
@@ -134,7 +134,7 @@ function closeParen (masked, open) {
 }
 
 // Split the masked text between from and to at top-level commas; a trailing empty argument is dropped.
-function topLevelArgs (masked, source, from, to) {
+function topLevelArgs (masked, uncommented, from, to) {
     const args = []
     let depth = 0
     let start = from
@@ -148,8 +148,9 @@ function topLevelArgs (masked, source, from, to) {
         }
     }
     args.push({ start, end: to })
-    // Judge emptiness on the source: masking blanks a string argument to whitespace.
-    return args.filter((arg, index) => index === 0 || index < args.length - 1 || source.slice(arg.start, arg.end).trim() !== '')
+    // Comments are not arguments, while literal values still are.
+    return args.filter((arg, index) => index === 0 || index < args.length - 1 ||
+        uncommented.slice(arg.start, arg.end).trim() !== '')
 }
 
 function lineAt (source, offset) {
@@ -174,14 +175,14 @@ function stringAt (source, offset) {
 }
 
 function findCalls (source) {
-    const masked = maskNonCode(source)
+    const { masked, uncommented } = maskNonCode(source)
     const calls = []
     MOCHA_CALL.lastIndex = 0
     let match
     while ((match = MOCHA_CALL.exec(masked)) !== null) {
         const openParen = masked.indexOf('(', match.index)
         const parenClose = closeParen(masked, openParen)
-        const args = topLevelArgs(masked, source, openParen + 1, parenClose)
+        const args = topLevelArgs(masked, uncommented, openParen + 1, parenClose)
         const last = args[args.length - 1]
         // Look for the callback only at the head of the call's own last argument.
         const callback = last && /^\s*(?:async\s+)?(?:function(?:\s+[\w$]+)?\s*\([^)]*\)|\([^)]*\)\s*=>|[\w$]+\s*=>)\s*\{/
@@ -202,7 +203,7 @@ function findCalls (source) {
             bodyClose,
         })
     }
-    return { calls, masked }
+    return { calls, masked, uncommented }
 }
 
 function parentSuite (call, calls) {
@@ -338,14 +339,15 @@ function declaredPendings (source, file, calls) {
 // Report a runtime skip, except the standard unavailable-venue guard: this.skip(), or the mocha
 // context a hook passes into a helper (mocha.skip()). A skip outside any hook or test body is
 // charged to its helper function, since the gate cannot follow the call back to a test.
-function runtimePendings (source, file, calls, masked) {
+function runtimePendings (source, file, calls, masked, uncommented) {
     const pending = []
     const skipCall = /(?<![.$\w])([A-Za-z_$][\w$]*)\s*\.\s*skip\s*\(/g
     let match
     while ((match = skipCall.exec(masked)) !== null) {
         const openParen = match.index + match[0].length - 1
         // A declared skip (it.skip, describe.skip) or a skip with arguments is not mocha's runtime skip.
-        if (MOCHA_DECLARERS.has(match[1]) || source.slice(openParen + 1, closeParen(masked, openParen)).trim() !== '') continue
+        if (MOCHA_DECLARERS.has(match[1]) ||
+            uncommented.slice(openParen + 1, closeParen(masked, openParen)).trim() !== '') continue
         const container = calls
             .filter((call) => call.bodyOpen < match.index && call.bodyClose > match.index)
             .sort((a, b) => b.bodyOpen - a.bodyOpen)
@@ -372,8 +374,9 @@ function runtimePendings (source, file, calls, masked) {
 }
 
 function parseSource (source, file) {
-    const { calls, masked } = findCalls(source)
-    const pending = declaredPendings(source, file, calls).concat(runtimePendings(source, file, calls, masked))
+    const { calls, masked, uncommented } = findCalls(source)
+    const pending = declaredPendings(source, file, calls)
+        .concat(runtimePendings(source, file, calls, masked, uncommented))
     return { pending: pending.sort((a, b) => a.line - b.line), calls }
 }
 

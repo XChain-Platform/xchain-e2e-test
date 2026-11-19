@@ -19,12 +19,12 @@
 // regtest stack.
 //
 // An ACTION name counts when a suite at any depth under test/actions/ actually
-// builds a payload for it. Payloads are always assembled as "NAME|<version>|..."
-// string literals, either in the suite itself or in a test/ helper the suite
-// pulls in, so we walk each suite's local require graph and read the leading
-// token out of those literals. Tokens are then filtered against the decoder's
-// VALID_ACTION_NAMES (aliases folded to their canonical spelling), so a stray
-// capitalized literal can never inflate the number.
+// builds a payload for it. Payloads may be assembled as "NAME|<version>|..."
+// string literals or as [NAME, version, ...].join('|') arrays, either in the
+// suite itself or in a test/ helper the suite pulls in. We walk each suite's
+// local require graph and read those leading tokens. Tokens are then filtered
+// against the decoder's VALID_ACTION_NAMES (aliases folded to their canonical
+// spelling), so a stray capitalized literal can never inflate the number.
 
 const fs = require('fs')
 const path = require('path')
@@ -45,6 +45,8 @@ const CONSTANTS_SRC = path.join(REPO_ROOT, '../xchain-decoder/src/XChainDecoder/
 // "BATCH|" + version + ... . The delimiter class after the pipe keeps ordinary
 // prose and SQL out of the result set.
 const PAYLOAD_LITERAL = /["'`]([A-Z][A-Z0-9]{2,})\|(?:\d+|["'`]|\$\{)/g
+const PAYLOAD_ARRAY_HEAD = /\[\s*["'`]([A-Z][A-Z0-9]{2,})["'`]\s*,\s*["'`]?\d+["'`]?\s*[,\]]/g
+const PIPE_JOIN = /^\s*\.join\(\s*(["'`])\|\1\s*\)/
 
 const LOCAL_REQUIRE = /require\((['"])(\.[^'"]+)\1\)/g
 
@@ -196,6 +198,95 @@ function actionSuiteFiles(dir, base = dir, found = []) {
     return found.sort()
 }
 
+// A slash after one of these (or after one of these keywords) opens a regex
+// literal; after an identifier, number or closing bracket it is division.
+const REGEX_PRECEDER = /(?:[(,=:[!&|?{};+\-*%<>~^]|\b(?:return|typeof|case|in|of|delete|void|throw|new|yield|await))\s*$/
+
+// Quote and backslash characters inside a regex literal must not open a
+// string, so the body runs to the closing slash outside any character class.
+function regexEnd(source, start) {
+    let inClass = false
+    for (let i = start + 1; i < source.length && source[i] !== '\n'; i++) {
+        if (source[i] === '\\') i++
+        else if (source[i] === '[') inClass = true
+        else if (source[i] === ']') inClass = false
+        else if (source[i] === '/' && !inClass) return i + 1
+    }
+    return -1
+}
+
+// Plain quotes cannot span a line, so a stray quote is bounded to its line.
+function quotedEnd(source, start) {
+    const quote = source[start]
+    let i = start + 1
+    while (i < source.length && source[i] !== quote) {
+        if (quote !== '`' && source[i] === '\n') return i
+        i += source[i] === '\\' ? 2 : 1
+    }
+    return Math.min(i + 1, source.length)
+}
+
+// The non-code span opening at i as [blankFrom, end], or null. A literal keeps
+// its opening delimiter, so a later slash never reads a blanked string as an
+// operator that would open a regex.
+function nonCodeSpan(source, out, i) {
+    const ch = source[i]
+    if (ch === '"' || ch === "'" || ch === '`') return [i + 1, quotedEnd(source, i)]
+    if (source.startsWith('//', i)) {
+        const newline = source.indexOf('\n', i)
+        return [i, newline === -1 ? source.length : newline]
+    }
+    if (source.startsWith('/*', i)) {
+        const close = source.indexOf('*/', i + 2)
+        return [i, close === -1 ? source.length : close + 2]
+    }
+    if (ch === '/' && REGEX_PRECEDER.test(out.slice(Math.max(0, i - 16), i).join(''))) {
+        const end = regexEnd(source, i)
+        if (end !== -1) return [i + 1, end]
+    }
+    return null
+}
+
+// Blank out comment text and string and regex bodies (keeping length and
+// newlines) so a bracket inside any of them never reads as code.
+function maskNonCode(source) {
+    const out = source.split('')
+    let i = 0
+    while (i < source.length) {
+        const span = nonCodeSpan(source, out, i)
+        if (!span) {
+            i++
+            continue
+        }
+        for (let j = span[0]; j < span[1]; j++) if (source[j] !== '\n') out[j] = ' '
+        i = span[1]
+    }
+    return out.join('')
+}
+
+function arrayEnd(masked, start) {
+    let depth = 0
+    for (let i = start; i < masked.length; i++) {
+        if (masked[i] === '[') depth++
+        else if (masked[i] === ']' && --depth === 0) return i + 1
+    }
+    return -1
+}
+
+// Names whose [NAME, version, ...] array is live code and is joined with '|'.
+// The head is read from the original text but only at a bracket the masked
+// text shows as code, so commented-out or quoted examples never count.
+function arrayPayloadNames(source) {
+    const masked = maskNonCode(source)
+    const names = []
+    for (const match of source.matchAll(PAYLOAD_ARRAY_HEAD)) {
+        if (masked[match.index] !== '[') continue
+        const end = arrayEnd(masked, match.index)
+        if (end !== -1 && PIPE_JOIN.test(source.slice(end))) names.push(match[1])
+    }
+    return names
+}
+
 // actionsDir/testRoot default to this repo's own tree; they are parameters only
 // so a test can drive the counter over a fixture suite and prove alias folding
 // actually happens, which nothing could express before.
@@ -212,6 +303,10 @@ function countActionSuites({ actionsDir = ACTIONS_DIR, testRoot = TEST_ROOT } = 
             const src = fs.readFileSync(file, 'utf8')
             for (const m of src.matchAll(PAYLOAD_LITERAL)) {
                 const name = vocab.aliases[m[1]] || m[1]
+                if (vocab.names.has(name)) found.add(name)
+            }
+            for (const rawName of arrayPayloadNames(src)) {
+                const name = vocab.aliases[rawName] || rawName
                 if (vocab.names.has(name)) found.add(name)
             }
         }

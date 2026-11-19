@@ -49,7 +49,7 @@ describe('getContractState() key semantics', function () {
         state.mockConnection.query.rejects(err)
         const spy = sinon.stub(console, 'error')
         try {
-            assert.strictEqual(await state.db.getContractState(7, 'callback_status'), null)
+            await assert.rejects(state.db.getContractState(7, 'callback_status'), /state_key_bin/)
             assert.strictEqual(spy.callCount, 1)
             assert.match(spy.firstCall.args[0], /state_key_bin/)
         } finally { spy.restore() }
@@ -76,5 +76,15 @@ describe('queryListAddresses()', function () {
         const result = await state.db.queryListAddresses('SELECT 1', 5)
         assert.deepStrictEqual(result, { succeeded: false })
         assert.ok(state.mockConnection.release.notCalled)
+    })
+})
+
+describe('getActiveStakeCount()', function () {
+    it('counts scheduled deactivations through the committed indexer tip', async function () {
+        state.mockConnection.query.resolves([{ n: 2 }])
+        assert.strictEqual(await state.db.getActiveStakeCount(), 2)
+        const sql = state.mockConnection.query.firstCall.args[0]
+        assert.match(sql, /deactivation_block\s*>\s*\(\s*SELECT COALESCE\(MAX\(b\.block_index\), 0\)/)
+        assert.doesNotMatch(sql, /activation_block\s*<=/)
     })
 })

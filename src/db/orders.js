@@ -15,7 +15,7 @@
  *
  ********************************************************************/
 
-const { rethrowInsideWait, logger } = require('./shared')
+const { rethrowQueryError, logger } = require('./shared')
 
 class OrderChecks {
     // ─── ORDER ─────────────────────────────────────────────────────────
@@ -68,7 +68,7 @@ class OrderChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (order):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -102,7 +102,7 @@ class OrderChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (order_match):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -153,7 +153,7 @@ class OrderChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (swap):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -187,7 +187,7 @@ class OrderChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (swap_match):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -216,7 +216,7 @@ class OrderChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (batch):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -253,7 +253,7 @@ class OrderChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (link):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }

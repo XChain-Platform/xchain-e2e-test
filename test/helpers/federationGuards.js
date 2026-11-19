@@ -87,7 +87,8 @@ async function assertCleanValidatorSet(indexerDatabase){
         'Hub-federation tests need a clean validator set, but the chain has ' + n +
         ' active stake(s). Reset to a fresh chain first:\n' +
         '    XCHAIN_NODE_DATA_DIR=<data dir> xchain_node reset all bitcoin regtest\n' +
-        '(run each federation suite on its own fresh chain; they are not isolated from prior staking).')
+        '(run each federation suite on its own fresh chain; they are not isolated from prior staking). ' +
+        'A recently unstaked validator stays active until its deactivation block passes.')
 }
 
 // ── Per-request responsible-set guards (selection-dependent cases) ──────────

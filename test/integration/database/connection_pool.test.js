@@ -108,9 +108,7 @@ describe('Database Connection Pool Integration', function () {
             const db = createDb()
             mockConnection.query.rejects(new Error('MariaDB syntax error'))
 
-            const result = await db.checkIssue({ tick: 'MYTOKEN' })
-
-            assert.strictEqual(result, null, 'returns null on error')
+            await assert.rejects(db.checkIssue({ tick: 'MYTOKEN' }), /MariaDB syntax error/)
             assert(mockConnection.release.calledOnce, 'connection released despite error')
         })
 
@@ -118,9 +116,7 @@ describe('Database Connection Pool Integration', function () {
             const db = createDb()
             mockConnection.query.rejects(new Error('table not found'))
 
-            const result = await db.checkSend({ source: 'addr1' })
-
-            assert.strictEqual(result, null)
+            await assert.rejects(db.checkSend({ source: 'addr1' }), /table not found/)
             assert(mockConnection.release.calledOnce)
         })
     })

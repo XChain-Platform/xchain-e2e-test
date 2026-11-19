@@ -15,7 +15,7 @@
  *
  ********************************************************************/
 
-const { rethrowInsideWait, logger } = require('./shared')
+const { rethrowQueryError, logger } = require('./shared')
 
 class StakingChecks {
     async getAttestationRequestsByContract(contractIndex){
@@ -27,7 +27,7 @@ class StakingChecks {
         const connection = await this.getConnection()
         try {
             return await connection.query(query, [contractIndex])
-        } catch(err){ this['_warnOnSchemaError']('getAttestationRequestsByContract', err); return rethrowInsideWait(err, []) } finally { await connection.release() }
+        } catch(err){ this['_warnOnSchemaError']('getAttestationRequestsByContract', err); return rethrowQueryError(err) } finally { await connection.release() }
     }
 
     // Distinguish a schema drift (missing table / renamed column) from a normal
@@ -62,7 +62,7 @@ class StakingChecks {
         try {
             const rows = await connection.query(query, [contractIndex, stateKey])
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ this['_warnOnSchemaError']('getContractState', err); return rethrowInsideWait(err) } finally { await connection.release() }
+        } catch(err){ this['_warnOnSchemaError']('getContractState', err); return rethrowQueryError(err) } finally { await connection.release() }
     }
 
     async waitForDelegation(params, timeMax = 60000){ return this['_waitFor'](this.checkDelegation, params, timeMax) }
@@ -95,7 +95,7 @@ class StakingChecks {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
+        } catch(err){ return rethrowQueryError(err) } finally { await connection.release() }
     }
 
     // ── Stake-key revocations (DELEGATE v2 against the ORIGINAL stake key) ──
@@ -125,7 +125,7 @@ class StakingChecks {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
+        } catch(err){ return rethrowQueryError(err) } finally { await connection.release() }
     }
 
     // ── Contract-targeted staking (STAKE v3 / UNSTAKE v1 / DELEGATE v1) ──
@@ -156,7 +156,7 @@ class StakingChecks {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
+        } catch(err){ return rethrowQueryError(err) } finally { await connection.release() }
     }
 
     async waitForContractUnstake(params, timeMax = 60000){ return this['_waitFor'](this.checkContractUnstake, params, timeMax) }
@@ -185,7 +185,7 @@ class StakingChecks {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
+        } catch(err){ return rethrowQueryError(err) } finally { await connection.release() }
     }
 
     async waitForContractDelegation(params, timeMax = 60000){ return this['_waitFor'](this.checkContractDelegation, params, timeMax) }
@@ -211,7 +211,7 @@ class StakingChecks {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
+        } catch(err){ return rethrowQueryError(err) } finally { await connection.release() }
     }
 
     async waitForSlashEvent(params, timeMax = 60000){ return this['_waitFor'](this.checkSlashEvent, params, timeMax) }
@@ -233,7 +233,7 @@ class StakingChecks {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
+        } catch(err){ return rethrowQueryError(err) } finally { await connection.release() }
     }
 
     async waitForRewardClaim(params, timeMax = 60000){ return this['_waitFor'](this.checkRewardClaim, params, timeMax) }
@@ -256,7 +256,7 @@ class StakingChecks {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
+        } catch(err){ return rethrowQueryError(err) } finally { await connection.release() }
     }
 }
 

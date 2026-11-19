@@ -20,7 +20,7 @@ const ROOT = path.join(__dirname, '..')
 const SCAN_DIR = path.join(ROOT, 'test', 'attestMirror', 'barrier_family')
 const CALL_BOOTS = new Set(['bootFamilyVenue', 'buildFamilyVenue'])
 const CONSTRUCTOR_BOOT = 'AttestMirrorVenue'
-const isOptOut = optOutMarker('fresh-indexers-ok', { commentText: true })
+const isOptOut = optOutMarker('fresh-indexers-ok')
 
 // Parse the file and keep each line comment by line, so text inside strings never reads as a comment.
 function parseWithComments (source) {

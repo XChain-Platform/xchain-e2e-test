@@ -161,12 +161,81 @@ function countingChecks() {
     })
 
     it('counts distinct ACTION names, not suite files', () => {
-        // The whole point of the rule: 69-odd files collapse onto far fewer
+        // The whole point of the rule: 141 files collapse onto far fewer
         // action names, because versions and reorg/negative variants of one
         // action are the same entry.
         assert.ok(recount.count < recount.suiteFiles,
             'the recount produced one entry per file, which is not the ACTION-name rule')
         assert.ok(recount.count > 0, 'the recount found no actions at all')
+    })
+}
+
+// Counts a fixture tree of { 'relative/path.js': source } under a fresh temp
+// root, with suites under actions/ and helpers beside it.
+function countFixture(files) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'action-count-array-'))
+    try {
+        for (const [rel, source] of Object.entries(files)) {
+            fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true })
+            fs.writeFileSync(path.join(root, rel), source)
+        }
+        return counter.countActionSuites({ actionsDir: path.join(root, 'actions'), testRoot: root })
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true })
+    }
+}
+
+function arrayPayloadChecks() {
+    it('counts a pipe-joined ACTION array reached through a helper', () => {
+        const counted = countFixture({
+            'helpers/attest_builder.js': [
+                'module.exports = (x) => [', "    'ATTEST',", "    '1',", '    x', "].join('|')",
+            ].join('\n'),
+            'actions/attest.test.js': "require('../helpers/attest_builder')\n",
+            'actions/names_only.test.js':
+                "const names = ['VOTE', 'BET']\nconst tuple = ['VOTE', '1', value]\n",
+        })
+        assert.deepStrictEqual(counted.bySuite['attest.test.js'], ['ATTEST'])
+        assert.deepStrictEqual(counted.bySuite['names_only.test.js'], [])
+        assert.ok(!counted.actions.includes('VOTE'))
+        assert.ok(!counted.actions.includes('BET'))
+    })
+
+    it('ignores pipe-joined array text inside comments and strings', () => {
+        const counted = countFixture({
+            'actions/inert.test.js': [
+                "// const old = ['VOTE', '1', x].join('|')",
+                "/* const older = ['BET', '0', y].join('|') */",
+                "const doc = \"example: ['VOTE', '1', x].join('|')\"",
+                "const tpl = `['BET', '0', y].join('|')`",
+                "const live = ['SEND', '0', z].join('|')",
+            ].join('\n'),
+        })
+        assert.deepStrictEqual(counted.bySuite['inert.test.js'], ['SEND'])
+        assert.ok(!counted.actions.includes('VOTE'))
+        assert.ok(!counted.actions.includes('BET'))
+    })
+
+    it('reads quotes inside a regex literal as regex, not as a string', () => {
+        // A quote in a regex body (even after a slash inside a character
+        // class) must not open a string that swallows the live array after it,
+        // a division slash must not open a regex, and a quote the mask cannot
+        // close stops at its own line.
+        const counted = countFixture({
+            'actions/regex.test.js': [
+                "const re = /[/'\"]/g; const live = ['SEND', '0', z].join('|')",
+                "const half = total / 2; const y = ['VOTE', '1', x].join('|'); const r = 1 / 4",
+                "if (ok) /'/.test(s)",
+                "const w = ['BET', '0', q].join('|')",
+            ].join('\n'),
+        })
+        assert.deepStrictEqual(counted.bySuite['regex.test.js'], ['BET', 'SEND', 'VOTE'])
+    })
+
+    it('counts the real attestation action suite as ATTEST coverage', () => {
+        const suite = 'attestation.test/02_accepts_a_signed_attest_v1_response.test.js'
+        assert.ok(recount.actions.includes('ATTEST'))
+        assert.ok(recount.bySuite[suite].includes('ATTEST'))
     })
 }
 
@@ -231,6 +300,7 @@ describe('published ACTION test-suite count', () => {
     describe('the counting rule is reproducible from the tree', vocabularyChecks)
     describe('the counting rule is reproducible from the tree', aliasChecks)
     describe('the counting rule is reproducible from the tree', countingChecks)
+    describe('the counting rule is reproducible from the tree', arrayPayloadChecks)
 })
 
 describe('published ACTION test-suite count', () => {

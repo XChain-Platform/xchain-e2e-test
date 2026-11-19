@@ -15,7 +15,7 @@
  *
  ********************************************************************/
 
-const { rethrowInsideWait, logger } = require('./shared')
+const { rethrowQueryError, logger } = require('./shared')
 
 class MarketChecks {
     // ─── ADDRESS ───────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ class MarketChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (address):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -81,7 +81,7 @@ class MarketChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (destroy):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -113,7 +113,7 @@ class MarketChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (message):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -153,7 +153,7 @@ class MarketChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (price):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -185,7 +185,7 @@ class MarketChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (file):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -219,7 +219,7 @@ class MarketChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (sleep):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -256,7 +256,7 @@ class MarketChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (sweep):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -291,7 +291,7 @@ class MarketChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (dividend):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -325,7 +325,7 @@ class MarketChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (callback):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }

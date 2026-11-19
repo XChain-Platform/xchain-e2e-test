@@ -16,7 +16,7 @@
  ********************************************************************/
 
 const { buildDispenserFilters, buildDispenserQuery } = require('./dispenser_filters')
-const { rethrowInsideWait, logger } = require('./shared')
+const { rethrowQueryError, logger } = require('./shared')
 
 class DispenserChecks {
     async waitForDispenser(dispenserObject, timeMax = 60000){ return this['_waitFor'](this.checkDispenser, dispenserObject, timeMax) }
@@ -39,7 +39,7 @@ class DispenserChecks {
             }
         } catch (err) {
             logger.error('Error with database query (dispenser):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -120,7 +120,7 @@ class DispenserChecks {
             }
         } catch (err) {
             logger.error('Error with database query (dispense):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -145,7 +145,7 @@ class DispenserChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (dispenser_status):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }

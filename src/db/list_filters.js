@@ -15,7 +15,7 @@
  *
  ********************************************************************/
 
-const { rethrowInsideWait, logger } = require('./shared')
+const { rethrowQueryError, logger } = require('./shared')
 
 function buildBroadcastFilter({blockIndex,txHash,source,message,value,fee,memo,broadcastActionIndex,status}){
     const whereClauses = []
@@ -143,7 +143,7 @@ async function findListRow(database, query, whereValues){
         }
     } catch (err) {
         logger.error('Error with database query (list):', err);
-        return rethrowInsideWait(err, {listRow: null, finished: true})
+        return rethrowQueryError(err)
     } finally {
         await connection.release()
     }
@@ -203,7 +203,7 @@ async function checkListItems(database, listRow, type, items){
         }
     } catch (err) {
         logger.error('Error with database query (list items):', err);
-        return rethrowInsideWait(err)
+        return rethrowQueryError(err)
     } finally {
         await connection.release()
     }

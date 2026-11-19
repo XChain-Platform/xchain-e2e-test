@@ -13,7 +13,7 @@
 // Chaos Experiment 5: Database Mid-Query Disconnect (@P1)
 //
 // Verifies that when a MariaDB connection drops during a polling query, a
-// direct check* call returns null (not throw) and releases the connection, the
+// direct check* call rejects and releases the connection, the
 // waitFor* polling loop keeps retrying, and a wait that never got an answer says so.
 
 const assert = require('assert')
@@ -35,16 +35,14 @@ describe('Chaos Experiment 5: Database Mid-Query Disconnect @P1', function () {
             const { db, mockConn } = createDb()
             mockConn.query.rejects(new Error('ER_CONNECTION_LOST'))
 
-            const result = await db.checkIssue({ tick: 'CHAOS', status: 'valid' })
-
-            assert.strictEqual(result, null)
+            await assert.rejects(db.checkIssue({ tick: 'CHAOS', status: 'valid' }), /ER_CONNECTION_LOST/)
         })
 
         it('releases connection even when query throws', async function () {
             const { db, mockConn } = createDb()
             mockConn.query.rejects(new Error('ER_CONNECTION_LOST'))
 
-            await db.checkIssue({ tick: 'CHAOS' })
+            await assert.rejects(db.checkIssue({ tick: 'CHAOS' }), /ER_CONNECTION_LOST/)
 
             assert(mockConn.release.calledOnce, 'connection must be released in finally block')
         })
@@ -109,9 +107,7 @@ describe('Chaos Experiment 5: Database Mid-Query Disconnect @P1', function () {
             const { db, mockConn } = createDb()
             mockConn.query.rejects(new Error('ER_CONNECTION_LOST'))
 
-            const result = await db.checkSend({ tick: 'CHAOS', source: 'addr1' })
-
-            assert.strictEqual(result, null)
+            await assert.rejects(db.checkSend({ tick: 'CHAOS', source: 'addr1' }), /ER_CONNECTION_LOST/)
             assert(mockConn.release.calledOnce)
         })
     })

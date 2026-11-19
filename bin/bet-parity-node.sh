@@ -259,7 +259,16 @@ cmd_status() {
 cmd_logs() { docker logs --tail "${2:-40}" "$PARITY_CONTAINER"; }
 
 cmd_down() {
+    local remaining
     docker rm -f "$PARITY_CONTAINER" >/dev/null 2>&1 || true
+    if ! remaining=$(docker ps -aq --filter "name=^${PARITY_CONTAINER}$"); then
+        echo "FAILED: cannot confirm $PARITY_CONTAINER was removed; check it by hand" >&2
+        return 1
+    fi
+    if [ -n "$remaining" ]; then
+        echo "FAILED: $PARITY_CONTAINER still exists after rm -f; remove it by hand" >&2
+        return 1
+    fi
     echo "node B removed; $PARITY_DB left in place (re-run 'up' to re-clone)"
 }
 

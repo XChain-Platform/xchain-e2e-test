@@ -56,6 +56,7 @@
 
 const fs   = require('fs')
 const path = require('path')
+const { lineComments, markerFor } = require('./lib/line_comments')
 const { MIN_REASON_WORDS, optOutMarker } = require('./lib/opt_out_marker')
 
 const ROOT       = path.join(__dirname, '..')
@@ -136,6 +137,7 @@ function guardedByThrow(lines, from, name){
 
 function scanLines(lines, rel, isHelper){
     const hits = []
+    const comments = lineComments(lines.join('\n'))
     lines.forEach((line, idx) => {
         // A comment describing a wait is not a wait.
         const code = line.replace(/\/\/.*$/, '')
@@ -144,12 +146,7 @@ function scanLines(lines, rel, isHelper){
         // The marker counts on the call's own line or anywhere in the comment
         // block directly above it, because the reason usually needs a sentence
         // and a one-line-only rule would push it onto the code line.
-        if (isOptOut(line)) return
-        let opted = false
-        for (let k = idx - 1; k >= 0 && /^\s*\/\//.test(lines[k]); k--){
-            if (isOptOut(lines[k])) { opted = true; break }
-        }
-        if (opted) return
+        if (markerFor(lines, comments, idx + 1, isOptOut)) return
         // The tracker barrier earns no guard or assertion credit (header above).
         if (isSync){
             if (!SYNC_HANDED_BACK.test(code)) hits.push({ file: rel, line: idx + 1, helper: isHelper, text: line.trim() })

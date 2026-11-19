@@ -74,12 +74,17 @@ function fuzzCheckMethod(methodName, filterArb) {
                 const { db, mockConn } = createDb()
                 mockConn.query.rejects(new Error('fuzz-induced query error'))
 
-                const result = await db[methodName](filterObj)
-                assert.strictEqual(result, null, `${methodName} should return null on query error`)
+                const outcome = await db[methodName](filterObj).then(
+                    value => ({ value }),
+                    error => ({ error })
+                )
                 // Connection must be released IF a query was attempted
                 if (mockConn.query.called) {
+                    assert.match(outcome.error.message, /fuzz-induced query error/)
                     assert(mockConn.release.called,
                         `${methodName} must release connection after query error`)
+                } else {
+                    assert.strictEqual(outcome.value, null)
                 }
             }), FC_PARAMS)
         })

@@ -30,11 +30,10 @@ function reasonWords (text) {
     return text.trim().split(/\s+/).filter((w) => /[A-Za-z]/.test(w)).length
 }
 
-// Build a predicate for `// <name>: <reason>` in a source line, or for `<name>: <reason>`
-// at the start of comment text (commentText: true) when a parser has already stripped the slashes.
-function optOutMarker (name, { commentText = false } = {}) {
+// Build a predicate for `<name>: <reason>` at the start of parsed line-comment text.
+function optOutMarker (name) {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const marker = new RegExp((commentText ? '^\\s*' : '\\/\\/\\s*') + escaped + ':(.*)$')
+    const marker = new RegExp('^\\s*' + escaped + ':(.*)$')
     return (text) => {
         const m = marker.exec(text || '')
         return !!m && reasonWords(m[1]) >= MIN_REASON_WORDS

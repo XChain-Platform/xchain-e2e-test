@@ -40,11 +40,14 @@ function fixture () {
         '        exit 1',
         '        ;;',
         '    ps)',
+        '        [ -n "${FAKE_PS_OUT:-}" ] && printf "%s\\n" "$FAKE_PS_OUT"',
+        '        exit "${FAKE_PS_EXIT:-0}"',
         '        ;;',
         '    logs)',
         '        echo "node B log line"',
         '        ;;',
         '    rm)',
+        '        exit "${FAKE_RM_EXIT:-0}"',
         '        ;;',
         '    *)',
         '        exit 65',
@@ -55,14 +58,14 @@ function fixture () {
     return { root, log, bin }
 }
 
-function run (f, args) {
+function run (f, args, extraEnv) {
     return spawnSync('bash', [SCRIPT].concat(args), {
         cwd: ROOT,
         env: Object.assign({}, process.env, {
             PATH: f.bin + path.delimiter + process.env.PATH,
             FAKE_DOCKER_LOG: f.log,
             WORK: path.join(f.root, 'work'),
-        }),
+        }, extraEnv || {}),
         encoding: 'utf8',
     })
 }
@@ -81,6 +84,21 @@ describe('bet-parity-node.sh with node A unreachable', function () {
         assert.strictEqual(r.status, 0, r.stderr)
         assert.match(dockerCalls(f), /^docker rm -f xchain-bet-parity-indexer$/m)
         assert.doesNotMatch(dockerCalls(f), /^docker exec /m)
+    })
+
+    it('down fails when node B still exists after removal', function () {
+        const r = run(f, ['down'], { FAKE_RM_EXIT: '1', FAKE_PS_OUT: 'container-id' })
+        assert.notStrictEqual(r.status, 0)
+        assert.doesNotMatch(r.stdout, /node B removed/)
+        assert.match(r.stderr, /still exists/)
+        assert.match(dockerCalls(f), /^docker ps -aq /m)
+    })
+
+    it('down fails when absence cannot be confirmed', function () {
+        const r = run(f, ['down'], { FAKE_RM_EXIT: '1', FAKE_PS_EXIT: '1' })
+        assert.notStrictEqual(r.status, 0)
+        assert.doesNotMatch(r.stdout, /node B removed/)
+        assert.match(r.stderr, /cannot confirm/)
     })
 
     it('logs still reads node B', function () {

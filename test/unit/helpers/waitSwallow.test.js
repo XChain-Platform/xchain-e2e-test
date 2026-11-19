@@ -117,6 +117,16 @@ describe('check-wait-swallow: the gate that keeps helpers loud', function () {
         ].join('\n')), [])
     })
 
+    it('does not accept marker text inside a string', function () {
+        const source = "await db.waitForBatch({}); const note = '// give-up-ok: sequencing only, asserted below'"
+        assert.strictEqual(findings(source).length, 1)
+    })
+
+    it('accepts a real marker after a string containing double slashes', function () {
+        const source = "await db.waitForBatch({}); const ref = 'proto://value' // give-up-ok: sequencing only, asserted below"
+        assert.deepStrictEqual(findings(source), [])
+    })
+
     it('does not accept a bare marker with no reason', function () {
         const hits = findings("        await indexerDatabase.waitForBatch({}) // give-up-ok:")
         assert.strictEqual(hits.length, 1)

@@ -17,7 +17,7 @@
 
 const { buildAirdropFilter, buildAirdropQuery } = require('./tx_filters')
 const { buildBroadcastFilter, getListWhere, getListQuery, findListRow, checkListItems } = require('./list_filters')
-const { rethrowInsideWait, logger } = require('./shared')
+const { rethrowQueryError, logger } = require('./shared')
 
 class BroadcastListChecks {
     async waitForBroadcast(broadcastObject, timeMax = 60000){ return this['_waitFor'](this.checkBroadcast, broadcastObject, timeMax) }
@@ -59,7 +59,7 @@ class BroadcastListChecks {
             }
         } catch (err) {
             logger.error('Error with database query (broadcast):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -194,7 +194,7 @@ class BroadcastListChecks {
             }
         } catch (err) {
             logger.error('Error with database query (airdrop):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }

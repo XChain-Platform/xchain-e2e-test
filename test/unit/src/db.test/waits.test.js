@@ -111,9 +111,9 @@ function registerWaitNoAnswerScopeTests(TX) {
 
     it('keeps null-on-error for a direct check* call, before and after a strict wait', async function () {
         state.mockConnection.query.rejects(new Error('ER_CONNECTION_LOST'))
-        assert.strictEqual(await state.db.checkSend({ txHash: TX }), null)
+        await assert.rejects(state.db.checkSend({ txHash: TX }), /ER_CONNECTION_LOST/)
         await assert.rejects(state.db.waitForSend({ txHash: TX }, 50), err => err.code === 'WAIT_NO_ANSWER')
-        assert.strictEqual(await state.db.checkSend({ txHash: TX }), null, 'the wait scope must not leak')
+        await assert.rejects(state.db.checkSend({ txHash: TX }), /ER_CONNECTION_LOST/)
     })
 
     // Request-scoped, not an instance flag: a direct call whose query fails while a
@@ -126,9 +126,9 @@ function registerWaitNoAnswerScopeTests(TX) {
             else setTimeout(fail, 20)
         }))
         const wait   = state.db.waitForSend({ txHash: TX }, 50)
-        const direct = state.db.checkIssue({ tick: 'OVERLAP' })
-        const [waitErr, directRow] = await Promise.all([wait.then(() => null, err => err), direct])
-        assert.strictEqual(directRow, null)
+        const direct = state.db.checkIssue({ tick: 'OVERLAP' }).then(() => null, err => err)
+        const [waitErr, directErr] = await Promise.all([wait.then(() => null, err => err), direct])
+        assert.match(directErr.message, /ER_BAD_FIELD_ERROR/)
         assert.ok(waitErr && waitErr.code === 'WAIT_NO_ANSWER', 'the wait itself still refuses')
     })
 }

@@ -34,7 +34,7 @@
  *
  *   - go through stakeHelper, which registers the stake for release
  *   - book it at broadcast with stakeTeardown.bookBroadcastStake in the same file,
- *     one live call per unmarked raw broadcast the file makes)
+ *     passing addressInfo and signingPubkey once per unmarked raw broadcast
  *   - say why this one never becomes a member, on the payload's own line or in
  *     the comment block directly above it:
  *         // stake-teardown-ok: <reason>
@@ -57,6 +57,7 @@
 
 const fs   = require('fs')
 const path = require('path')
+const { lineComments, markerFor, regexEnd, slashStartsRegex } = require('./lib/line_comments')
 const { MIN_REASON_WORDS, optOutMarker } = require('./lib/opt_out_marker')
 const { interpolationEnd, scanNamed } = require('./lib/template_literal')
 
@@ -116,12 +117,39 @@ function walk(dir, acc, root = dir){
 }
 
 // Accept a marker on the payload's own line or in the comment block directly above it.
-function optedOut(lines, idx){
-    if (hasOptOut(lines[idx])) return true
-    for (let k = idx - 1; k >= 0 && COMMENT_LINE.test(lines[k]); k--){
-        if (hasOptOut(lines[k])) return true
+function optedOut(lines, comments, line){
+    return markerFor(lines, comments, line, hasOptOut) !== null
+}
+
+const SIMPLE_ESCAPES = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', v: '\v' }
+
+function decodeEscape(source, start){
+    const escaped = source[start + 1]
+    if (escaped === '\n') return { value: '', next: start + 2, newlines: 1 }
+    if (escaped === '\r'){
+        const next = source[start + 2] === '\n' ? start + 3 : start + 2
+        return { value: '', next, newlines: 1 }
     }
-    return false
+    if (SIMPLE_ESCAPES[escaped] !== undefined){
+        return { value: SIMPLE_ESCAPES[escaped], next: start + 2, newlines: 0 }
+    }
+    if (escaped === '0' && !/\d/.test(source[start + 2] || '')){
+        return { value: '\0', next: start + 2, newlines: 0 }
+    }
+    if (escaped === 'x' && /^[0-9a-f]{2}$/i.test(source.slice(start + 2, start + 4))){
+        return { value: String.fromCharCode(parseInt(source.slice(start + 2, start + 4), 16)),
+            next: start + 4, newlines: 0 }
+    }
+    const codePoint = escaped === 'u' && /^\{([0-9a-f]{1,6})\}/i.exec(source.slice(start + 2))
+    if (codePoint && parseInt(codePoint[1], 16) <= 0x10ffff){
+        return { value: String.fromCodePoint(parseInt(codePoint[1], 16)),
+            next: start + 2 + codePoint[0].length, newlines: 0 }
+    }
+    if (escaped === 'u' && /^[0-9a-f]{4}$/i.test(source.slice(start + 2, start + 6))){
+        return { value: String.fromCharCode(parseInt(source.slice(start + 2, start + 6), 16)),
+            next: start + 6, newlines: 0 }
+    }
+    return { value: escaped, next: start + 2, newlines: 0 }
 }
 
 function quotedToken(source, start, quote, line){
@@ -130,15 +158,10 @@ function quotedToken(source, start, quote, line){
         if (source[i] === quote) return { end: i + 1, line: tokenLine, value }
         if (source[i] === '\n') tokenLine++
         if (source[i] === '\\' && i + 1 < source.length){
-            const escaped = source[i + 1]
-            const simple = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', v: '\v' }
-            if (simple[escaped] !== undefined) value += simple[escaped]
-            else if (escaped === 'x' && /^[0-9a-f]{2}$/i.test(source.slice(i + 2, i + 4))){
-                value += String.fromCharCode(parseInt(source.slice(i + 2, i + 4), 16)); i += 2
-            } else if (escaped === 'u' && /^[0-9a-f]{4}$/i.test(source.slice(i + 2, i + 6))){
-                value += String.fromCharCode(parseInt(source.slice(i + 2, i + 6), 16)); i += 4
-            } else value += escaped
-            i += 2
+            const decoded = decodeEscape(source, i)
+            value += decoded.value
+            tokenLine += decoded.newlines
+            i = decoded.next
             continue
         }
         value += source[i++]
@@ -159,41 +182,13 @@ function templateToken(source, start, line){
         }
         if (source[i] === '\n') tokenLine++
         if (source[i] === '\\' && i + 1 < source.length){
-            value += source[i] + source[i + 1]
-            i += 2
+            const decoded = decodeEscape(source, i)
+            value += decoded.value
+            tokenLine += decoded.newlines
+            i = decoded.next
         } else value += source[i++]
     }
     return { end: i, line: tokenLine, value }
-}
-
-// Keywords after which a slash starts a regex literal rather than a division.
-const REGEX_AFTER_KEYWORDS = new Set(['return', 'typeof', 'case', 'in', 'of', 'do', 'else', 'yield', 'await',
-    'void', 'delete', 'new', 'instanceof', 'throw'])
-
-// Decide from the previous token whether a slash divides (after an operand) or opens a regex.
-function slashStartsRegex(previous){
-    if (!previous) return true
-    if (previous.type === 'identifier') return REGEX_AFTER_KEYWORDS.has(previous.value)
-    if (previous.type !== 'punctuator') return false
-    // Digits arrive as single punctuators because this lexer has no number token.
-    return !/^(?:[)\]0-9]|\+\+|--)$/.test(previous.value)
-}
-
-// Return the end of a regex literal opening at start, or -1 when none closes on its line.
-function regexEnd(source, start){
-    let i = start + 1, inClass = false
-    while (i < source.length && source[i] !== '\n'){
-        if (source[i] === '\\'){ i += 2; continue }
-        if (source[i] === '[') inClass = true
-        else if (source[i] === ']') inClass = false
-        else if (source[i] === '/' && !inClass){
-            i++
-            while (/[a-z]/i.test(source[i] || '')) i++
-            return i
-        }
-        i++
-    }
-    return -1
 }
 
 // A deliberately small lexer is enough here and keeps this gate runnable before
@@ -362,7 +357,7 @@ function originFor(tokens, bindings, start, end, seen = new Set()){
         if ((token.type === 'string' || token.type === 'template') &&
             (token.value.startsWith('STAKE') || token.value === 'ST')) return token
         if (token.type === 'identifier' && bindings.has(token.value) && !seen.has(token.value) &&
-            expressionValue(tokens, bindings, bindings.get(token.value).start, bindings.get(token.value).end) === 'STAKE'){
+            isStake(expressionValue(tokens, bindings, bindings.get(token.value).start, bindings.get(token.value).end))){
             const bound = bindings.get(token.value)
             return originFor(tokens, bindings, bound.start, bound.end, new Set([...seen, token.value]))
         }
@@ -423,12 +418,60 @@ function isKnownNonStakePayload(tokens, rel, start, end){
     return NON_STAKE_OPAQUE_PAYLOADS.get(rel)?.has(tokens[start].value) || false
 }
 
-function registrationCount(tokens){
+const FALSY_WORDS = new Set(['null', 'undefined', 'false', 'NaN'])
+
+// True when the span can only evaluate to a value the ledger refuses: a falsy
+// literal, a void expression, or a binding whose initializer is one.
+function staticallyFalsy(tokens, bindings, start, end, seen = new Set()){
+    ({ start, end } = stripParens(tokens, start, end))
+    if (start >= end) return true
+    const first = tokens[start]
+    if (first.value === 'void' && first.type === 'identifier') return end > start + 1
+    if (end === start + 1 && (first.type === 'string' || first.type === 'template')) return first.value === ''
+    if (end === start + 1 && first.type === 'identifier'){
+        if (FALSY_WORDS.has(first.value)) return true
+        if (!bindings.has(first.value) || seen.has(first.value)) return false
+        const bound = bindings.get(first.value)
+        return staticallyFalsy(tokens, bindings, bound.start, bound.end, new Set([...seen, first.value]))
+    }
+    const digits = tokens.slice(start, end).map((t) => t.value).join('').replace(/^[+-]/, '')
+    return /^[0-9.]+$/.test(digits) && Number(digits) === 0
+}
+
+// Names the object literal gives a value the ledger can use; the last member of a
+// name wins, as it does at runtime.
+function objectMemberKeys(tokens, bindings, start, end){
+    const usable = new Map()
+    for (const member of splitTopLevel(tokens, start, end, ',')){
+        const key = tokens[member.start]
+        if (!key || (key.type !== 'identifier' && key.type !== 'string')) continue
+        if (member.end === member.start + 1){
+            usable.set(key.value, !staticallyFalsy(tokens, bindings, member.start, member.end))
+            continue
+        }
+        if (tokens[member.start + 1]?.value !== ':') continue
+        usable.set(key.value, !staticallyFalsy(tokens, bindings, member.start + 2, member.end))
+    }
+    return usable
+}
+
+function validBookSpec(tokens, bindings, start, end){
+    ({ start, end } = stripParens(tokens, start, end))
+    if (tokens[start]?.value !== '{' || matching(tokens, start, '{', '}') !== end - 1) return false
+    const usable = objectMemberKeys(tokens, bindings, start + 1, end - 1)
+    return usable.get('addressInfo') === true && usable.get('signingPubkey') === true
+}
+
+function registrationCount(tokens, bindings){
     let count = 0
     for (let i = 0; i + 3 < tokens.length; i++){
         const method = tokens[i + 2].value
-        if (tokens[i].value === 'stakeTeardown' && tokens[i + 1].value === '.' &&
-            method === 'bookBroadcastStake' && tokens[i + 3].value === '(') count++
+        if (tokens[i].value !== 'stakeTeardown' || tokens[i + 1].value !== '.' ||
+            method !== 'bookBroadcastStake' || tokens[i + 3].value !== '(') continue
+        const close = matching(tokens, i + 3, '(', ')')
+        if (close < 0) continue
+        const args = splitTopLevel(tokens, i + 4, close, ',')
+        if (args.length && validBookSpec(tokens, bindings, args[0].start, args[0].end)) count++
     }
     return count
 }
@@ -442,12 +485,14 @@ function actionValueSpan(tokens, i){
 }
 
 function scanLines(lines, rel){
-    const tokens = scanNamed(rel, () => tokensFor(lines.join('\n')))
+    const source = lines.join('\n')
+    const tokens = scanNamed(rel, () => tokensFor(source))
     const bindings = bindingMap(tokens)
-    const sitesByLine = new Map()
+    const comments = scanNamed(rel, () => lineComments(source))
+    const sitesByOrigin = new Map()
     const add = (token) => {
-        if (!token || COMMENT_LINE.test(lines[token.line - 1]) || optedOut(lines, token.line - 1)) return
-        sitesByLine.set(token.line, { file: rel, line: token.line, text: lines[token.line - 1].trim() })
+        if (!token || COMMENT_LINE.test(lines[token.line - 1]) || optedOut(lines, comments, token.line)) return
+        sitesByOrigin.set(token.start, { file: rel, line: token.line, text: lines[token.line - 1].trim() })
     }
 
     for (const bound of bindings.values()){
@@ -485,10 +530,12 @@ function scanLines(lines, rel){
         }
     }
 
-    const sites = [...sitesByLine.values()].sort((a, b) => a.line - b.line)
+    const sites = [...sitesByOrigin.entries()]
+        .sort((a, b) => a[1].line - b[1].line || a[0] - b[0])
+        .map((entry) => entry[1])
     // One registration books one broadcast. A static scan cannot pair them, so a
     // shortfall flags every unmarked site in the file.
-    return sites.length > registrationCount(tokens) ? sites : []
+    return sites.length > registrationCount(tokens, bindings) ? sites : []
 }
 
 function scanFile(file){
@@ -520,7 +567,7 @@ function main(){
     console.error('A stake nothing registers is a stake nothing gives back, and the shared venue keeps it')
     console.error('in its capability set for good.')
     console.error('Fix a site by staking through test/helpers/stakeHelper, or by calling')
-    console.error('stakeTeardown.bookBroadcastStake() for the stake you broadcast.')
+    console.error('stakeTeardown.bookBroadcastStake({ addressInfo, signingPubkey }) for the stake you broadcast.')
     console.error('If this stake can never')
     console.error('become a capability member, say why on its own line or the one above,')
     console.error('in a reason of at least ' + MIN_REASON_WORDS + ' words on the marker line:')

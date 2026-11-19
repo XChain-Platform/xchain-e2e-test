@@ -15,20 +15,13 @@
  *
  ********************************************************************/
 
-const { AsyncLocalStorage } = require('async_hooks');
 const config = require('../config');
 const { getLogger } = require('../lib/logger');
 const logger = getLogger();
 
-// Set while a _waitFor poll runs its check, per async call chain, so a direct
-// check* caller running at the same moment keeps the null-on-error contract.
-const insideWaitPoll = new AsyncLocalStorage();
-
-// Answer a failed lookup query: rethrow it inside a _waitFor poll, so a wait can
-// tell "the database never answered" from "no row", and return `fallback` elsewhere.
-function rethrowInsideWait(err, fallback = null){
-    if (insideWaitPoll.getStore()) throw err
-    return fallback
+// Failed queries must stay distinct from successful lookups that found no row.
+function rethrowQueryError(err){
+    throw err
 }
 
-module.exports = { config, logger, insideWaitPoll, rethrowInsideWait }
+module.exports = { config, logger, rethrowQueryError }

@@ -15,7 +15,7 @@
  *
  ********************************************************************/
 
-const { rethrowInsideWait, logger } = require('./shared')
+const { rethrowQueryError, logger } = require('./shared')
 
 class ContractChecks {
     // ─── COINPAY ──────────────────────────────────────────────────────
@@ -40,7 +40,7 @@ class ContractChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (coinpay):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -69,7 +69,7 @@ class ContractChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (coinpay_obligation):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -97,7 +97,7 @@ class ContractChecks {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
+        } catch(err){ return rethrowQueryError(err) } finally { await connection.release() }
     }
 
     async waitForExecution(params, timeMax = 60000){ return this['_waitFor'](this.checkExecution, params, timeMax) }
@@ -122,7 +122,7 @@ class ContractChecks {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
+        } catch(err){ return rethrowQueryError(err) } finally { await connection.release() }
     }
 
     async waitForDeposit(params, timeMax = 60000){ return this['_waitFor'](this.checkDeposit, params, timeMax) }
@@ -149,7 +149,7 @@ class ContractChecks {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
+        } catch(err){ return rethrowQueryError(err) } finally { await connection.release() }
     }
 
     async waitForWithdrawal(params, timeMax = 60000){ return this['_waitFor'](this.checkWithdrawal, params, timeMax) }
@@ -176,7 +176,7 @@ class ContractChecks {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
+        } catch(err){ return rethrowQueryError(err) } finally { await connection.release() }
     }
 
     // ── Staking Methods ──
@@ -203,20 +203,22 @@ class ContractChecks {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
+        } catch(err){ return rethrowQueryError(err) } finally { await connection.release() }
     }
 
-    // Count currently-active, valid stakes (those still in the validator
-    // snapshot, not deactivated). Used by the hub-federation tests to assert a
-    // clean validator set before staking their own hubs: leftover stakes would
-    // skew the deterministic responsible-set selection and make those tests
-    // flaky. Zero on a freshly-reset regtest chain.
+    // Count valid stakes that have not deactivated at the committed indexer tip.
+    // UNSTAKE schedules deactivation, so stakes waiting to activate and stakes
+    // inside the post-UNSTAKE delay both keep this fail-closed guard dirty.
     async getActiveStakeCount(){
         const query = `SELECT COUNT(*) AS n
             FROM stakes s
             LEFT JOIN index_statuses ist ON ist.id = s.status_id
             WHERE ist.status = 'valid'
-              AND (s.deactivation_block IS NULL OR s.deactivation_block = 0)`
+              AND (s.deactivation_block IS NULL
+                OR s.deactivation_block = 0
+                OR s.deactivation_block > (
+                    SELECT COALESCE(MAX(b.block_index), 0) FROM blocks b
+                ))`
         const connection = await this.getConnection()
         try {
             const rows = await connection.query(query)
@@ -246,7 +248,7 @@ class ContractChecks {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return rethrowInsideWait(err) } finally { await connection.release() }
+        } catch(err){ return rethrowQueryError(err) } finally { await connection.release() }
     }
 
     // ── Attestation Methods ──
@@ -272,7 +274,7 @@ class ContractChecks {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ this['_warnOnSchemaError']('checkAttestationRequest', err); return rethrowInsideWait(err) } finally { await connection.release() }
+        } catch(err){ this['_warnOnSchemaError']('checkAttestationRequest', err); return rethrowQueryError(err) } finally { await connection.release() }
     }
 
     async waitForAttestationResponse(params, timeMax = 60000){ return this['_waitFor'](this.checkAttestationResponse, params, timeMax) }
@@ -297,7 +299,7 @@ class ContractChecks {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ this['_warnOnSchemaError']('checkAttestationResponse', err); return rethrowInsideWait(err) } finally { await connection.release() }
+        } catch(err){ this['_warnOnSchemaError']('checkAttestationResponse', err); return rethrowQueryError(err) } finally { await connection.release() }
     }
 
     async getAttestationValidatorSignatures(responseActionIndex){
@@ -319,7 +321,7 @@ class ContractChecks {
             // array; guard the shape before mapping it below.
             if(!Array.isArray(parsed)) return []
             return parsed.map(s => ({ validator_pubkey: s.pubkey, validator_sig: s.sig }))
-        } catch(err){ this['_warnOnSchemaError']('getAttestationValidatorSignatures', err); return rethrowInsideWait(err, []) } finally { await connection.release() }
+        } catch(err){ this['_warnOnSchemaError']('getAttestationValidatorSignatures', err); return rethrowQueryError(err) } finally { await connection.release() }
     }
 
     async waitForAttestationRequestCount(params, timeMax = 60000){ return this['_waitFor'](this.checkAttestationRequestCount, params, timeMax) }

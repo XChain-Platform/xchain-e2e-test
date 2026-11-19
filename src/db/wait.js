@@ -15,7 +15,7 @@
  *
  ********************************************************************/
 
-const { logger, insideWaitPoll } = require('./shared')
+const { logger } = require('./shared')
 
 class WaitMethods {
     // ─── Generic waitFor wrapper ───────────────────────────────────────
@@ -113,7 +113,7 @@ class WaitMethods {
 
     async ['_pollOnce'](checkFn, params, wait){
         try {
-            const row = await insideWaitPoll.run(true, () => checkFn.call(this, params))
+            const row = await checkFn.call(this, params)
             wait.answered++
             return row
         } catch(err) {

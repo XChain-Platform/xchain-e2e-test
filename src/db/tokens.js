@@ -16,7 +16,7 @@
  ********************************************************************/
 
 const { buildMintWhere, buildMintQuery, buildIssueFilter, buildSendFilters, buildSendQuery, firstSendRow } = require('./tx_filters')
-const { rethrowInsideWait, logger } = require('./shared')
+const { rethrowQueryError, logger } = require('./shared')
 
 class TokenChecks {
     async waitForIssue(issueObject, timeMax = 60000){ return this['_waitFor'](this.checkIssue, issueObject, timeMax) }
@@ -58,7 +58,7 @@ class TokenChecks {
             }
         } catch (err) {
             logger.error('Error with database query (issue):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -79,7 +79,7 @@ class TokenChecks {
             return firstSendRow(rows)
         } catch (err) {
             logger.error('Error with database query (send):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -139,7 +139,7 @@ class TokenChecks {
             }
         } catch (err) {
             logger.error('Error with database query (credit):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -234,7 +234,7 @@ class TokenChecks {
             }
         } catch (err) {
             logger.error('Error with database query (debit):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
@@ -259,7 +259,7 @@ class TokenChecks {
             }
         } catch (err) {
             logger.error('Error with database query (mint):', err);
-            return rethrowInsideWait(err)
+            return rethrowQueryError(err)
         } finally {
             await connection.release()
         }
