@@ -47,7 +47,7 @@
 
 const fs   = require('fs')
 const path = require('path')
-const { scanNamed, templateLiteralEnd } = require('./lib/template_literal')
+const { scanNamed, templateInterpolations } = require('./lib/template_literal')
 
 const ROOT         = path.join(__dirname, '..')
 const SCAN_DIR     = path.join(ROOT, 'test')
@@ -82,51 +82,68 @@ const TIMER_INSIDE  = /\bsetTimeout\s*\(/
 
 // Blank out comments, strings and template literals so brace counting and call
 // detection see code only. Returns a same-length string (offsets stay valid).
-function blankNonCode(src) {
-    const out = src.split('')
-    let i = 0
-    const blank = (from, to) => {
-        for (let k = from; k < to && k < out.length; k++) if (out[k] !== '\n') out[k] = ' '
+function blankRange(out, from, to) {
+    for (let k = from; k < to && k < out.length; k++) if (out[k] !== '\n') out[k] = ' '
+}
+
+function regexLiteralEnd(src, out, i) {
+    let p = i - 1
+    while (p >= 0 && /\s/.test(out[p])) p--
+    const prev = p >= 0 ? out[p] : ''
+    const word = src.slice(Math.max(0, p - 9), p + 1)
+    if (!(p < 0 || '(,=:[!&|?{};+-*%^~'.includes(prev) ||
+        /\b(?:return|typeof|case|in|of|do|else|yield|await)$/.test(word))) return -1
+    let j = i + 1
+    let inClass = false
+    while (j < src.length && src[j] !== '\n') {
+        if (src[j] === '\\') { j += 2; continue }
+        if (src[j] === '[') inClass = true
+        else if (src[j] === ']') inClass = false
+        else if (src[j] === '/' && !inClass) return j + 1
+        j++
     }
-    while (i < src.length) {
+    return -1
+}
+
+// Index past a regex's closing slash, flags left as code like the guess below.
+function lexedRegexEnd(src, regexEnds, i) {
+    return regexEnds.has(i) ? src.lastIndexOf('/', regexEnds.get(i) - 1) + 1 : -1
+}
+
+// Inside interpolation code, regexEnds holds the lexer's regex spans and
+// replaces the context guess, which cannot see past the masked `${`.
+function blankRangeNonCode(src, out, from, to, regexEnds) {
+    let i = from
+    while (i < to) {
         const c = src[i]
         const d = src[i + 1]
         if (c === '/' && d === '/') {
             const end = src.indexOf('\n', i); const stop = end === -1 ? src.length : end
-            blank(i, stop); i = stop; continue
+            blankRange(out, i, Math.min(stop, to)); i = Math.min(stop, to); continue
         }
         if (c === '/' && d === '*') {
             const end = src.indexOf('*/', i + 2); const stop = end === -1 ? src.length : end + 2
-            blank(i, stop); i = stop; continue
+            blankRange(out, i, Math.min(stop, to)); i = Math.min(stop, to); continue
         }
         // Regex literal, not division: decided by the previous code token. A
         // regex may legitimately contain quotes and braces, so mislexing one as
         // a string swallows the braces after it and unbalances the whole file.
         if (c === '/') {
-            let p = i - 1
-            while (p >= 0 && /\s/.test(out[p])) p--
-            const prev = p >= 0 ? out[p] : ''
-            const word = src.slice(Math.max(0, p - 9), p + 1)
-            const regexOk = p < 0 || '(,=:[!&|?{};+-*%^~'.includes(prev)
-                || /\b(?:return|typeof|case|in|of|do|else|yield|await)$/.test(word)
-            if (regexOk) {
-                let j = i + 1
-                let inClass = false
-                let closed = false
-                while (j < src.length && src[j] !== '\n') {
-                    if (src[j] === '\\') { j += 2; continue }
-                    if (src[j] === '[') inClass = true
-                    else if (src[j] === ']') inClass = false
-                    else if (src[j] === '/' && !inClass) { closed = true; break }
-                    j++
-                }
-                if (closed) { blank(i + 1, j); i = j + 1; continue }
-            }
+            const end = regexEnds ? lexedRegexEnd(src, regexEnds, i) : regexLiteralEnd(src, out, i)
+            if (end !== -1) { blankRange(out, i + 1, Math.min(end - 1, to)); i = Math.min(end, to); continue }
         }
         if (c === '`') {
-            const end = templateLiteralEnd(src, i)
-            const close = src[end - 1] === '`' ? end - 1 : end
-            blank(i + 1, close); i = end; continue
+            const template = templateInterpolations(src, i)
+            const stop = Math.min(template.end, to)
+            let literalStart = i + 1
+            for (const part of template.parts) {
+                if (part.codeStart >= stop) break
+                blankRange(out, literalStart, Math.min(part.codeStart, stop))
+                blankRangeNonCode(src, out, part.codeStart, Math.min(part.codeEnd, stop), part.regexEnds)
+                literalStart = Math.min(part.codeEnd, stop)
+            }
+            const close = src[stop - 1] === '`' ? stop - 1 : stop
+            blankRange(out, literalStart, close); i = stop; continue
         }
         if (c === '"' || c === "'") {
             let j = i + 1
@@ -135,10 +152,16 @@ function blankNonCode(src) {
                 if (src[j] === c) break
                 j++
             }
-            blank(i + 1, j); i = j + 1; continue
+            const stop = Math.min(j + 1, to)
+            blankRange(out, i + 1, Math.min(j, to)); i = stop; continue
         }
         i++
     }
+}
+
+function blankNonCode(src) {
+    const out = src.split('')
+    blankRangeNonCode(src, out, 0, src.length)
     return out.join('')
 }
 

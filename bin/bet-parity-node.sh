@@ -80,6 +80,7 @@ NODE_B_MANAGED=0
 # REFUSING/MISMATCH exits and Ctrl-C. It never calls exit, so the status stands.
 cleanup_on_exit() {
     local rc=$?
+    local remaining
     # Remove the plaintext credentials file whatever happened before.
     docker exec "$DB_CONTAINER" rm -f "$CNF" >/dev/null 2>&1 || true
     if [ "$rc" -ne 0 ] && [ "$NODE_B_MANAGED" = 1 ]; then
@@ -87,7 +88,9 @@ cleanup_on_exit() {
         echo "   up failed (exit $rc): removing $PARITY_CONTAINER so it does not stay resident" >&2
         docker rm -f "$PARITY_CONTAINER" >/dev/null 2>&1 || true
         # `rm -f ... || true` swallows its own failure, so prove the container is gone.
-        if [ -n "$(docker ps -aq --filter "name=^${PARITY_CONTAINER}$")" ]; then
+        if ! remaining=$(docker ps -aq --filter "name=^${PARITY_CONTAINER}$"); then
+            echo "   WARNING: cannot confirm $PARITY_CONTAINER was removed; check by hand: docker ps -a --filter name=$PARITY_CONTAINER" >&2
+        elif [ -n "$remaining" ]; then
             echo "   WARNING: $PARITY_CONTAINER still exists; remove it by hand: docker rm -f $PARITY_CONTAINER" >&2
         fi
     fi
@@ -163,6 +166,7 @@ clone_database() {
 }
 
 cmd_up() {
+    local remaining
     resolve_src_db
     refuse_when_parity_db_is_source
     mkdir -p "$WORK"
@@ -174,9 +178,12 @@ cmd_up() {
     # buys a consistent read of the SOURCE, nothing at the destination.
     echo "== removing any existing $PARITY_CONTAINER before touching $PARITY_DB"
     docker rm -f "$PARITY_CONTAINER" >/dev/null 2>&1 || true
-    # `rm -f ... || true` swallows its own failure, so prove the container is gone
-    # rather than assume it: a swallowed failure lands back in the bug above.
-    if [ -n "$(docker ps -aq --filter "name=^${PARITY_CONTAINER}$")" ]; then
+    # Refuse unless the listing succeeds and proves the old container is gone.
+    if ! remaining=$(docker ps -aq --filter "name=^${PARITY_CONTAINER}$"); then
+        echo "   REFUSING: cannot confirm $PARITY_CONTAINER was removed (docker ps failed); will not drop $PARITY_DB" >&2
+        exit 1
+    fi
+    if [ -n "$remaining" ]; then
         echo "   REFUSING: $PARITY_CONTAINER still exists after rm -f; will not drop $PARITY_DB under a live writer" >&2
         exit 1
     fi

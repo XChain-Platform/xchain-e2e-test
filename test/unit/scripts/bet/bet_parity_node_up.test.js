@@ -66,7 +66,15 @@ const FAKE_DOCKER = [
     '        esac ;;',
     '    cp) cat >/dev/null ;;',
     '    inspect) echo fake/image:tag ;;',
-    '    ps|rm|create|start) ;;',
+    '    ps)',
+    '        count_file="$FAKE_DOCKER_LOG.ps"',
+    '        count=0; [ ! -f "$count_file" ] || count=$(cat "$count_file")',
+    '        count=$((count + 1)); printf "%s" "$count" > "$count_file"',
+    '        if [ -n "${FAKE_PS_FAIL_FROM:-}" ] && [ "$count" -ge "$FAKE_PS_FAIL_FROM" ]; then exit 1; fi',
+    '        [ -z "${FAKE_PS_OUT:-}" ] || printf "%s\\n" "$FAKE_PS_OUT"',
+    '        exit "${FAKE_PS_EXIT:-0}" ;;',
+    '    rm) exit "${FAKE_RM_EXIT:-0}" ;;',
+    '    create|start) ;;',
     '    *) exit 65 ;;',
     'esac',
     '',
@@ -135,6 +143,21 @@ describe('bet-parity-node.sh up with node A reachable', function () {
         assert.match(calls(f).join('\n'), new RegExp('DROP DATABASE IF EXISTS .*' + DEFAULT_PARITY_DB))
     })
 
+    it('refuses before cloning when container removal cannot be confirmed', function () {
+        const r = up(f, { FAKE_RM_EXIT: '1', FAKE_PS_EXIT: '1' })
+        assert.notStrictEqual(r.status, 0)
+        assert.match(r.stderr, /cannot confirm/)
+        const log = calls(f).join('\n')
+        assert.doesNotMatch(log, /DROP DATABASE|mariadb-dump|docker create/)
+    })
+
+    it('refuses before cloning when the old container remains', function () {
+        const r = up(f, { FAKE_RM_EXIT: '1', FAKE_PS_OUT: 'container-id' })
+        assert.notStrictEqual(r.status, 0)
+        assert.match(r.stderr, /still exists/)
+        assert.doesNotMatch(calls(f).join('\n'), /DROP DATABASE|mariadb-dump|docker create/)
+    })
+
     it('clones with a consistent snapshot and builds node B from node A env', function () {
         const r = up(f)
         assert.strictEqual(r.status, 0, r.stderr)
@@ -184,5 +207,12 @@ describe('bet-parity-node.sh up with node A reachable', function () {
         assert.notStrictEqual(r.status, 0)
         assert.match(r.stderr, /MISMATCH: node A src aaaa .* != node B src bbbb/)
         removedAfterCreate(f)
+    })
+
+    it('keeps the original failure and warns when cleanup cannot confirm removal', function () {
+        const r = up(f, { FAKE_HASH_B: 'bbbb', FAKE_PS_FAIL_FROM: '2' })
+        assert.notStrictEqual(r.status, 0)
+        assert.match(r.stderr, /MISMATCH: node A src aaaa .* != node B src bbbb/)
+        assert.match(r.stderr, /WARNING: cannot confirm/)
     })
 })

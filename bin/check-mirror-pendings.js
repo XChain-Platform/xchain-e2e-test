@@ -5,7 +5,7 @@
 const fs = require('fs')
 const path = require('path')
 const { MIN_REASON_WORDS, reasonWords } = require('./lib/opt_out_marker')
-const { scanNamed, templateLiteralEnd } = require('./lib/template_literal')
+const { scanNamed, templateInterpolations } = require('./lib/template_literal')
 
 const ROOT = path.resolve(__dirname, '..')
 const DEFAULT_INPUTS = [path.join(ROOT, 'test', 'attestMirror')]
@@ -13,7 +13,7 @@ const TEST_FILE = /\.test\.js$/
 // Read helper modules too: a skip a hook hands to a helper lives there, not in the leg file.
 const SOURCE_FILE = /\.js$/
 // Match the x-prefixed skip aliases too; the lookbehind keeps a member call such as re.test( out.
-const MOCHA_CALL = /(?<![.$\w])(x?(?:describe|context|it|specify)|suite|test|before|beforeEach|setup)(\.skip)?\s*\(/g
+const MOCHA_CALL = /(?<![.$\w])(x?(?:describe|context|it|specify)|suite|test|before|beforeEach|setup)(\s*\.\s*skip)?\s*\(/g
 const BASE_KIND = { specify: 'it', xspecify: 'it', xit: 'it', xdescribe: 'describe', xcontext: 'context' }
 const HOOKS = new Set(['before', 'beforeEach', 'setup'])
 const SUITES = new Set(['describe', 'context', 'suite'])
@@ -61,16 +61,16 @@ function regexEnd (source, start) {
     return -1
 }
 
-function maskNonCode (source) {
-    const masked = source.split('')
-    const uncommented = source.split('')
-    let i = 0
-    while (i < source.length) {
+// Inside interpolation code, regexEnds holds the lexer's regex spans and
+// replaces the context guess, which cannot see past the masked `${`.
+function maskRange (source, masked, uncommented, from, to, regexEnds) {
+    let i = from
+    while (i < to) {
         const c = source[i]
         const next = source[i + 1]
         if (c === '/' && next === '/') {
             const end = source.indexOf('\n', i)
-            const stop = end === -1 ? source.length : end
+            const stop = Math.min(end === -1 ? source.length : end, to)
             blankRange(masked, i, stop)
             blankRange(uncommented, i, stop)
             i = stop
@@ -78,34 +78,49 @@ function maskNonCode (source) {
         }
         if (c === '/' && next === '*') {
             const end = source.indexOf('*/', i + 2)
-            const stop = end === -1 ? source.length : end + 2
+            const stop = Math.min(end === -1 ? source.length : end + 2, to)
             blankRange(masked, i, stop)
             blankRange(uncommented, i, stop)
             i = stop
             continue
         }
         if (c === '`') {
-            const end = templateLiteralEnd(source, i)
-            blankRange(masked, i, end)
-            i = end
+            const template = templateInterpolations(source, i)
+            const stop = Math.min(template.end, to)
+            let literalStart = i
+            for (const part of template.parts) {
+                if (part.codeStart >= stop) break
+                blankRange(masked, literalStart, Math.min(part.codeStart, stop))
+                maskRange(source, masked, uncommented, part.codeStart, Math.min(part.codeEnd, stop), part.regexEnds)
+                literalStart = Math.min(part.codeEnd, stop)
+            }
+            blankRange(masked, literalStart, stop)
+            i = stop
             continue
         }
         if (c === '"' || c === "'") {
-            const end = quotedEnd(source, i, c)
-            blankRange(masked, i, end)
-            i = end
+            const stop = Math.min(quotedEnd(source, i, c), to)
+            blankRange(masked, i, stop)
+            i = stop
             continue
         }
-        if (c === '/' && slashStartsRegex(masked, source, i)) {
-            const end = regexEnd(source, i)
+        if (c === '/' && (regexEnds ? regexEnds.has(i) : slashStartsRegex(masked, source, i))) {
+            const end = regexEnds ? regexEnds.get(i) : regexEnd(source, i)
             if (end !== -1) {
-                blankRange(masked, i, end)
-                i = end
+                const stop = Math.min(end, to)
+                blankRange(masked, i, stop)
+                i = stop
                 continue
             }
         }
         i++
     }
+}
+
+function maskNonCode (source) {
+    const masked = source.split('')
+    const uncommented = source.split('')
+    maskRange(source, masked, uncommented, 0, source.length)
     return { masked: masked.join(''), uncommented: uncommented.join('') }
 }
 

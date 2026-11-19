@@ -438,18 +438,25 @@ function staticallyFalsy(tokens, bindings, start, end, seen = new Set()){
     return /^[0-9.]+$/.test(digits) && Number(digits) === 0
 }
 
-// Names the object literal gives a value the ledger can use; the last member of a
-// name wins, as it does at runtime.
+// Names the object literal gives a value the ledger can use. An unknown member
+// makes earlier keys unknowable; later explicit keys can restore them.
 function objectMemberKeys(tokens, bindings, start, end){
     const usable = new Map()
     for (const member of splitTopLevel(tokens, start, end, ',')){
+        if (member.start >= member.end) continue
         const key = tokens[member.start]
-        if (!key || (key.type !== 'identifier' && key.type !== 'string')) continue
+        if (!key || (key.type !== 'identifier' && key.type !== 'string')){
+            usable.clear()
+            continue
+        }
         if (member.end === member.start + 1){
             usable.set(key.value, !staticallyFalsy(tokens, bindings, member.start, member.end))
             continue
         }
-        if (tokens[member.start + 1]?.value !== ':') continue
+        if (tokens[member.start + 1]?.value !== ':'){
+            usable.clear()
+            continue
+        }
         usable.set(key.value, !staticallyFalsy(tokens, bindings, member.start + 2, member.end))
     }
     return usable
@@ -484,28 +491,53 @@ function actionValueSpan(tokens, i){
     return { start: i + 2, end: expressionEnd(tokens, i + 2) }
 }
 
+function siteCollector(lines, comments, rel){
+    const sitesByOrigin = new Map()
+    const callsByOrigin = new Map()
+    const ignored = (token) => !token || COMMENT_LINE.test(lines[token.line - 1]) ||
+        optedOut(lines, comments, token.line)
+    const siteFor = (token) => ({ file: rel, line: token.line, text: lines[token.line - 1].trim() })
+    const add = (token) => {
+        if (!ignored(token)) sitesByOrigin.set(token.start, siteFor(token))
+    }
+    const addCall = (origin, call) => {
+        if (ignored(origin)) return
+        add(origin)
+        if (!callsByOrigin.has(origin.start)) callsByOrigin.set(origin.start, new Map())
+        callsByOrigin.get(origin.start).set(call.start, ignored(call) ? null : siteFor(call))
+    }
+    const counted = () => {
+        const entries = []
+        for (const [originStart, originSite] of sitesByOrigin){
+            const calls = callsByOrigin.get(originStart)
+            if (!calls) entries.push([originStart, originSite])
+            else if (calls.size === 1){
+                if ([...calls.values()][0]) entries.push([originStart, originSite])
+            } else for (const entry of calls) if (entry[1]) entries.push(entry)
+        }
+        return entries.sort((a, b) => a[1].line - b[1].line || a[0] - b[0]).map((entry) => entry[1])
+    }
+    return { add, addCall, counted }
+}
+
 function scanLines(lines, rel){
     const source = lines.join('\n')
     const tokens = scanNamed(rel, () => tokensFor(source))
     const bindings = bindingMap(tokens)
     const comments = scanNamed(rel, () => lineComments(source))
-    const sitesByOrigin = new Map()
-    const add = (token) => {
-        if (!token || COMMENT_LINE.test(lines[token.line - 1]) || optedOut(lines, comments, token.line)) return
-        sitesByOrigin.set(token.start, { file: rel, line: token.line, text: lines[token.line - 1].trim() })
-    }
+    const collector = siteCollector(lines, comments, rel)
 
     for (const bound of bindings.values()){
         if (isStake(expressionValue(tokens, bindings, bound.start, bound.end)))
-            add(originFor(tokens, bindings, bound.start, bound.end))
+            collector.add(originFor(tokens, bindings, bound.start, bound.end))
     }
     for (let i = 0; i < tokens.length; i++){
         const token = tokens[i]
-        if ((token.type === 'string' || token.type === 'template') && token.value !== 'STAKE' && isStake(token.value)) add(token)
-        if (token.value === '[') add(joinedStake(tokens, bindings, i))
+        if ((token.type === 'string' || token.type === 'template') && token.value !== 'STAKE' && isStake(token.value)) collector.add(token)
+        if (token.value === '[') collector.add(joinedStake(tokens, bindings, i))
         const action = actionValueSpan(tokens, i)
         if (action && expressionValue(tokens, bindings, action.start, action.end) === 'STAKE')
-            add(originFor(tokens, bindings, action.start, action.end))
+            collector.add(originFor(tokens, bindings, action.start, action.end))
         if (token.value !== 'createAndSendTransaction' || tokens[i + 1]?.value !== '(') continue
         const close = matching(tokens, i + 1, '(', ')')
         // A parameter list followed by a body is the helper's own definition, not a broadcast.
@@ -516,23 +548,21 @@ function scanLines(lines, rel){
         const value = expressionValue(tokens, bindings, payload.start, payload.end)
         const joined = tokens[payload.start]?.value === '['
             ? joinedStake(tokens, bindings, payload.start) : null
-        if (isStake(value))
-            add(originFor(tokens, bindings, payload.start, payload.end))
-        else if (joined)
-            add(joined)
+        let origin = null
+        if (isStake(value)) origin = originFor(tokens, bindings, payload.start, payload.end)
+        else if (joined) origin = joined
         // Treat an unresolved head as unresolved even when the payload tail is literal.
         else if (value.startsWith(UNKNOWN) &&
             !isStakeHelperBuilt(tokens, bindings, payload.start, payload.end) &&
             !isKnownNonStakePayload(tokens, rel, payload.start, payload.end)){
             const builder = calledBuilder(tokens, bindings, payload.start, payload.end)
             if (!builder || !NON_STAKE_BUILDERS.has(builder))
-                add(originFor(tokens, bindings, payload.start, payload.end))
+                origin = originFor(tokens, bindings, payload.start, payload.end)
         }
+        if (origin) collector.addCall(origin, token)
     }
 
-    const sites = [...sitesByOrigin.entries()]
-        .sort((a, b) => a[1].line - b[1].line || a[0] - b[0])
-        .map((entry) => entry[1])
+    const sites = collector.counted()
     // One registration books one broadcast. A static scan cannot pair them, so a
     // shortfall flags every unmarked site in the file.
     return sites.length > registrationCount(tokens, bindings) ? sites : []

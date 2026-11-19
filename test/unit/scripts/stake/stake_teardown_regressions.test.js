@@ -28,6 +28,28 @@ describe('check-stake-teardown origin fidelity', function () {
         const source = "const prefix = 'STAKE|1|'; const msg = prefix + pk\n" + REGISTER
         assert.strictEqual(scan(source).length, 0)
     })
+
+    it('counts distinct calls that share one payload prefix', function () {
+        const source = ["const prefix = 'STAKE|1|1000|'",
+            'await tx.createAndSendTransaction(addrA, prefix + pkA)',
+            'await tx.createAndSendTransaction(addrB, prefix + pkB)', REGISTER].join('\n')
+        assert.deepStrictEqual(scan(source).map((hit) => hit.line), [2, 3])
+    })
+
+    it('accepts shared-prefix calls when every broadcast is booked', function () {
+        const source = ["const prefix = 'STAKE|1|1000|'",
+            'await tx.createAndSendTransaction(addrA, prefix + pkA)',
+            'await tx.createAndSendTransaction(addrB, prefix + pkB)', REGISTER, REGISTER].join('\n')
+        assert.strictEqual(scan(source).length, 0)
+    })
+
+    it('honors an origin opt-out across shared-prefix calls', function () {
+        const source = ['// stake-teardown-ok: rejected on the zero amount guard',
+            "const prefix = 'STAKE|1|0|'",
+            'await tx.createAndSendTransaction(addrA, prefix + pkA)',
+            'await tx.createAndSendTransaction(addrB, prefix + pkB)'].join('\n')
+        assert.strictEqual(scan(source).length, 0)
+    })
 })
 
 describe('check-stake-teardown booking fidelity', function () {
@@ -80,6 +102,30 @@ describe('check-stake-teardown booking fidelity', function () {
         const source = ["let msg = 'STAKE|1|1000|' + pk", 'stakeTeardown.bookBroadcastStake({',
             '    addressInfo: addr,', '    signingPubkey: pk,', '})'].join('\n')
         assert.strictEqual(scan(source).length, 0)
+    })
+
+    it('rejects bookings whose earlier required keys can be overridden', function () {
+        const specs = [
+            '{ addressInfo: addr, signingPubkey: pk, ...{ signingPubkey: null } }',
+            '{ addressInfo: addr, signingPubkey: pk, ...overrides }',
+            "{ addressInfo: addr, signingPubkey: pk, ['signingPubkey']: null }",
+            '{ ...spec }',
+        ]
+        for (const spec of specs) {
+            const call = 'stakeTeardown.bookBroadcastStake(' + spec + ')'
+            assert.strictEqual(scan("let msg = 'STAKE|1|1000|' + pk\n" + call).length, 1, call)
+        }
+    })
+
+    it('accepts explicit required keys after an unknown member', function () {
+        const specs = [
+            '{ ...base, addressInfo: addr, signingPubkey: pk }',
+            '{ addressInfo: addr, ...base, signingPubkey: pk, addressInfo: addr }',
+        ]
+        for (const spec of specs) {
+            const call = 'stakeTeardown.bookBroadcastStake(' + spec + ')'
+            assert.strictEqual(scan("let msg = 'STAKE|1|1000|' + pk\n" + call).length, 0, call)
+        }
     })
 })
 

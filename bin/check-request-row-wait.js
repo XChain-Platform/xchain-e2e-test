@@ -35,7 +35,7 @@ const fs   = require('fs')
 const path = require('path')
 const { lineComments, markerFor } = require('./lib/line_comments')
 const { optOutMarker } = require('./lib/opt_out_marker')
-const { scanNamed, templateLiteralEnd } = require('./lib/template_literal')
+const { scanNamed, templateInterpolations } = require('./lib/template_literal')
 
 const ROOT         = path.join(__dirname, '..')
 const DEFAULT_PATH = path.join(ROOT, 'test', 'attestMirror')
@@ -46,28 +46,42 @@ function slash (value) { return value.split(path.sep).join('/') }
 // Blank comments and literals without changing offsets. The scanner only
 // needs identifiers, punctuation and braces; keeping offsets stable preserves
 // exact source lines in the report.
-function blankNonCode (src) {
-    const out = src.split('')
-    const blank = (from, to) => {
-        for (let i = from; i < to && i < out.length; i++) if (out[i] !== '\n') out[i] = ' '
-    }
-    let i = 0
-    while (i < src.length) {
+function blankRange (out, from, to) {
+    for (let i = from; i < to && i < out.length; i++) if (out[i] !== '\n') out[i] = ' '
+}
+
+// regexEnds maps each regex literal's start offset to its end, as found by the
+// interpolation lexer; it is empty outside interpolation code.
+function blankRangeNonCode (src, out, from, to, regexEnds = new Map()) {
+    let i = from
+    while (i < to) {
         const c = src[i]
         const d = src[i + 1]
+        if (regexEnds.has(i)) {
+            const stop = Math.min(regexEnds.get(i), to)
+            blankRange(out, i, stop); i = stop; continue
+        }
         if (c === '/' && d === '/') {
             const end = src.indexOf('\n', i)
-            const stop = end === -1 ? src.length : end
-            blank(i, stop); i = stop; continue
+            const stop = Math.min(end === -1 ? src.length : end, to)
+            blankRange(out, i, stop); i = stop; continue
         }
         if (c === '/' && d === '*') {
             const end = src.indexOf('*/', i + 2)
-            const stop = end === -1 ? src.length : end + 2
-            blank(i, stop); i = stop; continue
+            const stop = Math.min(end === -1 ? src.length : end + 2, to)
+            blankRange(out, i, stop); i = stop; continue
         }
         if (c === '`') {
-            const end = templateLiteralEnd(src, i)
-            blank(i, end); i = end; continue
+            const template = templateInterpolations(src, i)
+            const stop = Math.min(template.end, to)
+            let literalStart = i
+            for (const part of template.parts) {
+                if (part.codeStart >= stop) break
+                blankRange(out, literalStart, Math.min(part.codeStart, stop))
+                blankRangeNonCode(src, out, part.codeStart, Math.min(part.codeEnd, stop), part.regexEnds)
+                literalStart = Math.min(part.codeEnd, stop)
+            }
+            blankRange(out, literalStart, stop); i = stop; continue
         }
         if (c === '"' || c === "'") {
             let j = i + 1
@@ -76,10 +90,16 @@ function blankNonCode (src) {
                 if (src[j] === c) break
                 j++
             }
-            blank(i, Math.min(j + 1, src.length)); i = j + 1; continue
+            const stop = Math.min(j + 1, to)
+            blankRange(out, i, stop); i = stop; continue
         }
         i++
     }
+}
+
+function blankNonCode (src) {
+    const out = src.split('')
+    blankRangeNonCode(src, out, 0, src.length)
     return out.join('')
 }
 

@@ -61,6 +61,7 @@ async function bootHubs(){
         dbNamePrefix: 'XChain_DOGE_Regtest_ELECT_' + process.pid + '_'
     });
     await S.mvh.start();
+    for (const hub of S.mvh.hubs) hub.stateAnchorPublisher.electionToleranceBlocks = 100000;
     S.pubkeys = S.mvh.getPubkeys().map(p => p.toLowerCase());
     stubCapabilities();
 }

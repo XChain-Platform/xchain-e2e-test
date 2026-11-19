@@ -110,7 +110,11 @@ function tokenEnd (source, i, state) {
     if (c === '`') { state.after = 'division'; return templateLiteralEnd(source, i) }
     if (c === '/' && slashOpensRegex(source, i, state.after)) {
         const end = regexEnd(source, i)
-        if (end !== -1) { state.after = 'division'; return end }
+        if (end !== -1) {
+            state.after = 'division'
+            if (state.regexEnds) state.regexEnds.set(i, end)
+            return end
+        }
     }
     const name = stickyMatch(IDENTIFIER, source, i)
     if (name) {
@@ -130,8 +134,11 @@ function tokenEnd (source, i, state) {
 }
 
 // start is the first character after `${`; returns the index just past its `}`.
-function interpolationEnd (source, start) {
-    const state = { after: 'regex', braces: 0, parens: [], word: null, property: false, newline: false }
+// An optional regexEnds map receives start -> end for each regex literal at
+// this interpolation's own level, so a masker can blank exactly the spans this
+// scan treated as regex instead of guessing again from context.
+function interpolationEnd (source, start, regexEnds) {
+    const state = { after: 'regex', braces: 0, parens: [], word: null, property: false, newline: false, regexEnds }
     let i = start
     while (i < source.length) {
         const c = source[i]
@@ -148,19 +155,30 @@ function interpolationEnd (source, start) {
     return source.length
 }
 
-// start is an opening backtick; returns the index just past its closing one.
-function templateLiteralEnd (source, start) {
+// Returns the closing boundary and executable spans inside a template literal.
+function templateInterpolations (source, start) {
+    const parts = []
     let i = start + 1
     while (i < source.length) {
         if (source[i] === '\\') { i += 2; continue }
-        if (source[i] === '`') return i + 1
+        if (source[i] === '`') return { end: i + 1, parts }
         if (source[i] === '$' && source[i + 1] === '{') {
-            i = interpolationEnd(source, i + 2)
+            const codeStart = i + 2
+            const regexEnds = new Map()
+            const after = interpolationEnd(source, codeStart, regexEnds)
+            const codeEnd = source[after - 1] === '}' ? after - 1 : after
+            parts.push({ codeStart, codeEnd, regexEnds })
+            i = after
             continue
         }
         i++
     }
-    return source.length
+    return { end: source.length, parts }
+}
+
+// start is an opening backtick; returns the index just past its closing one.
+function templateLiteralEnd (source, start) {
+    return templateInterpolations(source, start).end
 }
 
 // Runs one file's scan and prefixes an ambiguity error with the file it came from.
@@ -173,4 +191,4 @@ function scanNamed (file, scan) {
     }
 }
 
-module.exports = { AMBIGUOUS_TEMPLATE, interpolationEnd, scanNamed, templateLiteralEnd }
+module.exports = { AMBIGUOUS_TEMPLATE, interpolationEnd, scanNamed, templateInterpolations, templateLiteralEnd }
