@@ -189,6 +189,28 @@ Object.defineProperties(state, {
     contractIndex: { get() { return contractIndex; } }
 });
 
+async function submitValidatorStake(stakeAmount) {
+    let booking = null;
+    let result;
+    try {
+        result = await submit(sdk,
+            { action: 'STAKE', params: { version: 1, amount: stakeAmount, signingPubkey: validator.pubkey } },
+            { pubkey: operator.address, change: operator.address },
+            submitOpts({ wif: operator.wif, onProgress(step) {
+                if (step === 'waiting' && !booking) booking = stakeTeardown.bookBroadcastStake({
+                    addressInfo: operator, signingPubkey: validator.pubkey, amount: stakeAmount
+                });
+            } })
+        );
+    } catch (err) {
+        if (booking && err && err.code === 'ACTION_REJECTED') booking.undo();
+        throw err;
+    }
+    if (booking && result && result.indexed &&
+        /^(invalid|rejected)/.test(String(result.indexed.status))) booking.undo();
+    return result;
+}
+
 async function setup() {
         // STAKE + EXECUTE (and thus the attestation framework) are BTC-only.
         const coinCode = global.COIN_CODE || 'BTC';
@@ -217,14 +239,7 @@ async function setup() {
         // http_get PROVIDER floor (10000), enforced on the responsible set
         // at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest). Driven via SDK.
         const stakeAmount = '15000.00000000';
-        const stakeRes = await submit(sdk,
-            { action: 'STAKE', params: { version: 1, amount: stakeAmount, signingPubkey: validator.pubkey } },
-            { pubkey: operator.address, change: operator.address },
-            submitOpts({ wif: operator.wif })
-        );
-        // Book a valid stake before asserting on it, so the root afterAll gives the fresh key back.
-        if (stakeRes && stakeRes.indexed && stakeRes.indexed.status === 'valid')
-            stakeTeardown.registerStake({ addressInfo: operator, signingPubkey: validator.pubkey, amount: stakeAmount });
+        const stakeRes = await submitValidatorStake(stakeAmount);
         console.log('    [sdk] STAKE v1 version=' + stakeRes.version + ' status=' + stakeRes.indexed.status);
         expect(stakeRes.version, 'should select STAKE v1 (capability)').to.equal(1);
         expect(stakeRes.indexed.status).to.equal('valid');

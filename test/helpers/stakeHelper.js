@@ -76,6 +76,17 @@ async function waitForAnyRewardClaim({source, txHash}, timeMax = 60000){
     return null
 }
 
+// Broadcast a STAKE and book it for release from the helper's post-broadcast callback,
+// so a wait inside the helper that gives up cannot leave a confirmable stake unbooked.
+// A caller whose helper never fires the callback is booked once on return.
+async function broadcastBooked(addressInfo, msg, bookStake){
+    let booking = null
+    const book = () => booking || (booking = bookStake())
+    const txHash = await transactionHelper.createAndSendTransaction(
+        addressInfo, msg, null, [], null, null, false, { onBroadcast: book })
+    return { txHash, booking: book() }
+}
+
 // Wait for a STAKE that was booked for release at broadcast (see stakeTeardown.js).
 // A wait that gives up keeps the booking, since the stake can still confirm; only a
 // row the indexer has already recorded as rejected gives the booking back.
@@ -103,11 +114,10 @@ module.exports = {
         const msg = "STAKE|1|" + amount + "|" + signingPubkey
 
         console.log("Creating and sending STAKE V1 tx...")
-        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
-
         // The broadcast stake can become a REAL member of the venue's capability
-        // sets, so book the debt now for the run's teardown to give back.
-        const booking = stakeTeardown.bookBroadcastStake({ addressInfo, signingPubkey, amount })
+        // sets, so it is booked at broadcast for the run's teardown to give back.
+        const { txHash, booking } = await broadcastBooked(addressInfo, msg,
+            () => stakeTeardown.bookBroadcastStake({ addressInfo, signingPubkey, amount }))
 
         console.log("Waiting for stake in the database...")
         const stakeRow = await awaitBookedStake(booking, async () => requireRow(await indexerDatabase.waitForStake({
@@ -128,11 +138,10 @@ module.exports = {
         const msg = "STAKE|2|" + amount + "|" + signingPubkey
 
         console.log("Creating and sending STAKE V2 (top-up) tx...")
-        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
-
         // A top-up onto a stake this run already released (or one seeded before
         // it) is still this run's debt: the single UNSTAKE sweeps every row.
-        const booking = stakeTeardown.bookBroadcastStake({ addressInfo, signingPubkey, amount })
+        const { txHash, booking } = await broadcastBooked(addressInfo, msg,
+            () => stakeTeardown.bookBroadcastStake({ addressInfo, signingPubkey, amount }))
 
         console.log("Waiting for top-up stake row in the database...")
         const stakeRow = await awaitBookedStake(booking, async () => requireRow(await indexerDatabase.waitForStake({
@@ -319,9 +328,8 @@ module.exports = {
         const msg = "STAKE|3|" + amount + "|" + signingPubkey + "|" + contractIndex + "|" + tick
 
         console.log("Creating and sending STAKE V3 tx...")
-        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
-
-        const booking = stakeTeardown.bookBroadcastStake({ addressInfo, signingPubkey, amount, contractIndex, tick })
+        const { txHash, booking } = await broadcastBooked(addressInfo, msg,
+            () => stakeTeardown.bookBroadcastStake({ addressInfo, signingPubkey, amount, contractIndex, tick }))
 
         console.log("Waiting for contract stake in the database...")
         const stakeRow = await awaitBookedStake(booking, async () => requireRow(await indexerDatabase.waitForContractStake({
@@ -349,8 +357,8 @@ module.exports = {
         const msg = "STAKE|3|" + amount + "|" + signingPubkey + "|" + contractIndex + "|" + tick
 
         console.log("Creating and sending (expected-invalid) STAKE V3 tx...")
-        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
-        const booking = stakeTeardown.bookBroadcastStake({ addressInfo, signingPubkey, amount, contractIndex, tick })
+        const { txHash, booking } = await broadcastBooked(addressInfo, msg,
+            () => stakeTeardown.bookBroadcastStake({ addressInfo, signingPubkey, amount, contractIndex, tick }))
 
         console.log("Waiting for the rejected contract_stakes row in the database...")
         const end = Date.now() + timeMax

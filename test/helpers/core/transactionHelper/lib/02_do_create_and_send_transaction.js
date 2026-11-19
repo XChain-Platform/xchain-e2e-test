@@ -206,6 +206,9 @@ module.exports = {
             console.log("Sending the second transaction... (hex length: "+spentHex.length+")")
             spentTxHash = await nodeConnector.broadcastTx(spentHex)
         }
+        // The action is on the network from here; the waits below can still fail, so a
+        // caller that owes a teardown for it books it in this callback, not after the return.
+        if (opts && typeof opts.onBroadcast === 'function') opts.onBroadcast(spentTxHash != null ? spentTxHash : txHash)
         if (capture){
             capture.fundingTxHash = txHash
             capture.revealTxHash = spentTxHash

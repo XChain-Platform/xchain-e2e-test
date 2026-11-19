@@ -40,6 +40,8 @@ module.exports = {
     // the tracker can catch up, then rebuild from scratch.
     // `opts` (all optional):
     //   compress  tri-state passed straight through to the encoder (null = its default)
+    //   onBroadcast  called with the action's txid right after the broadcast and before
+    //             the confirmation and tracker waits, which can still throw
     //   capture   an object this helper fills in with the encoder's build metadata
     //             (encoding, compression report, envelope recovery record, commit and
     //             reveal txids). Tests that assert on HOW the action was carried need

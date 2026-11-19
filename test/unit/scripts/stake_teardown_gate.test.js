@@ -68,9 +68,18 @@ describe('check-stake-teardown gate', () => {
     it('accepts a file that books its own debt with the release ledger', () => {
         const hits = scan([
             "await transactionHelper.createAndSendTransaction(addr, 'STAKE|1|' + amount + '|' + pubkey)",
-            "stakeTeardown.registerStake({ addressInfo: addr, signingPubkey: pubkey, amount: amount })"
+            "stakeTeardown.bookBroadcastStake({ addressInfo: addr, signingPubkey: pubkey, amount: amount })"
         ].join('\n'))
         assert.strictEqual(hits.length, 0)
+    })
+
+    it('rejects a registration that can run only after a throwing wait', () => {
+        const hits = scan([
+            "await transactionHelper.createAndSendTransaction(addr, 'STAKE|1|' + amount + '|' + pubkey)",
+            'await waitForStake(pubkey)',
+            "stakeTeardown.registerStake({ addressInfo: addr, signingPubkey: pubkey, amount: amount })"
+        ].join('\n'))
+        assert.strictEqual(hits.length, 1)
     })
 })
 
@@ -100,7 +109,7 @@ describe('check-stake-teardown gate', () => {
 })
 
 describe('check-stake-teardown gate: one registration per broadcast', () => {
-    const REGISTER = "stakeTeardown.registerStake({ addressInfo: addr, signingPubkey: pk, amount: 1 })"
+    const REGISTER = "stakeTeardown.bookBroadcastStake({ addressInfo: addr, signingPubkey: pk, amount: 1 })"
 
     it('flags both broadcasts when a file registers once and broadcasts twice', () => {
         const hits = scan(["let a = 'STAKE|1|1000|' + pkA", "let b = 'STAKE|1|1000|' + pkB", REGISTER].join('\n'))
@@ -313,7 +322,7 @@ describe('check-stake-teardown gate: payloads assembled from a bare STAKE', () =
         assert.strictEqual(scan(['// stake-teardown-ok: zero amount, always rejected',
             "let msg = ['STAKE', 1, 0, pk].join('|')"].join('\n')).length, 0)
         assert.strictEqual(scan(["let msg = ['STAKE', 1, amount, pk].join('|')",
-            'stakeTeardown.registerStake({ addressInfo: addr, signingPubkey: pk, amount: amount })'].join('\n')).length, 0)
+            'stakeTeardown.bookBroadcastStake({ addressInfo: addr, signingPubkey: pk, amount: amount })'].join('\n')).length, 0)
     })
 })
 
@@ -329,7 +338,7 @@ describe('check-stake-teardown gate: SDK-form STAKE submissions', () => {
         assert.strictEqual(scan(['// stake-teardown-ok: a contract stake never joins a capability set',
             "submit(sdk, { action: 'STAKE', params: p })"].join('\n')).length, 0)
         assert.strictEqual(scan(["const res = await submit(sdk, { action: 'STAKE', params: p })",
-            'stakeTeardown.registerStake({ addressInfo: from, signingPubkey: p.signingPubkey, amount: p.amount })'].join('\n')).length, 0)
+            'stakeTeardown.bookBroadcastStake({ addressInfo: from, signingPubkey: p.signingPubkey, amount: p.amount })'].join('\n')).length, 0)
     })
 })
 

@@ -318,10 +318,25 @@ async function readBlockStamp (btc, height) {
     return { height: Number(height), hash: String(hash), blockTime: Number(block.time), mtp: Number(block.mediantime) }
 }
 
+async function restoreMinerState (helper, steps) {
+    let firstError = null
+    for (const step of steps) {
+        try {
+            await step.run()
+        } catch (err) {
+            if (!firstError) {
+                const message = err && err.message ? err.message : String(err)
+                firstError = new Error(helper + ': ' + step.name + ' failed: ' + message, { cause: err })
+            }
+        }
+    }
+    return firstError
+}
+
 /**
  * Mine ONE block with the node clock pinned at `stampS` (unpinned when null), the miner's
  * adaptive loop paused so nothing else lands in it, and read the stamp back from the node.
- * The pin is released in a finally so a failed leg never leaves the rail's clock pinned.
+ * The pin is released in a finally. A failed release or resume fails a successful call.
  *
  * `opts.resume === false` leaves the miner PAUSED after the block, for a leg whose next
  * drill block must be the very next height (BF5's B then B + 1 then B + 2, BF8's LTC run).
@@ -333,29 +348,45 @@ async function mineStamped (btc, stampS, opts) {
     const miner = btc.globals.regtestMinerConnector
     const before = Number(await btc.globals.nodeConnector.getBlockCount())
     await miner.pauseMining()
+    let bodyFailed = false
     try {
         if (stampS !== null && stampS !== undefined) await miner.setMockTime(Number(stampS))
         await miner.generateBlocks(1)
+    } catch (err) {
+        bodyFailed = true
+        throw err
     } finally {
-        if (stampS !== null && stampS !== undefined) await miner.setMockTime(0).catch(() => {})
-        if (resume) await miner.resumeMining().catch(() => {})
+        const steps = []
+        if (stampS !== null && stampS !== undefined) {
+            steps.push({ name: 'setMockTime(0)', run: () => miner.setMockTime(0) })
+        }
+        if (resume) steps.push({ name: 'resumeMining', run: () => miner.resumeMining() })
+        const restoreError = await restoreMinerState('mineStamped', steps)
+        if (restoreError && !bodyFailed) throw restoreError
     }
     const after = Number(await btc.globals.nodeConnector.getBlockCount())
     assert.strictEqual(after, before + 1, 'mineStamped: expected exactly one block, tip went ' + before + ' to ' + after)
     return readBlockStamp(btc, after)
 }
 
-/** Mine `count` blocks under one pin, for the parent's spaced 144-block run. */
+/** Mine `count` blocks under one pin. A failed release or resume fails a successful call. */
 async function mineSpacedRun (btc, count, stampS) {
     const miner = btc.globals.regtestMinerConnector
     const from = Number(await btc.globals.nodeConnector.getBlockCount())
     await miner.pauseMining()
+    let bodyFailed = false
     try {
         await miner.setMockTime(Number(stampS))
         await miner.generateBlocks(Number(count))
+    } catch (err) {
+        bodyFailed = true
+        throw err
     } finally {
-        await miner.setMockTime(0).catch(() => {})
-        await miner.resumeMining().catch(() => {})
+        const restoreError = await restoreMinerState('mineSpacedRun', [
+            { name: 'setMockTime(0)', run: () => miner.setMockTime(0) },
+            { name: 'resumeMining', run: () => miner.resumeMining() },
+        ])
+        if (restoreError && !bodyFailed) throw restoreError
     }
     const to = Number(await btc.globals.nodeConnector.getBlockCount())
     assert.strictEqual(to, from + Number(count), 'mineSpacedRun: tip went ' + from + ' to ' + to)

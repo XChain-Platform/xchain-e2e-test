@@ -156,6 +156,42 @@ describe('stakeHelper', () => {
         })
     })
 
+    // The helper broadcasts and then waits for node confirmation and tracker
+    // indexing before it returns, so a failure in that tail must not lose the booking.
+    describe('fixture-stake booking when the broadcast helper fails after the broadcast', () => {
+        beforeEach(() => stakeTeardown.reset())
+        afterEach(() => stakeTeardown.reset())
+
+        it('keeps a v1 stake booked when the helper throws after announcing the broadcast', async () => {
+            createTxStub.callsFake(async (a, msg, raw, outs, type, key, skip, opts) => {
+                opts.onBroadcast('abc123')
+                throw new Error('post-broadcast wait failed')
+            })
+            await assert.rejects(helper.sendStakeV1(addressInfo, '1000', 'pubkeyPB1'), /post-broadcast wait failed/)
+            const out = stakeTeardown.outstanding()
+            assert.strictEqual(out.length, 1)
+            assert.strictEqual(out[0].signingPubkey, 'pubkeyPB1')
+        })
+
+        it('books a v2 top-up once when the callback fires and the helper then returns', async () => {
+            await helper.sendStakeV1(addressInfo, '1000', 'pubkeyPB2')
+            createTxStub.callsFake(async (a, msg, raw, outs, type, key, skip, opts) => {
+                opts.onBroadcast('abc123')
+                opts.onBroadcast('abc123')
+                return 'abc123'
+            })
+            await helper.sendStakeV2(addressInfo, '500', 'pubkeyPB2')
+            const out = stakeTeardown.outstanding()
+            assert.strictEqual(out.length, 1)
+            assert.deepStrictEqual(out[0].amounts, ['1000', '500'])
+        })
+
+        it('books a stake whose helper never announces the broadcast', async () => {
+            await helper.sendStakeV1(addressInfo, '1000', 'pubkeyPB3')
+            assert.strictEqual(stakeTeardown.outstanding().length, 1)
+        })
+    })
+
     // A broadcast STAKE can confirm after its wait gives up, so the booking is
     // kept unless the indexer has already recorded the stake as rejected.
     describe('fixture-stake booking when the valid wait gives up', () => {

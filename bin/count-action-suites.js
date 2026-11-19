@@ -18,8 +18,8 @@
 // `describe` blocks, which is what makes it reproducible without a live
 // regtest stack.
 //
-// An ACTION name counts when a suite under test/actions/ actually builds a
-// payload for it. Payloads are always assembled as "NAME|<version>|..."
+// An ACTION name counts when a suite at any depth under test/actions/ actually
+// builds a payload for it. Payloads are always assembled as "NAME|<version>|..."
 // string literals, either in the suite itself or in a test/ helper the suite
 // pulls in, so we walk each suite's local require graph and read the leading
 // token out of those literals. Tokens are then filtered against the decoder's
@@ -185,12 +185,23 @@ function requireClosure(entry, testRoot = TEST_ROOT, seen = new Set()) {
     return seen
 }
 
+function actionSuiteFiles(dir, base = dir, found = []) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === 'node_modules' || (entry.isDirectory() && entry.name.startsWith('.'))) continue
+        const absolute = path.join(dir, entry.name)
+        if (entry.isDirectory()) actionSuiteFiles(absolute, base, found)
+        else if (entry.isFile() && entry.name.endsWith('.test.js'))
+            found.push(path.relative(base, absolute).split(path.sep).join('/'))
+    }
+    return found.sort()
+}
+
 // actionsDir/testRoot default to this repo's own tree; they are parameters only
 // so a test can drive the counter over a fixture suite and prove alias folding
 // actually happens, which nothing could express before.
 function countActionSuites({ actionsDir = ACTIONS_DIR, testRoot = TEST_ROOT } = {}) {
     const vocab = vocabulary()
-    const suites = fs.readdirSync(actionsDir).filter((f) => f.endsWith('.test.js')).sort()
+    const suites = actionSuiteFiles(actionsDir)
 
     const bySuite = {}
     const actions = new Set()

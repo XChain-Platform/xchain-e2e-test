@@ -31,8 +31,19 @@ const { railQuery, resilientSend, pumpUntil, capabilityWeights, waitForIndexedHe
 // block that was never computed. Keying on the pubkey and polling until the row
 // appears removes both.
 async function stakeKeyFrom(rail, addressInfo, amount, pubkey, label) {
-    await resilientSend(label, rail, () =>
-        transactionHelper.createAndSendTransaction(addressInfo, 'STAKE|1|' + amount + '|' + pubkey));
+    // Booked from the broadcast callback, ahead of the helper's own confirmation waits, so a
+    // wait that gives up cannot leave a confirmable stake out of the release ledger. Only
+    // stakes on the BOOTSTRAPPED rail are booked: the root afterAll sweeps through the
+    // globals initialCheck set, so a stake on the origin rail would be swept against the
+    // wrong chain.
+    let booking = null;
+    const book = () => {
+        if (!booking && rail && rail.code === global.COIN_CODE)
+            booking = stakeTeardown.bookBroadcastStake({ addressInfo: addressInfo, signingPubkey: pubkey, amount: amount });
+    };
+    await resilientSend(label, rail, () => transactionHelper.createAndSendTransaction(
+        addressInfo, 'STAKE|1|' + amount + '|' + pubkey, null, [], null, null, false, { onBroadcast: book }));
+    book();
     const row = await pumpUntil(label + ' row', rail, async () => {
         const rows = await railQuery(rail,
             'SELECT s.action_index, s.amount, s.activation_block, st.status ' +
@@ -41,16 +52,8 @@ async function stakeKeyFrom(rail, addressInfo, amount, pubkey, label) {
             'WHERE ip.pubkey = ? ORDER BY s.action_index DESC LIMIT 1', [String(pubkey).toLowerCase()]);
         return rows.length ? rows[0] : null;
     }, 300000);
+    if (booking && /^(invalid|rejected)/.test(String(row.status))) booking.undo();
     assert.strictEqual(String(row.status), 'valid', label + ' indexed ' + row.status);
-    // Book the debt with the run's release ledger. The drill unwinds its
-    // cross_chain stake by hand (it has to: the relay leg needs the majority
-    // gone mid-run), while an unbooked attestation stake stays in the venue's
-    // capability set for good, which is the accumulation this ledger prevents.
-    // Only stakes on the BOOTSTRAPPED rail are booked: the root
-    // afterAll sweeps through the globals initialCheck set, so a stake on the
-    // origin rail would be swept against the wrong chain.
-    if (rail && rail.code === global.COIN_CODE)
-        stakeTeardown.registerStake({ addressInfo: addressInfo, signingPubkey: pubkey, amount: amount });
     return row;
 }
 

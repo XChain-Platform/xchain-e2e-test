@@ -135,6 +135,12 @@ function countingChecks() {
             fs.mkdirSync(actionsDir)
             fs.writeFileSync(path.join(actionsDir, 'alias.test.js'),
                 'const payload = "MSG|0|abc"\nconst plain = "ISSUE|0|abc"\n')
+            const partsDir = path.join(actionsDir, 'widget.test')
+            fs.mkdirSync(partsDir)
+            fs.writeFileSync(path.join(actionsDir, 'widget.test.js'),
+                'const label = "root suite with no action payload"\n')
+            fs.writeFileSync(path.join(partsDir, '01_part.test.js'),
+                'const payload = "DIVIDEND|0|abc"\n')
 
             const counted = counter.countActionSuites({ actionsDir, testRoot: root })
             assert.ok(counted.actions.includes('MESSAGE'),
@@ -144,6 +150,11 @@ function countingChecks() {
                 'the raw alias token leaked into the counted set')
             assert.ok(counted.actions.includes('ISSUE'),
                 'the fixture counter lost a canonical action name')
+            assert.ok(counted.actions.includes('DIVIDEND'),
+                'an ACTION built only by a nested suite was not counted')
+            assert.strictEqual(counted.suiteFiles, 3,
+                'the suite-file count did not include the nested part')
+            assert.deepStrictEqual(counted.bySuite['widget.test/01_part.test.js'], ['DIVIDEND'])
         } finally {
             fs.rmSync(root, { recursive: true, force: true })
         }

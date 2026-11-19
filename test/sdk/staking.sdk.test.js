@@ -79,23 +79,32 @@ describe('[sdk] contract-targeted staking (DEPLOY v1 -> STAKE v3)', function () 
 
     it('STAKE v3 stakes XCHAIN against the contract', async function () {
         const signingPubkey = newSigningPubkey();
-        const res = await submit(sdk,
-            {
-                action: 'STAKE',
-                params: {
-                    amount: '200.00000000',
-                    signingPubkey,
-                    targetContractIndex: contractIndex,
-                    tick: GAS_TICK,
+        let booking = null;
+        let res;
+        try {
+            res = await submit(sdk,
+                {
+                    action: 'STAKE',
+                    params: {
+                        amount: '200.00000000',
+                        signingPubkey,
+                        targetContractIndex: contractIndex,
+                        tick: GAS_TICK,
+                    },
                 },
-            },
-            { pubkey: staker.address, change: staker.address },
-            submitOpts({ wif: staker.wif })
-        );
+                { pubkey: staker.address, change: staker.address },
+                submitOpts({ wif: staker.wif, onProgress(step) {
+                    if (step === 'waiting' && !booking) booking = stakeTeardown.bookBroadcastStake({
+                        addressInfo: staker, signingPubkey, amount: '200.00000000', contractIndex, tick: GAS_TICK
+                    });
+                } })
+            );
+        } catch (err) {
+            if (booking && err && err.code === 'ACTION_REJECTED') booking.undo();
+            throw err;
+        }
+        if (booking && res && res.indexed && /^(invalid|rejected)/.test(String(res.indexed.status))) booking.undo();
         console.log('    [sdk] STAKE version=' + res.version + ' encoding=' + res.encoding + ' status=' + res.indexed.status);
-        // Book a valid contract stake before asserting on it, so the root afterAll unstakes it.
-        if (res && res.indexed && res.indexed.status === 'valid')
-            stakeTeardown.registerStake({ addressInfo: staker, signingPubkey, amount: '200.00000000', contractIndex, tick: GAS_TICK });
         expect(res.version, 'should select STAKE v3').to.equal(3);
         expect(res.indexed.status).to.equal('valid');
     });

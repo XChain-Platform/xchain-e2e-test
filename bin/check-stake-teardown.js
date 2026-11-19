@@ -33,8 +33,7 @@
  * So every raw or SDK-form STAKE broadcast under test/ must do ONE of:
  *
  *   - go through stakeHelper, which registers the stake for release
- *   - register it itself (a stakeTeardown.registerStake or bookBroadcastStake
- *     call in the same file,
+ *   - book it at broadcast with stakeTeardown.bookBroadcastStake in the same file,
  *     one live call per unmarked raw broadcast the file makes)
  *   - say why this one never becomes a member, on the payload's own line or in
  *     the comment block directly above it:
@@ -429,7 +428,7 @@ function registrationCount(tokens){
     for (let i = 0; i + 3 < tokens.length; i++){
         const method = tokens[i + 2].value
         if (tokens[i].value === 'stakeTeardown' && tokens[i + 1].value === '.' &&
-            (method === 'registerStake' || method === 'bookBroadcastStake') && tokens[i + 3].value === '(') count++
+            method === 'bookBroadcastStake' && tokens[i + 3].value === '(') count++
     }
     return count
 }
@@ -521,7 +520,7 @@ function main(){
     console.error('A stake nothing registers is a stake nothing gives back, and the shared venue keeps it')
     console.error('in its capability set for good.')
     console.error('Fix a site by staking through test/helpers/stakeHelper, or by calling')
-    console.error('stakeTeardown.registerStake() or bookBroadcastStake() for the stake you broadcast.')
+    console.error('stakeTeardown.bookBroadcastStake() for the stake you broadcast.')
     console.error('If this stake can never')
     console.error('become a capability member, say why on its own line or the one above,')
     console.error('in a reason of at least ' + MIN_REASON_WORDS + ' words on the marker line:')
