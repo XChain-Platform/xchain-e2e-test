@@ -147,6 +147,7 @@ const SEED_SENTINEL_ROUNDS = Object.freeze([
     999200001, 999200002,    // nativeFeeLive band (chain-time anchor)
     999200011, 999200012,    // nativeFeeLive band (wall-clock anchor)
     999300001, 999300002,    // nativeFeeDispenser band
+    999500080, 999500081,    // nativeExecuteMeteredGas: dust-safe XCHAIN/native pair
     997710001, 997710002,    // batchIssuanceLimits A4/A5: the down-priced {COIN}/USD that
                              // makes ONE command's worth of native fee a spendable
                              // output rather than dust
