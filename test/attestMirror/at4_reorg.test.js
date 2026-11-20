@@ -21,7 +21,7 @@
  * This drill reorgs the shared regtest chain and must run exclusively.
  ********************************************************************/
 
-require('dotenv').config()
+require('dotenv').config({ quiet: true })
 
 const {
     newContext, bringUp, tearDown, proveRequestKept, proveRequestRemoved,

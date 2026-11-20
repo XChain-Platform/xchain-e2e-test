@@ -31,7 +31,7 @@
  ********************************************************************/
 
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const assert = require('assert')
 const fs     = require('fs')

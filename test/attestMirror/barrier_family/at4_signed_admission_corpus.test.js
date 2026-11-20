@@ -46,7 +46,7 @@
 const assert = require('assert')
 const path = require('path')
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const rows = require('../helpers/barrierFamilyRows')
 const drive = require('../helpers/barrierFamilyDrive')

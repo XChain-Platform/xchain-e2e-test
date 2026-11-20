@@ -36,7 +36,7 @@
 // Covers the six-of-ten checkpoint boundary. One part of multiHubStateAnchorN10.integration.test.js.
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const assert = require('assert');
 const { MultiValidatorHub, ValidatorIdentity } = require('../../helpers/multiValidatorHubHelper');

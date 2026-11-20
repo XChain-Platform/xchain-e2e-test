@@ -15,7 +15,9 @@ const CryptoNetworks = require('../../../../src/crypto_networks');
 // The hub wallet's private key as a WIF for the regtest coin network.
 function wifEncodeFor(wallet){
     const network = CryptoNetworks.getBitcoinJsNetwork(COIN + '-' + NETWORK);
-    return wifEncode(network.wif, Buffer.from(wallet.privateKey), true);
+    return wifEncode({
+        version: network.wif, privateKey: Buffer.from(wallet.privateKey), compressed: true
+    });
 }
 
 module.exports = { wifEncodeFor };

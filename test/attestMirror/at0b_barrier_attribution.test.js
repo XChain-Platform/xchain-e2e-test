@@ -21,7 +21,7 @@
  * remains available, and release forces a fresh snapshot before convergence.
  ********************************************************************/
 
-require('dotenv').config()
+require('dotenv').config({ quiet: true })
 
 const {
     newContext, bringUp, tearDown, parkOnAttributedBarrier, releaseAndConverge,

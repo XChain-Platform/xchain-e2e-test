@@ -52,7 +52,7 @@
 const assert = require('assert')
 const dotenv = require('dotenv')
 const UNIT_ONLY = process.env.ZC1_UNIT_ONLY === '1'
-if (!UNIT_ONLY) dotenv.config()
+if (!UNIT_ONLY) dotenv.config({ quiet: true })
 
 const { newCtx, setupVenue, teardownVenue, waitForLocalRequestAtBlock } = require('./helpers/zc1_fixture')
 const { zeroConfFlipCase } = require('./helpers/zc1_steps')

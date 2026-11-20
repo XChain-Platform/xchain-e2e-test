@@ -79,8 +79,8 @@ describe('cryptoHelper', function () {
         it('returns an object with mnemonic, privateKey, publicKey, address', async function () {
             const result = await cryptoHelper.getNewAddress('alice', 'bitcoin', 'regtest');
             assert.ok(typeof result.mnemonic    === 'string', 'mnemonic should be a string');
-            assert.ok(Buffer.isBuffer(result.privateKey),     'privateKey should be a Buffer');
-            assert.ok(Buffer.isBuffer(result.publicKey),      'publicKey should be a Buffer');
+            assert.ok(result.privateKey instanceof Uint8Array, 'privateKey should be a Uint8Array');
+            assert.ok(result.publicKey instanceof Uint8Array,  'publicKey should be a Uint8Array');
             assert.ok(typeof result.address     === 'string', 'address should be a string');
             assert.ok(result.address.length > 0,              'address should not be empty');
         });

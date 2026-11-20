@@ -173,7 +173,7 @@ module.exports = {
         const commitPsbt = bitcoin.Psbt.fromHex(built["psbt"])
         const ecc = require('tiny-secp256k1')
         const { ECPairFactory } = require('ecpair')
-        const keyToSign = ECPairFactory(ecc).fromPrivateKey(addressInfo["privateKey"], { NETWORK_OBJECT })
+        const keyToSign = ECPairFactory(ecc).fromPrivateKey(addressInfo["privateKey"])
         for (let i = 0; i < commitPsbt.data.inputs.length; i++) commitPsbt.signInput(i, keyToSign)
         commitPsbt.finalizeAllInputs()
         commitPsbt.setMaximumFeeRate(100000)

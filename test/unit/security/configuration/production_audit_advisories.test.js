@@ -48,10 +48,9 @@ const path   = require('path');
 // body-parser under the staged xchain-hub, which is request-path code, so both
 // are reachable by an unauthenticated caller. 6.16.0 is the patch.
 //
-// Not covered here, deliberately: the elliptic / secp256k1 / bitcoinjs-message
-// chain. It has no patched release to move to, so it is an accepted residual
-// rather than a floor, and sdk-transitive-advisories.test.js guards its SHAPE
-// (ADV-14, ADV-15) instead of its version.
+// Elliptic has no patched release, but the SDK no longer reaches it through
+// bitcoinjs-message and secp256k1. sdk-transitive-advisories.test.js keeps the
+// accepted runtime residual pinned to an empty set (ADV-14).
 const root = path.resolve(__dirname, '..', '..', '..', '..');
 const pkg  = require(path.join(root, 'package.json'));
 const lock = require(path.join(root, 'package-lock.json'));

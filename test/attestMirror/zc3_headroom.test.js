@@ -59,7 +59,7 @@
  ********************************************************************/
 
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const { newCtx, setupZc3, teardownZc3 } = require('./helpers/zc3_fixture')
 const { constructVictimWindow, assertSignedResult, assertBoundInFirstSegment } = require('./helpers/zc3_asserts')

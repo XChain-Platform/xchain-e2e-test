@@ -96,9 +96,9 @@ module.exports = {
     // indexer's getAttestationAdmissionCounts uses, so the number here is the number the
     // cap compared against.
     async function admittedInBlock(blockIndex) {
-        let connection = await indexerDatabase.getConnection()
+        const connection = await indexerDatabase.getConnection()
         try {
-            let rows = await connection.query(
+            const rows = await connection.query(
                 `SELECT COUNT(*) AS n FROM attests
                   WHERE version = 0 AND contract_index = ? AND block_index = ?
                     AND request_status <> 'rejected'`,
@@ -111,9 +111,9 @@ module.exports = {
     // Status-agnostic execution lookup by (contract, caller, method) with a bounded poll.
     // The valid-only waitForExecution can never observe a reverted execution.
     async function waitForAnyExecution(caller, method, timeMax = 60000) {
-        let end = Date.now() + timeMax
+        const end = Date.now() + timeMax
         while (Date.now() < end) {
-            let row = await indexerDatabase.checkExecution({
+            const row = await indexerDatabase.checkExecution({
                 contractIndex: contractIndex,
                 caller:        caller,
                 methodName:    method
@@ -149,8 +149,8 @@ module.exports = {
         // The admission gate ahead of the cap needs a responsible set: at least one staked
         // validator clearing the http_get provider floor (10000). Staked from its OWN
         // source so SWQ source-dedup keeps it eligible (see attestation.test.js).
-        let validator = new attestationHelper.MockAttestationValidator()
-        let stakeSource = await cryptoHelper.getNewFundedAddress('attest-cap-val', COIN, NETWORK, null, 'legacy', 0, 0.02)
+        const validator = new attestationHelper.MockAttestationValidator()
+        const stakeSource = await cryptoHelper.getNewFundedAddress('attest-cap-val', COIN, NETWORK, null, 'legacy', 0, 0.02)
         await gasHelper.ensureGasBalance(stakeSource, '20000')
         await stakeHelper.sendStakeV1(stakeSource, '15000.00000000', validator.pubkey)
         validator.source = stakeSource.address
@@ -158,29 +158,29 @@ module.exports = {
         await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
         await utxoTrackerConnector.requireSync()
 
-        let deploy = await vmHelper.sendDeployV0(operatorAddr, CONTRACT_CODE, 500000)
+        const deploy = await vmHelper.sendDeployV0(operatorAddr, CONTRACT_CODE, 500000)
         assert(deploy.contract, 'contract should deploy')
         assert.strictEqual(deploy.contract.status, 'valid', 'deploy status: ' + deploy.contract.status)
         contractIndex = deploy.contract.action_index
     })
 
     it('admits exactly PER_CONTRACT_CAP requests from one EXECUTE (the boundary is inclusive)', async function () {
-        let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askTwice', [])
+        const exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askTwice', [])
         assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)
         assert.strictEqual(Number(exec.execution.emitted_count), PER_CONTRACT_CAP)
 
-        let admitted = await admittedInBlock(exec.execution.block_index)
+        const admitted = await admittedInBlock(exec.execution.block_index)
         assert.strictEqual(admitted, PER_CONTRACT_CAP, 'both at-cap requests should be pending')
     })
 
     it('rejects the request past the cap and reverts the emitting EXECUTE', async function () {
-        let exec = await vmHelper.sendExecuteV0Invalid(operatorAddr, contractIndex, 'askThrice', [])
+        const exec = await vmHelper.sendExecuteV0Invalid(operatorAddr, contractIndex, 'askThrice', [])
         assertCapRevert(exec.execution, 'askThrice')
 
         // The savepoint rollback takes the handler's own 'rejected' audit row with it, and
         // the two earlier emissions of the same EXECUTE as well: nothing from this block
         // may remain in the pending pool for the hub to serve.
-        let admitted = await admittedInBlock(exec.execution.block_index)
+        const admitted = await admittedInBlock(exec.execution.block_index)
         assert.strictEqual(admitted, 0, 'a reverted EXECUTE leaves no admitted request behind')
     })
 
@@ -199,8 +199,8 @@ module.exports = {
         }
         assert(pairTx && singleTx, 'both EXECUTE transactions should broadcast')
 
-        let pairRow   = await waitForAnyExecution(operatorAddr.address, 'askPair')
-        let singleRow = await waitForAnyExecution(secondCaller.address, 'askOnce')
+        const pairRow   = await waitForAnyExecution(operatorAddr.address, 'askPair')
+        const singleRow = await waitForAnyExecution(secondCaller.address, 'askOnce')
         assert(pairRow,   'askPair execution row should exist')
         assert(singleRow, 'askOnce execution row should exist')
         assert.strictEqual(Number(pairRow.block_index), Number(singleRow.block_index),
@@ -210,13 +210,13 @@ module.exports = {
         // full and reverts. Single-first: single admits 1, pair's second request trips
         // the cap and the whole pair reverts. Either way exactly one succeeds and the
         // other names the cap.
-        let winners = [pairRow, singleRow].filter(r => r.status === 'valid')
-        let losers  = [pairRow, singleRow].filter(r => r.status !== 'valid')
+        const winners = [pairRow, singleRow].filter(r => r.status === 'valid')
+        const losers  = [pairRow, singleRow].filter(r => r.status !== 'valid')
         assert.strictEqual(winners.length, 1, 'exactly one of the two same-block EXECUTEs should be admitted, got statuses: '
             + pairRow.status + ' / ' + singleRow.status)
         assertCapRevert(losers[0], losers[0].method_name)
 
-        let admitted = await admittedInBlock(pairRow.block_index)
+        const admitted = await admittedInBlock(pairRow.block_index)
         assert(admitted >= 1 && admitted <= PER_CONTRACT_CAP,
             'admitted requests in the block must stay within the per-contract cap, got ' + admitted)
         assert.strictEqual(admitted, Number(winners[0].emitted_count),

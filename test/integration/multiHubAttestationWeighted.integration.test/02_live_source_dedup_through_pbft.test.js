@@ -24,7 +24,7 @@
 // Covers the live weighted attestation source-dedup through PBFT. One part of multiHubAttestationWeighted.integration.test.js.
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const assert = require('assert');
 const http   = require('http');

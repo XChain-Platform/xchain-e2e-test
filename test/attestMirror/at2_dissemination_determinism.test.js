@@ -26,7 +26,7 @@
  * SERIALIZED, not parallel: the drill stakes into the shared regtest roster.
  ********************************************************************/
 
-require('dotenv').config()
+require('dotenv').config({ quiet: true })
 
 const assert = require('assert')
 const { newContext, bringUp, tearDown, proveDissemination } =

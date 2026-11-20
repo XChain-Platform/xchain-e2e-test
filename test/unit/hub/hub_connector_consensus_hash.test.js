@@ -24,12 +24,26 @@
  ********************************************************************/
 
 const assert = require('assert');
-const nock   = require('nock');
+const { default: nock } = require('nock');
 
 const XChainHubConnector = require('../../../src/XChainHubConnector.js');
 const coins              = require('../../../src/coins');
 
 const HUB_BASE = 'http://hub.test:10000';
+
+// Loading Nock activates a process-wide HTTP interceptor. Keep collection
+// side-effect free, then bracket each test with the documented lifecycle so
+// unrelated raw-socket tests see Node's normal networking implementation.
+nock.restore();
+
+function activateNock(){
+    if(!nock.isActive()) nock.activate();
+}
+
+function restoreNock(){
+    nock.cleanAll();
+    nock.restore();
+}
 
 const CONFIGS = {
     bitcoin: {
@@ -66,9 +80,8 @@ function stubHub(hashes){
 
 describe('XChainHubConnector hub-served consensus-hash cross-check', function(){
 
-    afterEach(function(){
-        nock.cleanAll();
-    });
+    beforeEach(activateNock);
+    afterEach(restoreNock);
 
     it('stays silent when the hub serves the hashes this suite vendors', async function(){
         const hub = new XChainHubConnector([HUB_BASE]);
@@ -102,9 +115,8 @@ describe('XChainHubConnector hub-served consensus-hash cross-check', function(){
 
 describe('XChainHubConnector hub-served consensus-hash cross-check', function(){
 
-    afterEach(function(){
-        nock.cleanAll();
-    });
+    beforeEach(activateNock);
+    afterEach(restoreNock);
 
     it('is silent against an older hub that serves no hashes at all', async function(){
         const hub = new XChainHubConnector([HUB_BASE]);

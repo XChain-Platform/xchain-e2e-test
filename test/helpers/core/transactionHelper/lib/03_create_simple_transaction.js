@@ -20,25 +20,12 @@ function toSats(value) {
     return typeof value === 'bigint' ? value : BigInt(String(value))
 }
 
-// Stock bitcoinjs-lib serializes a 64-bit value through a Number writer that
-// refuses anything above 2^53-1, so an output past that ceiling is rejected
-// here with a clear message instead of an opaque RangeError from inside it.
-function toSerializableNumber(sats, label) {
-    if (sats > BigInt(Number.MAX_SAFE_INTEGER)) {
-        throw new Error(label + " of " + sats + " sat exceeds the 2^53-1 sat a bitcoinjs-lib output can hold")
-    }
-    return Number(sats)
-}
-
-// Legacy (non-segwit) spend built without Psbt. Psbt needs the whole previous
-// transaction as nonWitnessUtxo and parses it with the stock reader, which
-// throws on any output above 2^53-1 sat, and its output typeforce caps values
-// at 21e14 sat, below what a single Dogecoin output can carry. A legacy
-// SIGHASH_ALL signature commits only to the previous output's script, never
-// its value, so the previous transaction is not needed at all.
+// Legacy (non-segwit) spend built without Psbt. A legacy SIGHASH_ALL signature
+// commits only to the previous output's script, never its value, so the
+// previous transaction is not needed here.
 function buildLegacySpend(addressInfo, selectedUtxos, outputs) {
     const ECPair = ECPairFactory(ecc)
-    const keyToSign = ECPair.fromPrivateKey(addressInfo["privateKey"], { network: NETWORK_OBJECT })
+    const keyToSign = ECPair.fromPrivateKey(addressInfo["privateKey"])
     const pubkey = Buffer.from(keyToSign.publicKey)
     const ownScript = bitcoin.payments.p2pkh({ pubkey, network: NETWORK_OBJECT }).output
 
@@ -48,12 +35,10 @@ function buildLegacySpend(addressInfo, selectedUtxos, outputs) {
     for (const utxo of selectedUtxos) {
         tx.addInput(Buffer.from(utxo.txid, 'hex').reverse(), utxo.vout, 0xffffffff)
     }
-    // Pushed directly rather than through addOutput, whose Satoshi typeforce
-    // stops at 21e14 sat; the 2^53-1 serializer ceiling is checked above.
     for (const out of outputs) {
         tx.outs.push({
             script: bitcoin.address.toOutputScript(out.address, NETWORK_OBJECT),
-            value: toSerializableNumber(out.value, "output")
+            value: out.value
         })
     }
 
@@ -151,7 +136,7 @@ module.exports = {
                         sequence: utxoSequence,
                         witnessUtxo: {
                             script: Buffer.from(nextUtxo.scriptPubKey, 'hex'),
-                            value: toSerializableNumber(toSats(nextUtxo.value), "segwit input"),
+                            value: toSats(nextUtxo.value),
                         }
                     })
                 } else {
@@ -166,11 +151,11 @@ module.exports = {
             }
 
             for (const out of outputs) {
-                psbt.addOutput({ address: out.address, value: toSerializableNumber(out.value, "output") })
+                psbt.addOutput({ address: out.address, value: out.value })
             }
 
             const ECPair = ECPairFactory(ecc);
-            const keyToSign = ECPair.fromPrivateKey(addressInfo["privateKey"], { NETWORK_OBJECT });
+            const keyToSign = ECPair.fromPrivateKey(addressInfo["privateKey"]);
 
             for (const proxInputIndex in psbt.data.inputs){
                 psbt.signInput(parseInt(proxInputIndex), keyToSign);

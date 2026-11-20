@@ -77,7 +77,7 @@
  ********************************************************************/
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { STEPS, teardown } = require('./oracleBatchCompression.integration.test/helpers/setup');

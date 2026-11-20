@@ -67,7 +67,7 @@
 
 const assert = require('assert')
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const { AttestMirrorVenue, writeInertMirrorRow } = require('../helpers/attestMirrorVenue')
 const { ValidatorIdentity } = require('../helpers/multiValidatorHubHelper')

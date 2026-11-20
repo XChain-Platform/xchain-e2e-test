@@ -132,7 +132,9 @@ function signerEnv (funded, signerDir) {
         HUB_SIGNER_MODULE: path.join(signerDir, 'signer.js'),
         DOGE_NETWORK:      funded.coin + '-' + funded.network,
         DOGE_ADDRESS:      funded.address,
-        DOGE_WIF:          wifEncode(netObj.wif, Buffer.from(funded.privateKey), true),
+        DOGE_WIF:          wifEncode({
+            version: netObj.wif, privateKey: Buffer.from(funded.privateKey), compressed: true
+        }),
         // Read by the publisher for election and low-balance warnings, separately
         // from the signer's own key material.
         DOGE_PUBKEY_HEX:   Buffer.from(funded.publicKey).toString('hex'),

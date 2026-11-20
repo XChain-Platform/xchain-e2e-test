@@ -24,10 +24,11 @@
 
 'use strict'
 
-const Spec = require('mocha/lib/reporters/spec')
+const { reporters, Runner } = require('mocha')
 const fs = require('fs')
 const path = require('path')
-const constants = require('mocha/lib/runner').constants
+const Spec = reporters.Spec
+const constants = Runner.constants
 
 const {
     EVENT_RUN_BEGIN,

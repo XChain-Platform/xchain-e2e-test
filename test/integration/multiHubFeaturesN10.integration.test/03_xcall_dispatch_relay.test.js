@@ -44,7 +44,7 @@
 // Covers the N=10 XCALL dispatch quorum. One part of multiHubFeaturesN10.integration.test.js.
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const assert = require('assert');
 const crypto = require('crypto');

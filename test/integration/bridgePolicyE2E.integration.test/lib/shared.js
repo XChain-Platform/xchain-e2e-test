@@ -17,7 +17,7 @@
 // Fixtures shared by the parts of bridgePolicyE2E.integration.test.
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const crypto = require('crypto');
 

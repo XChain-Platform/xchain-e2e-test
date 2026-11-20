@@ -34,7 +34,7 @@
  ********************************************************************/
 
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 // MultiValidatorHub uses in-process hubs that fetch the test URL via
 // the http_get provider. Test URL points at a local HTTP server, which

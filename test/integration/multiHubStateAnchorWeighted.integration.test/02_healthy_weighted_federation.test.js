@@ -48,7 +48,7 @@
 // Covers healthy weighted checkpoint finalization. One part of multiHubStateAnchorWeighted.integration.test.js.
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const assert = require('assert');
 const { MultiValidatorHub, ValidatorIdentity } = require('../../helpers/multiValidatorHubHelper');

@@ -57,7 +57,7 @@
 
 const assert = require('assert')
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const { newCtx, setupVenue, teardownVenue } = require('./helpers/at6_fixture')
 const { refusesOnChainV1AndSettles, refusesForSameReasonWhenFulfilled } = require('./helpers/at6_steps')

@@ -38,7 +38,7 @@
 // Covers healthy weighted XCALL finalization. One part of multiHubXcallWeighted.integration.test.js.
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const assert = require('assert');
 const crypto = require('crypto');

@@ -54,7 +54,7 @@ function rawLegacyTx(outputs, seed) {
 
 function makeWallet(fill) {
     const privateKey = Buffer.alloc(32, fill)
-    const keyPair = ECPair.fromPrivateKey(privateKey, { network })
+    const keyPair = ECPair.fromPrivateKey(privateKey)
     const pubkey = Buffer.from(keyPair.publicKey)
     const payment = bitcoin.payments.p2pkh({ pubkey, network })
     return { address: payment.address, privateKey, publicKey: pubkey, script: payment.output }
@@ -92,7 +92,10 @@ function fundingUtxo(wallet, valueStr, seed) {
     const raw = rawLegacyTx([{ value: BigInt(valueStr), script: wallet.script }], seed)
     const txid = txidOf(raw)
     return {
-        utxo: { txid, vout: 0, value: valueStr, scriptPubKey: wallet.script.toString('hex'), confirmations: 1 },
+        utxo: {
+            txid, vout: 0, value: valueStr,
+            scriptPubKey: Buffer.from(wallet.script).toString('hex'), confirmations: 1
+        },
         hex: raw.toString('hex'),
     }
 }
@@ -191,27 +194,27 @@ describe('createSimpleTransaction with output values above 2^53-1 sat', function
 
         const psbt = new bitcoin.Psbt({ network })
         psbt.addInput({ hash: f.utxo.txid, index: 0, sequence: 0xffffffff, nonWitnessUtxo: Buffer.from(f.hex, 'hex') })
-        psbt.addOutput({ address: dest.address, value: AMOUNT })
-        psbt.addOutput({ address: sender.address, value: Number(500000000n - BigInt(AMOUNT) - FEE) })
-        psbt.signInput(0, ECPair.fromPrivateKey(sender.privateKey, { network }))
+        psbt.addOutput({ address: dest.address, value: BigInt(AMOUNT) })
+        psbt.addOutput({ address: sender.address, value: 500000000n - BigInt(AMOUNT) - FEE })
+        psbt.signInput(0, ECPair.fromPrivateKey(sender.privateKey))
         psbt.finalizeAllInputs()
         assert.strictEqual(captured.broadcasts[0], psbt.extractTransaction().toHex())
     })
 
-    it('refuses a change output past the 2^53-1 serializer ceiling before broadcasting', async function () {
+    it('serializes a change output past 2^53-1 without rounding', async function () {
         const sender = makeWallet(0x77)
         const dest = makeWallet(0x88)
         const f = fundingUtxo(sender, '18014398509481984', 'huge')
         const captured = installRail([f.utxo], { [f.utxo.txid]: f.hex })
 
-        await assert.rejects(
-            () => transactionHelper.createSimpleTransaction(
-                { address: sender.address, privateKey: sender.privateKey, publicKey: sender.publicKey },
-                dest.address,
-                AMOUNT,
-            ),
-            /exceeds the 2\^53-1 sat/,
+        await transactionHelper.createSimpleTransaction(
+            { address: sender.address, privateKey: sender.privateKey, publicKey: sender.publicKey },
+            dest.address,
+            AMOUNT,
         )
-        assert.strictEqual(captured.broadcasts.length, 0)
+
+        assert.strictEqual(captured.broadcasts.length, 1)
+        const tx = bitcoin.Transaction.fromHex(captured.broadcasts[0])
+        assert.strictEqual(tx.outs[1].value, 18014398509481984n - BigInt(AMOUNT) - FEE)
     })
 })

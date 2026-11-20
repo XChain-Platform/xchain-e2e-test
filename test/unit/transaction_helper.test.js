@@ -49,9 +49,9 @@ function buildMinimalPsbt(privKeyBuf) {
     psbt.addInput({
         hash: 'a'.repeat(64),
         index: 0,
-        witnessUtxo: { script: p2wpkh.output, value: 100000 }
+        witnessUtxo: { script: p2wpkh.output, value: 100000n }
     });
-    psbt.addOutput({ address, value: 90000 });
+    psbt.addOutput({ address, value: 90000n });
     return { psbt: psbt.toHex(), encoding: 'OP_RETURN' };
 }
 
@@ -265,8 +265,8 @@ describe('transactionHelper', function () {
             const keyPair = ECPairFactory(ecc).fromPrivateKey(Buffer.alloc(32, 0x07), { network });
             const p2wpkh  = bitcoin.payments.p2wpkh({ pubkey: keyPair.publicKey, network });
             const psbt    = new bitcoin.Psbt({ network });
-            psbt.addInput({ hash: prevoutTxid, index: 0, witnessUtxo: { script: p2wpkh.output, value: 50000 } });
-            psbt.addOutput({ address: p2wpkh.address, value: 40000 });
+            psbt.addInput({ hash: prevoutTxid, index: 0, witnessUtxo: { script: p2wpkh.output, value: 50000n } });
+            psbt.addOutput({ address: p2wpkh.address, value: 40000n });
             return psbt.toHex();
         }
 

@@ -110,7 +110,7 @@ module.exports = {
 
         const psbtToSign = bitcoin.Psbt.fromHex(txPsbtHex)
         const ECPair = ECPairFactory(ecc);
-        const keyToSign = ECPair.fromPrivateKey(addressInfo["privateKey"], { NETWORK_OBJECT });
+        const keyToSign = ECPair.fromPrivateKey(addressInfo["privateKey"]);
 
         for (const proxInputIndex in psbtToSign.data.inputs){
             const proxInput = psbtToSign.data.inputs[proxInputIndex]

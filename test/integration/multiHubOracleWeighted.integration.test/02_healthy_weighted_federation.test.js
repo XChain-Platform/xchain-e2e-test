@@ -47,7 +47,7 @@
 // Covers healthy weighted oracle finalization. One part of multiHubOracleWeighted.integration.test.js.
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const path   = require('path');
 const assert = require('assert');

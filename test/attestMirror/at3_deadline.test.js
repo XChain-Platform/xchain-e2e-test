@@ -19,7 +19,7 @@
  * sections so automatic regtest blocks cannot move either boundary.
  ********************************************************************/
 
-require('dotenv').config()
+require('dotenv').config({ quiet: true })
 
 const {
     newContext, bringUp, tearDown, provePastDeadline, proveDeadlineBoundary,

@@ -48,7 +48,7 @@
  ********************************************************************/
 
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const { newCtx, setupZc2, teardownZc2 } = require('./helpers/zc2_fixture')
 const { readBaseline, emitRequest, readResponsibleHubs, awaitApplied } = require('./helpers/zc2_steps')

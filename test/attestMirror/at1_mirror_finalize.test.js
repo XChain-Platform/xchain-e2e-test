@@ -31,7 +31,7 @@
  * same identities.
  ********************************************************************/
 
-require('dotenv').config()
+require('dotenv').config({ quiet: true })
 
 const {
     newContext, bringUp, tearDown, settleHttpGet, settleLlm,

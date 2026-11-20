@@ -103,7 +103,9 @@ function stageProductionSigner(addressInfo){
     const network = CryptoNetworks.getBitcoinJsNetwork(COIN + '-' + NETWORK);
     process.env.DOGE_NETWORK = COIN + '-' + NETWORK;
     process.env.DOGE_ADDRESS = addressInfo.address;
-    process.env.DOGE_WIF = wifEncode(network.wif, Buffer.from(addressInfo.privateKey), true);
+    process.env.DOGE_WIF = wifEncode({
+        version: network.wif, privateKey: Buffer.from(addressInfo.privateKey), compressed: true
+    });
     process.env.DOGE_ENCODER_URL = 'http://' + (process.env.ENCODER_URL || 'localhost') + ':' +
         (process.env.ENCODER_API_PORT || '3023');
     process.env.HUB_SIGNER_MODULE = path.join(signerDir, 'signer.js');

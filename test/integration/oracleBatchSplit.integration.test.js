@@ -97,7 +97,7 @@
  ********************************************************************/
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const util   = require('util');
 const path   = require('path');

@@ -19,7 +19,7 @@
  * barrier is visible, delivery is released and both nodes must bind at one block.
  ********************************************************************/
 
-require('dotenv').config()
+require('dotenv').config({ quiet: true })
 
 const {
     newContext, bringUp, tearDown, proveForwardMargin, proveBarrierClears,

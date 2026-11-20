@@ -15,7 +15,7 @@
  ********************************************************************/
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const federation = require('./federation');
 const artifacts = require('./artifacts');

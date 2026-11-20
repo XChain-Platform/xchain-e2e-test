@@ -10,6 +10,7 @@ const sinon = require('sinon')
 const XChainIndexerConnector = require('../../../src/XChainIndexerConnector')
 const { OracleBatchReplayNode, processListening } = require('../../helpers/oracleBatchReplay')
 const { CANONICAL_REORG_BUFFER } = require('../../helpers/oracleBatchVenue')
+const { pickFreePorts } = require('../../helpers/oracle_batch_replay/port_allocation')
 
 function replayNode() {
     const node = new OracleBatchReplayNode({ label: 'unit' })
@@ -24,8 +25,8 @@ function replayNode() {
 describe('oracleBatchReplay hub listener readiness', function () {
     it('reports ready only while the child port is accepting connections', async function () {
         const server = net.createServer()
-        await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-        const port = server.address().port
+        const [port] = await pickFreePorts(1, 25000)
+        await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve))
 
         try {
             assert.deepStrictEqual(await processListening({ exitCode: null, signalCode: null }, '127.0.0.1', port),

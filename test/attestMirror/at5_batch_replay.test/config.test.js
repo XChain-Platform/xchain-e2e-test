@@ -18,7 +18,7 @@
 // drill (../at5_batch_replay.test.js), which carries the story.
 
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const { assertLlmAvailable, llmProbes, hubCredentialEnv } = require('../../helpers/attestMirrorVenue')
 const { resolveAt5ResponseProvider, at5ResponseRedundancy } = require('../helpers/at5ResponseProvider')

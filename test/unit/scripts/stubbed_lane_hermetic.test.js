@@ -23,7 +23,7 @@ const assert = require('assert')
 const fs     = require('fs')
 const path   = require('path')
 const { pathToFileURL } = require('url')
-const collectFiles = require('mocha/lib/cli/collect-files')
+const collectFiles = require('mocha/lib/cli/collect-files.cjs')
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..')
 const INTEGRATION_DIR = path.join(REPO_ROOT, 'test', 'integration')

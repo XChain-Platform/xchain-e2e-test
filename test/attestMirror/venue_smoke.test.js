@@ -40,7 +40,7 @@
  ********************************************************************/
 
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const { bootVenue, assertHubSnapshots, assertIndexers } = require('./helpers/venue_smoke_steps')

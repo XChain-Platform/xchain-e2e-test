@@ -37,7 +37,7 @@
 // Covers oracle safety with two validators down. One part of multiHubOracleByzantine.integration.test.js.
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const path   = require('path');
 const assert = require('assert');

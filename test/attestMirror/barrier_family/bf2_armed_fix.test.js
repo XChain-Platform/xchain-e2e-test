@@ -44,7 +44,7 @@
 const assert = require('assert')
 const path = require('path')
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const fixture = require('../helpers/barrierFamilyFixture')
 const rows = require('../helpers/barrierFamilyRows')

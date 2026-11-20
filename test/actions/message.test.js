@@ -22,7 +22,7 @@ describe('MESSAGE', () => {
                 senderAddr,
                 destAddr["address"],
                 1,
-                senderAddr["publicKey"].toString('hex')
+                Buffer.from(senderAddr["publicKey"]).toString('hex')
             )
             assert(result.message, "Message v0 (sender key) should exist in DB")
         })
@@ -39,7 +39,7 @@ describe('MESSAGE', () => {
                 senderAddr,
                 receiverAddr["address"],
                 1,
-                senderAddr["publicKey"].toString('hex')
+                Buffer.from(senderAddr["publicKey"]).toString('hex')
             )
             assert(v0Result.message, "Message v0 should exist in DB")
 
@@ -47,7 +47,7 @@ describe('MESSAGE', () => {
                 receiverAddr,
                 senderAddr["address"],
                 1,
-                receiverAddr["publicKey"].toString('hex')
+                Buffer.from(receiverAddr["publicKey"]).toString('hex')
             )
             assert(v1Result.message, "Message v1 (receiver key) should exist in DB")
         })
@@ -64,13 +64,13 @@ describe('MESSAGE', () => {
                 senderAddr,
                 receiverAddr["address"],
                 1,
-                senderAddr["publicKey"].toString('hex')
+                Buffer.from(senderAddr["publicKey"]).toString('hex')
             )
             await messageHelper.sendMessageV1(
                 receiverAddr,
                 senderAddr["address"],
                 1,
-                receiverAddr["publicKey"].toString('hex')
+                Buffer.from(receiverAddr["publicKey"]).toString('hex')
             )
 
             const result = await messageHelper.sendMessageV2(

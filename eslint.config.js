@@ -79,13 +79,18 @@ const tests = {
     languageOptions: src.languageOptions,
     rules: {
         camelcase: src.rules.camelcase,
-        'no-underscore-dangle': src.rules['no-underscore-dangle'],
+        'no-underscore-dangle': ['error', {
+            enforceInMethodNames: true,
+            allowAfterThis: false,
+            allowFunctionParams: false,
+            allow: ['_load', '_resolveFilename', '_sdk', '_setConfig'],
+        }],
         'prefer-const': 'error',
         'no-var': 'error',
     },
 };
 
-module.exports = [src, configAndEntry, tests];
+module.exports = [{ ignores: ['xchain-hub/**', 'xchain-sdk/**'] }, src, configAndEntry, tests];
 
 // Repo-specific additions.
 const directoryConfig = {

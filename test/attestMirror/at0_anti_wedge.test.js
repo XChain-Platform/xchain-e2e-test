@@ -40,7 +40,7 @@
  * configured, which is the weaker claim.
  ********************************************************************/
 
-require('dotenv').config()
+require('dotenv').config({ quiet: true })
 
 const assert = require('assert')
 const {

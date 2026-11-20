@@ -33,7 +33,7 @@
  *********************************************************************/
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const XChainUtxoTrackerConnector = require('../../../src/XChainUtxoTrackerConnector.js');
 const XChainHubConnector = require('../../../src/XChainHubConnector.js');
