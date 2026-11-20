@@ -44,6 +44,7 @@ describe('DESTROY', () => {
                 { tick: tick2, amount: 10 }
             ], "Multi-destroy v1")
             assert(result.destroy, "Destroy v1 should exist in DB")
+            assert.deepStrictEqual(result.destroys.map(row => row.tick), [tick1, tick2])
         })
     })
 
@@ -64,6 +65,7 @@ describe('DESTROY', () => {
                 { tick: tick2, amount: 10, memo: "Burning token B" }
             ])
             assert(result.destroy, "Destroy v2 should exist in DB")
+            assert.deepStrictEqual(result.destroys.map(row => row.tick), [tick1, tick2])
         })
     })
 })

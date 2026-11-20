@@ -162,6 +162,30 @@ describe('waitForDestroy() delegation to _waitFor', function () {
     })
 })
 
+describe('waitForDestroyLegs()', function () {
+    it('delegates to the ordered leg-set check', async function () {
+        const rows = [{ leg_ordinal: 0 }, { leg_ordinal: 1 }]
+        const stub = sinon.stub(state.db, '_waitFor').resolves(rows)
+        const params = { txHash: 'hash1', count: 2 }
+
+        assert.deepStrictEqual(await state.db.waitForDestroyLegs(params, 5000), rows)
+        assert.strictEqual(stub.firstCall.args[0], state.db.checkDestroyLegs)
+        assert.deepStrictEqual(stub.firstCall.args[1], params)
+        assert.strictEqual(stub.firstCall.args[2], 5000)
+    })
+
+    it('orders by action and leg ordinal and waits for the requested count', async function () {
+        const rows = [{ leg_ordinal: 0 }, { leg_ordinal: 1 }]
+        state.mockConnection.query.resolves(rows)
+        assert.deepStrictEqual(await state.db.checkDestroyLegs({ txHash: 'hash1', count: 2 }), rows)
+        assert.match(state.mockConnection.query.firstCall.args[0], /ORDER BY d\.action_index, d\.leg_ordinal/)
+        assert.deepStrictEqual(state.mockConnection.query.firstCall.args[1], ['hash1'])
+
+        state.mockConnection.query.resolves(rows.slice(0, 1))
+        assert.strictEqual(await state.db.checkDestroyLegs({ txHash: 'hash1', count: 2 }), null)
+    })
+})
+
 describe('waitForBatch() delegation to _waitFor', function () {
     it('delegates to _waitFor with checkBatch function reference', async function () {
         const row    = { id: 20 }

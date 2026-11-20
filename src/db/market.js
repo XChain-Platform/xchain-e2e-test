@@ -52,6 +52,7 @@ class MarketChecks {
 
     // ─── DESTROY ───────────────────────────────────────────────────────
     async waitForDestroy(obj, timeMax = 60000){ return this['_waitFor'](this.checkDestroy, obj, timeMax) }
+    async waitForDestroyLegs(obj, timeMax = 60000){ return this['_waitFor'](this.checkDestroyLegs, obj, timeMax) }
 
     async checkDestroy({txHash, source, tick, amount, memo, status}){
         const w = [], v = []
@@ -81,6 +82,32 @@ class MarketChecks {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             logger.error('Error with database query (destroy):', err);
+            return rethrowQueryError(err)
+        } finally {
+            await connection.release()
+        }
+    }
+
+    async checkDestroyLegs({txHash, count}){
+        if (txHash == null) return null
+        const query = `
+            SELECT d.*, itx.hash AS tx_hash, ia.address AS source, itick.tick AS tick, im.memo AS memo, ist.status AS status
+            FROM destroys d
+            LEFT JOIN actions act ON act.action_index = d.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_tickers itick ON itick.id = d.tick_id
+            LEFT JOIN index_memos im ON im.id = d.memo_id
+            LEFT JOIN index_statuses ist ON ist.id = d.status_id
+            WHERE itx.hash = ?
+            ORDER BY d.action_index, d.leg_ordinal`
+        const connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, [txHash])
+            return rows.length < (Number(count) || 1) ? null : rows
+        } catch (err) {
+            logger.error('Error with database query (destroy legs):', err)
             return rethrowQueryError(err)
         } finally {
             await connection.release()

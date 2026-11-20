@@ -15,6 +15,7 @@ const chainRail         = require('./chainRail')
 const requireRow        = require('./requireRow')
 const transactionHelper = require('./core/transactionHelper')
 const cryptoHelper      = require('./core/cryptoHelper')
+const createHeartbeatController = require('./core/heartbeatHelper')
 const gasFaucet         = require('./rail/gas_faucet')
 const path              = require('path')
 
@@ -112,12 +113,18 @@ function reservoirKey(){
 // mainnet, five to six blocks behind the wall clock at the idle cadence below).
 const BRIDGE_CREDIT_SLACK_MS = 180000
 
-// Empty-block heartbeat driven on BOTH chains while the credit is awaited. Neither
-// regtest miner mines without a transaction in its mempool, so with nothing in
-// flight BTC never buries the lock to the hub's depth and the destination's
-// protocol time never reaches the row's effective_time (run 35124072478 sat on
-// "not proposing BTC:3 (below depth 6)" until the credit wait gave up).
+// Empty-block heartbeat driven on BOTH chains while the credit is awaited. The
+// miners boot with a slow empty-block heartbeat, but the run pins it off for
+// deterministic block counts. Enabling it here lets BTC bury the lock and lets
+// destination protocol time reach the row's effective_time.
 const IDLE_MINE_INTERVAL_MS = 10000
+const {
+    noteHeartbeatBaseline,
+    pinHeartbeatOff,
+    restoreHeartbeatBaselines,
+    withIdleMining,
+    resetHeartbeatBaselines,
+} = createHeartbeatController(IDLE_MINE_INTERVAL_MS)
 
 // How long the hub may hold the lock before it proposes the transfer at all. A BTC leg
 // past BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION (regtest 0) is stamped with the first
@@ -137,72 +144,6 @@ const CHECKPOINT_COVERAGE_MS = (6 + 6) * IDLE_MINE_INTERVAL_MS + 2 * 60000
 // only once a checkpoint covers the lock, so the coverage wait comes first.
 function bridgeCreditWaitMs(destCoin){
     return relayMarginFloorS(destCoin) * 1000 + CHECKPOINT_COVERAGE_MS + BRIDGE_CREDIT_SLACK_MS
-}
-
-// The interval each miner had before the run first touched it (null = unknown), keyed
-// by URL so two connectors for one miner share a snapshot. The miner boots its heartbeat
-// at 60000 ms unless IDLE_MINE_INTERVAL_MS is set, so a run must restore, never zero, it.
-const heartbeatBaselines = new Map()
-
-// Record a miner's boot interval once, before anything here changes it. An older
-// miner has no boot field, so its current interval remains the compatibility
-// baseline. A miner that cannot report either is never restored to a guess.
-async function noteHeartbeatBaseline(miner){
-    if (heartbeatBaselines.has(miner.url)) return
-    let ms = null
-    try {
-        ms = await miner.getIdleMineIntervalBoot()
-        if (ms === null) ms = await miner.getIdleMineInterval()
-    }
-    catch (err) { console.log('[gasHelper] could not read ' + miner.url + ' idle heartbeat: ' + err.message) }
-    heartbeatBaselines.set(miner.url, { miner, ms })
-}
-
-// Turn a miner's heartbeat off for the rest of the run, recording its startup value first.
-async function pinHeartbeatOff(miner){
-    await noteHeartbeatBaseline(miner)
-    await miner.setIdleMineInterval(0)
-}
-
-// Give every recorded miner back the interval it had before the run. Every miner
-// is attempted even when an earlier one fails; failures are returned, not thrown.
-async function restoreHeartbeatBaselines(){
-    const failures = []
-    for (const [url, { miner, ms }] of heartbeatBaselines) {
-        if (ms === null) continue
-        try { await miner.setIdleMineInterval(ms) }
-        catch (err) { failures.push(url + ': ' + err.message) }
-    }
-    heartbeatBaselines.clear()
-    return failures
-}
-
-// Run `fn` with the idle heartbeat on every miner in `miners`, and switch it back
-// off on each of them afterwards whether `fn` resolved or threw. The rest of the
-// suite assumes a block lands only on its own transaction (depth and reorg
-// assertions count blocks), so a heartbeat left running would perturb every case
-// after this one. Every miner is restored even when an earlier restore fails;
-// the first restore error surfaces only when `fn` itself succeeded, so the
-// caller's own failure is never masked by a miner that would not answer.
-async function withIdleMining(miners, fn, intervalMs = IDLE_MINE_INTERVAL_MS){
-    for (const miner of miners) await miner.setIdleMineInterval(intervalMs)
-    let fnFailed = false
-    try {
-        return await fn()
-    } catch (err) {
-        fnFailed = true
-        throw err
-    } finally {
-        let restoreError = null
-        for (const miner of miners) {
-            try { await miner.setIdleMineInterval(0) }
-            catch (err) { if (!restoreError) restoreError = err }
-        }
-        // Deliberate: a heartbeat left running is a real failure of this helper's
-        // contract, so it replaces a successful return; it never replaces `fn`'s
-        // own error.
-        if (restoreError && !fnFailed) throw restoreError
-    }
 }
 
 // Caches derived faucet holders by address, and when each last paid a grant.
@@ -438,6 +379,6 @@ module.exports = {
 
     // Unit tests only: forget every recorded heartbeat baseline.
     ['_resetHeartbeatBaselines'](){
-        heartbeatBaselines.clear()
+        resetHeartbeatBaselines()
     }
 }

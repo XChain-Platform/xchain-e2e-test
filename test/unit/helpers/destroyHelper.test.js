@@ -25,6 +25,13 @@ describe('destroyHelper', () => {
         global.indexerDatabase = {
             waitForDestroy: sinon.stub().resolves({ id: 40 }),
             waitForDebit: sinon.stub().resolves({ id: 41 }),
+            waitForDestroyLegs: sinon.stub().callsFake(async () =>
+                global.indexerDatabase.waitForDestroy.getCalls().map((call, i) => ({
+                    id: 40 + i,
+                    leg_ordinal: i,
+                    tick: call.args[0].tick,
+                    amount: call.args[0].amount,
+                }))),
         }
     })
 
@@ -56,8 +63,10 @@ describe('destroyHelper', () => {
             const msg = createTxStub.firstCall.args[1]
             assert.strictEqual(msg, 'DESTROY|1|TOK1|50|TOK2|30|mymemo')
             assert.strictEqual(result.txHash, 'abc123')
-            assert.deepStrictEqual(result.destroy, { id: 40 })
+            assert.strictEqual(result.destroy.id, 41)
+            assert.deepStrictEqual(result.destroys.map(row => row.tick), ['TOK1', 'TOK2'])
             assert.strictEqual(result.debit, undefined)
+            assert.strictEqual(global.indexerDatabase.waitForDestroy.callCount, 2)
         })
 
         it('should omit memo when not provided', async () => {
@@ -73,6 +82,14 @@ describe('destroyHelper', () => {
             assert(global.indexerDatabase.waitForDestroy.calledOnce)
             assert(global.indexerDatabase.waitForDebit.notCalled)
         })
+
+        it('should reject duplicate ticks before sending', async () => {
+            await assert.rejects(
+                helper.sendDestroyV1(addressInfo, [{ tick: 'T', amount: '1' }, { tick: 'T', amount: '2' }]),
+                /duplicate destroy leg/
+            )
+            assert(createTxStub.notCalled)
+        })
     })
 
     describe('sendDestroyV2', () => {
@@ -86,6 +103,8 @@ describe('destroyHelper', () => {
             const msg = createTxStub.firstCall.args[1]
             assert.strictEqual(msg, 'DESTROY|2|TOK1|50|note1|TOK2|30|note2')
             assert.strictEqual(result.txHash, 'abc123')
+            assert.deepStrictEqual(result.destroys.map(row => row.tick), ['TOK1', 'TOK2'])
+            assert.strictEqual(global.indexerDatabase.waitForDestroy.callCount, 2)
         })
 
         it('should use empty string for missing memo', async () => {
@@ -94,6 +113,17 @@ describe('destroyHelper', () => {
 
             const msg = createTxStub.firstCall.args[1]
             assert.strictEqual(msg, 'DESTROY|2|TOK|100|')
+        })
+
+        it('should reject a missing or reordered leg set', async () => {
+            global.indexerDatabase.waitForDestroyLegs.resolves([
+                { leg_ordinal: 0, tick: 'TOK2', amount: '30' },
+                { leg_ordinal: 1, tick: 'TOK1', amount: '50' },
+            ])
+            await assert.rejects(() => helper.sendDestroyV2(addressInfo, [
+                { tick: 'TOK1', amount: '50' },
+                { tick: 'TOK2', amount: '30' },
+            ]), /does not match wire order/)
         })
     })
 })
