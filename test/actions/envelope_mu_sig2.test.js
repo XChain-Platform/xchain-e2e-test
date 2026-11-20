@@ -146,6 +146,7 @@ async function buildMuSig2Pair(modules){
 function deriveMuSig2Envelope(modules, account, built){
     const commitPsbt = bitcoin.Psbt.fromHex(built['psbt'], { network: NETWORK_OBJECT })
     const revealPsbt = bitcoin.Psbt.fromHex(built['revealPsbt'], { network: NETWORK_OBJECT })
+    // bitcoinjs-lib 7 returns a Uint8Array, whose toString ignores 'hex'; every caller hex-encodes it.
     const envelopeScript = revealPsbt.data.inputs[0].tapLeafScript[0].script
 
     // The co-signer derives the commit from the envelope script alone. If this
@@ -204,7 +205,7 @@ async function attemptStrictPolicy(modules, signer, daemonSk, publicKeys, built,
         try {
             await strictClient.signAll({
                 psbt: built['psbt'], secretKey: agentSk, inputIndexes: [0],
-                envelopeScript: envelopeScript.toString('hex'), network: NETWORK_OBJECT
+                envelopeScript: Buffer.from(envelopeScript).toString('hex'), network: NETWORK_OBJECT
             })
             return null
         } catch (err){ return err }
@@ -219,7 +220,7 @@ async function signMuSig2Commit(client, built, agentSk, commitPsbt, envelopeScri
     return await client.signAll({
         psbt: built['psbt'], secretKey: agentSk,
         inputIndexes: commitPsbt.data.inputs.map((internal, i) => i),
-        envelopeScript: envelopeScript.toString('hex'), network: NETWORK_OBJECT
+        envelopeScript: Buffer.from(envelopeScript).toString('hex'), network: NETWORK_OBJECT
     })
 }
 
@@ -236,7 +237,7 @@ async function signMuSig2Reveal(client, built, agentSk, envelopeScript){
     // Reveal: script-path spend of the envelope leaf.
     return await client.sign({
         psbt: built['revealPsbt'], secretKey: agentSk, inputIndex: 0,
-        envelopeScript: envelopeScript.toString('hex'), network: NETWORK_OBJECT
+        envelopeScript: Buffer.from(envelopeScript).toString('hex'), network: NETWORK_OBJECT
     })
 }
 
