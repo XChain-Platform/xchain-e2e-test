@@ -276,7 +276,7 @@ describe('Taproot Envelope under MuSig2 co-signing (§3.9)', function () {
         const { agentSk, daemonSk, publicKeys, account, fileName, feeOutput, built } = await buildMuSig2Pair(modules)
         assert.strictEqual(built['encoding'], 'TAPROOT', 'the encoder should have built an envelope')
         const { commitPsbt, revealPsbt, envelopeScript, derived } = deriveMuSig2Envelope(modules, account, built)
-        assert(commitPsbt.txOutputs.some(o => o.script.equals(derived.output)),
+        assert(commitPsbt.txOutputs.some(o => Buffer.from(o.script).equals(Buffer.from(derived.output))),
             'the encoder-built commit output must be the one the co-signer derives independently')
         const signer = createMuSig2Signer(modules, daemonSk, publicKeys, feeOutput)
         const { windowPath, store, client } = signer

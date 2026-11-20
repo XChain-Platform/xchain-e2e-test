@@ -29,7 +29,9 @@ const OP_ENDIF = 0x68
 // Minimal script reader. bitcoinjs-lib's decompile would do, but it collapses
 // small integer pushes to opcodes, and the envelope's format byte is exactly the
 // push a strict grammar check has to see as DATA.
-function decompile(script){
+function decompile(raw){
+    // bitcoinjs-lib 7 hands witness items over as Uint8Array; the reader needs Buffer methods.
+    const script = Buffer.from(raw)
     const out = []
     let i = 0
     while (i < script.length){

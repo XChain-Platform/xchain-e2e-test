@@ -48,6 +48,9 @@ const envelopeHelper = require('../helpers/envelopeHelper')
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
 const { NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
 
+// bitcoinjs-lib 7 returns output scripts as Uint8Array, which has no equals().
+function sameScript(a, b){ return Buffer.from(a).equals(Buffer.from(b)) }
+
 // The synthetic round that carries the mid-flight requirement change. Registered
 // in SEED_SENTINEL_ROUNDS so clearSeedSentinels can retract it: a seeded round
 // outranks every derived one, so an unretractable seed shadows a real hub forever.
@@ -210,8 +213,8 @@ describe('Taproot Envelope fee lifecycle across a block gap (§3.5)', function (
         // transactions themselves, before either is broadcast, because this is the
         // structural claim the rest of the test depends on.
         const feeScript = require('bitcoinjs-lib').address.toOutputScript(FEE_DEST, NETWORK_OBJECT)
-        const onCommit = pair.commitTx.outs.filter(o => o.script.equals(feeScript))
-        const onReveal = pair.revealTx.outs.filter(o => o.script.equals(feeScript))
+        const onCommit = pair.commitTx.outs.filter(o => sameScript(o.script, feeScript))
+        const onReveal = pair.revealTx.outs.filter(o => sameScript(o.script, feeScript))
         assert.strictEqual(onCommit.length, 1, 'the native fee output must ride the COMMIT (§3.5)')
         assert.strictEqual(Number(onCommit[0].value), nativeFeeHelper.FLAT_FEE_SATS)
         assert.strictEqual(onReveal.length, 0,
@@ -259,7 +262,7 @@ describe('Taproot Envelope fee lifecycle across a block gap (§3.5)', function (
         })
 
         const feeScript = require('bitcoinjs-lib').address.toOutputScript(FEE_DEST, NETWORK_OBJECT)
-        assert.strictEqual(pair.commitTx.outs.filter(o => o.script.equals(feeScript)).length, 0,
+        assert.strictEqual(pair.commitTx.outs.filter(o => sameScript(o.script, feeScript)).length, 0,
             'this case requires a commit with no fee output')
 
         const { revealHeight } = await publishSplit(pair)
