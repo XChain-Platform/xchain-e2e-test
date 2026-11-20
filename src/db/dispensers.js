@@ -96,7 +96,7 @@ class DispenserChecks {
             LEFT JOIN actions act ON act.action_index = d.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ias ON ias.id = tr.source_id
+            LEFT JOIN index_addresses ias ON ias.id = act.source_id
             LEFT JOIN index_coins give_ic ON give_ic.id = d.give_coin_id
             LEFT JOIN index_tickers give_it ON give_it.id = d.give_tick_id
             LEFT JOIN index_coins get_ic ON get_ic.id = d.get_coin_id

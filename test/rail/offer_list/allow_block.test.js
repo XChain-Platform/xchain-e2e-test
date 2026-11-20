@@ -93,7 +93,7 @@ describe('offer lists: allow and block on the regtest rail', function(){
 
         // Both SWAP rows are already indexed at status valid (sendSwapV0 waits for
         // them), so an empty poll below means the indexer answered and holds no match.
-        // A poll that never got an answer throws WAIT_NO_ANSWER and fails this test.
+        // A wait whose concluding polls fail throws WAIT_NO_ANSWER and fails this test.
         // give-up-ok: deliberate negative poll, a null here is the refusal being proved
         const match = await indexerDatabase.waitForSwapMatch({
             giveActionIndex: Number(offer.swap.action_index),

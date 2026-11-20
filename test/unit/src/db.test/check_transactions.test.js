@@ -63,6 +63,7 @@ describe('checkSend()', function () {
         assert.ok(sql.includes('ia2.address = ?'))
         assert.ok(sql.includes('im.memo = ?'))
         assert.ok(sql.includes('amount = ?'))
+        assert.ok(sql.includes('ia.id = act.source_id'))
     })
 
     it('single-field: only destination condition', async function () {

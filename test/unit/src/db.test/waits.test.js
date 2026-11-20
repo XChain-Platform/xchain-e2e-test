@@ -91,8 +91,20 @@ function registerWaitNoAnswerSendTests(TX) {
 
     it('returns null once any poll answered, even when later polls failed', async function () {
         state.mockConnection.query.onFirstCall().resolves([])
-        state.mockConnection.query.rejects(new Error('ER_CONNECTION_LOST'))
+        state.mockConnection.query.onSecondCall().rejects(new Error('ER_CONNECTION_LOST'))
+        state.mockConnection.query.resolves([])
         assert.strictEqual(await state.db.waitForSend({ txHash: TX }, 50), null)
+    })
+
+    it('throws when the concluding polls fail after an earlier empty answer', async function () {
+        state.mockConnection.query.onFirstCall().resolves([])
+        state.mockConnection.query.rejects(new Error('ER_CONNECTION_LOST'))
+        await assert.rejects(state.db.waitForSend({ txHash: TX }, 50), err => {
+            assert.strictEqual(err.code, 'WAIT_NO_ANSWER')
+            assert.match(err.message, /polls failed after the last answer/)
+            assert.match(err.cause.message, /ER_CONNECTION_LOST/)
+            return true
+        })
     })
 }
 

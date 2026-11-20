@@ -42,7 +42,7 @@ class TokenChecks {
             LEFT JOIN actions act ON act.action_index = i.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_addresses ia ON ia.id = act.source_id
             LEFT JOIN index_tickers itick ON itick.id = i.tick_id
             LEFT JOIN index_statuses ist ON ist.id = i.status_id
         `+"WHERE "+whereClauses.join(" AND ");

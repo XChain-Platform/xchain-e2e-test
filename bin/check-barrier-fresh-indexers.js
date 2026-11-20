@@ -59,14 +59,31 @@ function bootCallee (node) {
     return null
 }
 
+function staticPropertyName (property) {
+    const key = property.key
+    if (!property.computed && key.type === 'Identifier') return key.name
+    if (key.type === 'Literal' &&
+        (key.value === null || ['string', 'number', 'boolean', 'bigint'].includes(typeof key.value))) {
+        return String(key.value)
+    }
+    if (property.computed && key.type === 'TemplateLiteral' && key.expressions.length === 0) {
+        return key.quasis[0].value.cooked
+    }
+    return null
+}
+
 function objectProperty (object, name) {
     if (!object || object.type !== 'ObjectExpression') return undefined
     let value
     for (const property of object.properties) {
-        // A later spread can replace any earlier value. A later explicit property makes it knowable again.
+        // A later spread or unknown computed key can replace any earlier value.
+        // A later statically named property makes it knowable again.
         if (property.type === 'SpreadElement') value = undefined
-        else if (property.type === 'Property' && !property.computed &&
-            (property.key.name === name || property.key.value === name)) value = property.value
+        else if (property.type === 'Property') {
+            const keyName = staticPropertyName(property)
+            if (keyName === name) value = property.value
+            else if (property.computed && keyName === null) value = undefined
+        }
     }
     return value
 }

@@ -50,7 +50,7 @@ class OrderChecks {
             LEFT JOIN actions act ON act.action_index = o.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ias ON ias.id = tr.source_id
+            LEFT JOIN index_addresses ias ON ias.id = act.source_id
             LEFT JOIN index_coins give_ic ON give_ic.id = o.give_coin_id
             LEFT JOIN index_tickers give_it ON give_it.id = o.give_tick_id
             LEFT JOIN index_coins get_ic ON get_ic.id = o.get_coin_id
@@ -135,7 +135,7 @@ class OrderChecks {
             LEFT JOIN actions act ON act.action_index = s.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ias ON ias.id = tr.source_id
+            LEFT JOIN index_addresses ias ON ias.id = act.source_id
             LEFT JOIN index_coins give_ic ON give_ic.id = s.give_coin_id
             LEFT JOIN index_tickers give_it ON give_it.id = s.give_tick_id
             LEFT JOIN index_coins get_ic ON get_ic.id = s.get_coin_id
@@ -207,7 +207,7 @@ class OrderChecks {
             LEFT JOIN actions act ON act.action_index = b.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_addresses ia ON ia.id = act.source_id
             LEFT JOIN index_statuses ist ON ist.id = b.status_id
         `+"WHERE "+w.join(" AND ");
         const connection = await this.getConnection()
@@ -241,7 +241,7 @@ class OrderChecks {
             LEFT JOIN actions act ON act.action_index = l.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_addresses ia ON ia.id = act.source_id
             LEFT JOIN index_coins ic1 ON ic1.id = l.coin1_id
             LEFT JOIN index_coins ic2 ON ic2.id = l.coin2_id
             LEFT JOIN index_memos im ON im.id = l.memo_id

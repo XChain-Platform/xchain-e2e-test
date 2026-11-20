@@ -59,7 +59,7 @@ const fs   = require('fs')
 const path = require('path')
 const { lineComments, markerFor, regexEnd, slashStartsRegex } = require('./lib/line_comments')
 const { MIN_REASON_WORDS, optOutMarker } = require('./lib/opt_out_marker')
-const { interpolationEnd, scanNamed } = require('./lib/template_literal')
+const { scanNamed, templateInterpolations } = require('./lib/template_literal')
 
 const ROOT     = path.join(__dirname, '..')
 const SCAN_DIR = path.join(ROOT, 'test')
@@ -170,11 +170,14 @@ function quotedToken(source, start, quote, line){
 }
 
 function templateToken(source, start, line){
+    const template = templateInterpolations(source, start)
+    let partIndex = 0
     let i = start + 1, value = '', tokenLine = line
     while (i < source.length){
-        if (source[i] === '`') return { end: i + 1, line: tokenLine, value }
+        if (source[i] === '`') return { end: i + 1, line: tokenLine, value, parts: template.parts }
         if (source[i] === '$' && source[i + 1] === '{'){
-            const end = interpolationEnd(source, i + 2)
+            const part = template.parts[partIndex++]
+            const end = source[part.codeEnd] === '}' ? part.codeEnd + 1 : part.codeEnd
             tokenLine += (source.slice(i, end).match(/\n/g) || []).length
             value += UNKNOWN
             i = end
@@ -188,16 +191,16 @@ function templateToken(source, start, line){
             i = decoded.next
         } else value += source[i++]
     }
-    return { end: i, line: tokenLine, value }
+    return { end: i, line: tokenLine, value, parts: template.parts }
 }
 
 // A deliberately small lexer is enough here and keeps this gate runnable before
 // npm install. It removes comments, skips regex literals as opaque operands, and
 // makes newlines irrelevant to expressions.
-function tokensFor(source){
+function tokensFor(source, from = 0, to = source.length, firstLine = 1, nested = [], regexEnds = new Map()){
     const tokens = []
-    let i = 0, line = 1
-    while (i < source.length){
+    let i = from, line = firstLine
+    while (i < to){
         if (/\s/.test(source[i])){
             if (source[i++] === '\n') line++
             continue
@@ -215,8 +218,8 @@ function tokensFor(source){
             continue
         }
         const start = i
-        if (source[i] === '/' && slashStartsRegex(tokens[tokens.length - 1])){
-            const end = regexEnd(source, i)
+        if (source[i] === '/' && (regexEnds.has(i) || slashStartsRegex(tokens[tokens.length - 1]))){
+            const end = regexEnds.get(i) || regexEnd(source, i)
             if (end !== -1){
                 tokens.push({ type: 'regex', value: source.slice(i, end), line, endLine: line, start })
                 i = end
@@ -232,6 +235,7 @@ function tokensFor(source){
         if (source[i] === '`'){
             const parsed = templateToken(source, i, line)
             tokens.push({ type: 'template', value: parsed.value, line, endLine: parsed.line, start })
+            nested.push(...parsed.parts)
             i = parsed.end; line = parsed.line
             continue
         }
@@ -247,6 +251,22 @@ function tokensFor(source){
         i += value.length
     }
     return tokens
+}
+
+// The file's code and every interpolation's code, each lexed as its own stream.
+// A stream records the stream it is nested in, which always precedes it.
+function tokenStreams(source){
+    const streams = []
+    const pending = [{ part: { codeStart: 0, codeEnd: source.length, regexEnds: new Map() }, parent: -1 }]
+    while (pending.length){
+        const { part, parent } = pending.shift()
+        const nested = []
+        const line = 1 + (source.slice(0, part.codeStart).match(/\n/g) || []).length
+        const tokens = tokensFor(source, part.codeStart, part.codeEnd, line, nested, part.regexEnds)
+        nested.forEach((inner) => pending.push({ part: inner, parent: streams.length }))
+        streams.push({ tokens, parent })
+    }
+    return streams
 }
 
 function matching(tokens, start, open, close){
@@ -278,12 +298,16 @@ function expressionEnd(tokens, start){
     return tokens.length
 }
 
-function bindingMap(tokens){
-    const bindings = new Map()
+// An interpolation sees the bindings of the code around it, shadowed by its own;
+// the code around it never sees a binding declared inside it. Each binding keeps
+// the scope it was declared in, so its initializer resolves there.
+function bindingMap(tokens, inherited = new Map()){
+    const bindings = new Map(inherited)
     for (let i = 0; i + 3 < tokens.length; i++){
         if (!['const', 'let', 'var'].includes(tokens[i].value) ||
             tokens[i + 1].type !== 'identifier' || tokens[i + 2].value !== '=') continue
-        bindings.set(tokens[i + 1].value, { start: i + 3, end: expressionEnd(tokens, i + 3) })
+        bindings.set(tokens[i + 1].value,
+            { tokens, start: i + 3, end: expressionEnd(tokens, i + 3), scope: bindings })
     }
     return bindings
 }
@@ -321,7 +345,7 @@ function expressionValue(tokens, bindings, start, end, seen = new Set()){
         if (token.type === 'identifier' && bindings.has(token.value) && !seen.has(token.value)){
             const nextSeen = new Set(seen); nextSeen.add(token.value)
             const bound = bindings.get(token.value)
-            return expressionValue(tokens, bindings, bound.start, bound.end, nextSeen)
+            return expressionValue(bound.tokens, bound.scope, bound.start, bound.end, nextSeen)
         }
         return UNKNOWN
     }
@@ -350,16 +374,15 @@ function originFor(tokens, bindings, start, end, seen = new Set()){
         !seen.has(tokens[start].value)){
         const nextSeen = new Set(seen); nextSeen.add(tokens[start].value)
         const bound = bindings.get(tokens[start].value)
-        return originFor(tokens, bindings, bound.start, bound.end, nextSeen)
+        return originFor(bound.tokens, bound.scope, bound.start, bound.end, nextSeen)
     }
     for (let i = start; i < end; i++){
         const token = tokens[i]
         if ((token.type === 'string' || token.type === 'template') &&
             (token.value.startsWith('STAKE') || token.value === 'ST')) return token
-        if (token.type === 'identifier' && bindings.has(token.value) && !seen.has(token.value) &&
-            isStake(expressionValue(tokens, bindings, bindings.get(token.value).start, bindings.get(token.value).end))){
-            const bound = bindings.get(token.value)
-            return originFor(tokens, bindings, bound.start, bound.end, new Set([...seen, token.value]))
+        const bound = token.type === 'identifier' && !seen.has(token.value) && bindings.get(token.value)
+        if (bound && isStake(expressionValue(bound.tokens, bound.scope, bound.start, bound.end))){
+            return originFor(bound.tokens, bound.scope, bound.start, bound.end, new Set([...seen, token.value]))
         }
     }
     return tokens[start]
@@ -386,7 +409,7 @@ function calledBuilder(tokens, bindings, start, end, seen = new Set()){
         !seen.has(tokens[start].value)){
         const nextSeen = new Set(seen); nextSeen.add(tokens[start].value)
         const bound = bindings.get(tokens[start].value)
-        return calledBuilder(tokens, bindings, bound.start, bound.end, nextSeen)
+        return calledBuilder(bound.tokens, bound.scope, bound.start, bound.end, nextSeen)
     }
     let open = start
     while (tokens[open] && tokens[open].value !== '(') open++
@@ -403,7 +426,7 @@ function isStakeHelperBuilt(tokens, bindings, start, end, seen = new Set()){
         !seen.has(tokens[start].value)){
         const nextSeen = new Set(seen); nextSeen.add(tokens[start].value)
         const bound = bindings.get(tokens[start].value)
-        return isStakeHelperBuilt(tokens, bindings, bound.start, bound.end, nextSeen)
+        return isStakeHelperBuilt(bound.tokens, bound.scope, bound.start, bound.end, nextSeen)
     }
     let open = start
     while (tokens[open] && tokens[open].value !== '(') open++
@@ -432,7 +455,7 @@ function staticallyFalsy(tokens, bindings, start, end, seen = new Set()){
         if (FALSY_WORDS.has(first.value)) return true
         if (!bindings.has(first.value) || seen.has(first.value)) return false
         const bound = bindings.get(first.value)
-        return staticallyFalsy(tokens, bindings, bound.start, bound.end, new Set([...seen, first.value]))
+        return staticallyFalsy(bound.tokens, bound.scope, bound.start, bound.end, new Set([...seen, first.value]))
     }
     const digits = tokens.slice(start, end).map((t) => t.value).join('').replace(/^[+-]/, '')
     return /^[0-9.]+$/.test(digits) && Number(digits) === 0
@@ -520,17 +543,7 @@ function siteCollector(lines, comments, rel){
     return { add, addCall, counted }
 }
 
-function scanLines(lines, rel){
-    const source = lines.join('\n')
-    const tokens = scanNamed(rel, () => tokensFor(source))
-    const bindings = bindingMap(tokens)
-    const comments = scanNamed(rel, () => lineComments(source))
-    const collector = siteCollector(lines, comments, rel)
-
-    for (const bound of bindings.values()){
-        if (isStake(expressionValue(tokens, bindings, bound.start, bound.end)))
-            collector.add(originFor(tokens, bindings, bound.start, bound.end))
-    }
+function scanTokenStream(tokens, bindings, collector, rel){
     for (let i = 0; i < tokens.length; i++){
         const token = tokens[i]
         if ((token.type === 'string' || token.type === 'template') && token.value !== 'STAKE' && isStake(token.value)) collector.add(token)
@@ -561,11 +574,29 @@ function scanLines(lines, rel){
         }
         if (origin) collector.addCall(origin, token)
     }
+}
+
+function scanLines(lines, rel){
+    const source = lines.join('\n')
+    const streams = scanNamed(rel, () => tokenStreams(source))
+    const scopes = []
+    for (const stream of streams) scopes.push(bindingMap(stream.tokens, scopes[stream.parent]))
+    const comments = scanNamed(rel, () => lineComments(source))
+    const collector = siteCollector(lines, comments, rel)
+
+    streams.forEach(({ tokens }, k) => {
+        for (const bound of scopes[k].values()){
+            if (bound.tokens === tokens && isStake(expressionValue(tokens, bound.scope, bound.start, bound.end)))
+                collector.add(originFor(tokens, bound.scope, bound.start, bound.end))
+        }
+        scanTokenStream(tokens, scopes[k], collector, rel)
+    })
 
     const sites = collector.counted()
     // One registration books one broadcast. A static scan cannot pair them, so a
     // shortfall flags every unmarked site in the file.
-    return sites.length > registrationCount(tokens, bindings) ? sites : []
+    const registrations = streams.reduce((sum, { tokens }, k) => sum + registrationCount(tokens, scopes[k]), 0)
+    return sites.length > registrations ? sites : []
 }
 
 function scanFile(file){

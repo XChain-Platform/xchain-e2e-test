@@ -104,10 +104,9 @@ class WaitMethods {
             writeMark: null,   // highest action_index the indexer has written
             lastWrites: null, writeReason: null,
             writeMoved: null,  // when that mark last advanced
-            // Polls whose check answered (row or no row) versus threw, kept so a
-            // wait whose database never answered cannot give up as if the row
-            // were absent.
-            answered: 0, errored: 0, lastErr: null
+            // Track answered polls and errors after the latest answer so absence
+            // is reported only after a successful concluding poll.
+            answered: 0, errored: 0, erroredSinceAnswer: 0, lastErr: null
         }
     }
 
@@ -115,9 +114,11 @@ class WaitMethods {
         try {
             const row = await checkFn.call(this, params)
             wait.answered++
+            wait.erroredSinceAnswer = 0
             return row
         } catch(err) {
             wait.errored++
+            wait.erroredSinceAnswer++
             wait.lastErr = err
             logger.info(err)
             return null
@@ -203,12 +204,17 @@ class WaitMethods {
                     : 'last advanced ' + (Date.now() - wait.writeMoved) + 'ms ago (index ' + wait.writeMark + ')')
     }
 
-    // Refuse to read "never answered" as "absent": a null here would pass every
-    // assertion that the row does not exist, against a query that never ran.
+    // Refuse to read an unanswered conclusion as "absent": a null here would
+    // pass an absence assertion after the database stopped answering.
     ['_failIfNeverAnswered'](wait){
-        if (wait.answered !== 0 || wait.errored === 0) return
-        const err = new Error(wait.label + ': no poll answered in ' + (Date.now() - wait.startMs) + 'ms ('
-            + wait.polls + ' polls, all errored); last error: ' + (wait.lastErr && wait.lastErr.message))
+        if (wait.polls === 0) return
+        if (wait.answered !== 0 && wait.erroredSinceAnswer === 0) return
+        const summary = wait.answered === 0
+            ? 'no poll answered in ' + (Date.now() - wait.startMs) + 'ms ('
+                + wait.polls + ' polls, ' + wait.errored + ' errored)'
+            : wait.erroredSinceAnswer + ' concluding polls failed after the last answer'
+        const err = new Error(wait.label + ': ' + summary
+            + '; last error: ' + (wait.lastErr && wait.lastErr.message))
         err.code  = 'WAIT_NO_ANSWER'
         err.cause = wait.lastErr
         throw err

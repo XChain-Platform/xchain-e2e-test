@@ -48,6 +48,7 @@
 const fs   = require('fs')
 const path = require('path')
 const { scanNamed, templateInterpolations } = require('./lib/template_literal')
+const { bodyCanExit, counterOnlyTest } = require('./lib/loop_shape')
 
 const ROOT         = path.join(__dirname, '..')
 const SCAN_DIR     = path.join(ROOT, 'test')
@@ -204,19 +205,23 @@ function forClauses(header) {
 // loop without being polls, so they count:
 //   - data iteration, `for (const c of cases) { ... await sleep(n) }`: the loop
 //     re-checks nothing, so the wait inside it is an ordinary fixed settle;
+//   - indexed data iteration, `for (let i = 0; i < cases.length; i++)`, unless
+//     its body can exit early;
 //   - `while (true) { await sleep(n) }` with no way out, which re-checks nothing
 //     either and would spin forever if it were really a poll.
 function loopPolls(kind, header, body) {
     if (kind === 'iteration') return false
     let test = header
+    let indexedData = false
     if (kind === 'for') {
         const clauses = forClauses(header)
         test = clauses.length >= 2 ? clauses[1] : ''
+        indexedData = counterOnlyTest(clauses)
     }
     const t = test.trim()
-    if (t && !/^(?:true|1|!0)$/.test(t)) return true
-    // `for (;;)` / `while (true)` poll only if the body can leave.
-    return /\b(?:break|return|throw)\b/.test(body)
+    if (t && !indexedData && !/^(?:true|1|!0)$/.test(t)) return true
+    // `for (;;)` / `while (true)` poll only if the body can leave this loop.
+    return bodyCanExit(body)
 }
 
 // Classify the loop a header `(`..`)` pair belongs to, from its own text.

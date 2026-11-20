@@ -139,6 +139,50 @@ describe('check-barrier-fresh-indexers direct venue boots', function () {
     })
 })
 
+describe('check-barrier-fresh-indexers computed keys', function () {
+    const findings = (source) => findReusedLabelBoots(source)
+    const reused = [{ line: 1, label: 'x' }]
+
+    it('uses last-write semantics for literal and template keys', function () {
+        assert.deepStrictEqual(findings(
+            "bootFamilyVenue({ label: 'x', venue: { freshIndexers: true, ['freshIndexers']: false } })"
+        ), reused)
+        assert.deepStrictEqual(findings(
+            "bootFamilyVenue({ label: 'x', venue: { freshIndexers: true, [`freshIndexers`]: false } })"
+        ), reused)
+        assert.deepStrictEqual(findings(
+            "bootFamilyVenue({ label: 'x', venue: { ['freshIndexers']: true } })"
+        ), [])
+    })
+
+    it('clears an earlier value on an unknown computed key', function () {
+        assert.deepStrictEqual(findings(
+            "bootFamilyVenue({ label: 'x', venue: { freshIndexers: true, [someKey]: false } })"
+        ), reused)
+        assert.deepStrictEqual(findings(
+            "bootFamilyVenue({ label: 'x', venue: { [someKey]: false, freshIndexers: true } })"
+        ), [])
+    })
+
+    it('checks computed overrides of the venue and constructor flag', function () {
+        assert.deepStrictEqual(findings(
+            "bootFamilyVenue({ label: 'x', venue: { freshIndexers: true }, ['venue']: {} })"
+        ), reused)
+        assert.deepStrictEqual(findings(
+            "new AttestMirrorVenue({ label: 'x', freshIndexers: true, ['freshIndexers']: false })"
+        ), reused)
+    })
+
+    it('does not clear a value for a known different key', function () {
+        assert.deepStrictEqual(findings(
+            "bootFamilyVenue({ label: 'x', venue: { freshIndexers: true, ['other']: 1 } })"
+        ), [])
+        assert.deepStrictEqual(findings(
+            "bootFamilyVenue({ label: 'x', venue: { freshIndexers: true, [true]: 1 } })"
+        ), [])
+    })
+})
+
 describe('check-barrier-fresh-indexers reads code, not text', function () {
     it('does not accept freshIndexers written in a comment inside the call', function () {
         const source = [

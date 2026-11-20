@@ -34,7 +34,7 @@ class MarketChecks {
             LEFT JOIN actions act ON act.action_index = ao.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_addresses ia ON ia.id = act.source_id
             LEFT JOIN index_memos im ON im.id = ao.memo_id
             LEFT JOIN index_statuses ist ON ist.id = ao.status_id
         `+"WHERE "+w.join(" AND ");
@@ -71,7 +71,7 @@ class MarketChecks {
             LEFT JOIN actions act ON act.action_index = d.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_addresses ia ON ia.id = act.source_id
             LEFT JOIN index_tickers itick ON itick.id = d.tick_id
             LEFT JOIN index_memos im ON im.id = d.memo_id
             LEFT JOIN index_statuses ist ON ist.id = d.status_id
@@ -96,7 +96,7 @@ class MarketChecks {
             LEFT JOIN actions act ON act.action_index = d.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_addresses ia ON ia.id = act.source_id
             LEFT JOIN index_tickers itick ON itick.id = d.tick_id
             LEFT JOIN index_memos im ON im.id = d.memo_id
             LEFT JOIN index_statuses ist ON ist.id = d.status_id
@@ -130,7 +130,7 @@ class MarketChecks {
             LEFT JOIN actions act ON act.action_index = m.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ias ON ias.id = tr.source_id
+            LEFT JOIN index_addresses ias ON ias.id = act.source_id
             LEFT JOIN index_addresses iad ON iad.id = m.destination_id
             LEFT JOIN index_statuses ist ON ist.id = m.status_id
         `+"WHERE "+w.join(" AND ");
@@ -202,7 +202,7 @@ class MarketChecks {
             LEFT JOIN actions act ON act.action_index = f.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_addresses ia ON ia.id = act.source_id
             LEFT JOIN index_memos im ON im.id = f.memo_id
             LEFT JOIN index_statuses ist ON ist.id = f.status_id
         `+"WHERE "+w.join(" AND ");
@@ -235,7 +235,7 @@ class MarketChecks {
             LEFT JOIN actions act ON act.action_index = s.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_addresses ia ON ia.id = act.source_id
             LEFT JOIN index_tickers itick ON itick.id = s.tick_id
             LEFT JOIN index_memos im ON im.id = s.memo_id
             LEFT JOIN index_statuses ist ON ist.id = s.status_id
@@ -272,7 +272,7 @@ class MarketChecks {
             LEFT JOIN actions act ON act.action_index = sw.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ias ON ias.id = tr.source_id
+            LEFT JOIN index_addresses ias ON ias.id = act.source_id
             LEFT JOIN index_addresses iad ON iad.id = sw.destination_id
             LEFT JOIN index_memos im ON im.id = sw.memo_id
             LEFT JOIN index_statuses ist ON ist.id = sw.status_id
@@ -306,7 +306,7 @@ class MarketChecks {
             LEFT JOIN actions act ON act.action_index = d.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_addresses ia ON ia.id = act.source_id
             LEFT JOIN index_tickers itick ON itick.id = d.tick_id
             LEFT JOIN index_tickers itick2 ON itick2.id = d.dividend_tick_id
             LEFT JOIN index_memos im ON im.id = d.memo_id
@@ -340,7 +340,7 @@ class MarketChecks {
             LEFT JOIN actions act ON act.action_index = c.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_addresses ia ON ia.id = act.source_id
             LEFT JOIN index_tickers itick ON itick.id = c.tick_id
             LEFT JOIN index_tickers itick2 ON itick2.id = c.callback_tick_id
             LEFT JOIN index_memos im ON im.id = c.memo_id
