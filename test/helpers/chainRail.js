@@ -137,10 +137,20 @@ function activeRailIsIsolated(code) {
     });
 }
 
+// A run that routes any rail through <CODE>_SERVICE_HOST is a container stack (the
+// nightly xchain-node two-stack legs): its own port keys are container ports, never
+// the published blocks, and the routed rail's published defaults are deliberate. Only
+// a host run with shifted ports and no routed rail is an isolated stack.
+function stackIsIsolated() {
+    const routed = Object.keys(process.env).some(
+        (key) => /^[A-Z]+_SERVICE_HOST$/.test(key) && process.env[key]);
+    return !routed && activeRailIsIsolated(activeCoinCode());
+}
+
 function resolveRailPorts(code) {
     const defaults = DEFAULT_PORTS[code] || {};
     const activeCode = activeCoinCode();
-    const isolated = activeCode && activeCode !== code && activeRailIsIsolated(activeCode);
+    const isolated = activeCode && activeCode !== code && stackIsIsolated();
     const resolved = {};
     for (const [field, key] of PORT_FIELDS) {
         const envKey = code + '_' + key;
@@ -336,7 +346,7 @@ function createRailGlobals(rail, nodeCreds) {
 async function createRail(coin, network = 'regtest', opts = {}) {
     const code = COIN_CODE_MAP[coin] || String(coin).toUpperCase().slice(0, 3);
     const host = process.env[code + '_SERVICE_HOST'] || opts.host || 'localhost';
-    const isolated = activeRailIsIsolated(activeCoinCode());
+    const isolated = stackIsIsolated();
     const ports = resolveRailPorts(code);
 
     const hub = new XChainHubConnector(XChainHubConnector.parseEndpoints());
