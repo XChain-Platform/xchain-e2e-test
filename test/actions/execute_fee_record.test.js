@@ -199,11 +199,17 @@ describe('EXECUTE fee records (live stack)', function () {
     it('records the billed metered fee and payment mode on the GAS-balance lane', async function () {
         if (COIN_CODE !== 'BTC') this.skip()
 
-        const result = await vmHelper.sendExecuteV0(caller, contractIndex, 'ping', [])
-        assert(result.execution, 'the ledger-paid EXECUTE must record an execution')
-        assert.strictEqual(result.execution.status, 'valid')
+        // A stack with BTC native fees on (the nightly CI stack) would get a native fee
+        // output injected by the send helper and pay in mode 1. BTC falls back to the GAS
+        // balance only when no output pays the fee destination, so send without one.
+        // stake-teardown-ok: this is an EXECUTE wire, never a STAKE broadcast
+        const txHash = await transactionHelper.createAndSendTransaction(
+            caller, executeWire(), null, [], null, null, true)
+        const execution = await waitForExecutionTx(txHash)
+        assert(execution, 'the ledger-paid EXECUTE must record an execution')
+        assert.strictEqual(execution.status, 'valid')
 
-        const row = await executionFeeRow(result.execution.action_index)
+        const row = await executionFeeRow(execution.action_index)
         requireFeeRow(row)
         assert.strictEqual(Number(row.payment_mode), 2)
         assert.strictEqual(Number(row.fee_payment_mode), 2)
