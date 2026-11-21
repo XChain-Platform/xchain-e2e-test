@@ -174,9 +174,8 @@ async function waitForExecutionTx(txHash, timeMax = 90000) {
     return null
 }
 
-// EXECUTE writes no `fees` row: its native fee is the output the confirmed transaction
-// pays to the fee destination, and nothing can hand a confirmed output back. So the
-// kept fee is proved on the transaction itself.
+// Prove the kept fee independently on the confirmed transaction output. The fees row
+// records the payment, while the output proves that the chain paid the destination.
 async function assertNativeFeeKept(txHash, paidSats) {
     const raw = await nodeConnector['_rpc']('getrawtransaction', [txHash, true])
     const out = addressHelper.findVoutPayingAddress(raw, feeDestination)
