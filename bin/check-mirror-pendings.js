@@ -356,13 +356,17 @@ function declaredPendings (source, file, calls) {
 // charged to its helper function, since the gate cannot follow the call back to a test.
 function runtimePendings (source, file, calls, masked, uncommented) {
     const pending = []
-    const skipCall = /(?<![.$\w])([A-Za-z_$][\w$]*)\s*\.\s*skip\s*\(/g
+    const skipCall = /(?<![.$\w])([A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*)\s*\.\s*skip\s*\(/g
     let match
     while ((match = skipCall.exec(masked)) !== null) {
         const openParen = match.index + match[0].length - 1
-        // A declared skip (it.skip, describe.skip) or a skip with arguments is not mocha's runtime skip.
-        if (MOCHA_DECLARERS.has(match[1]) ||
-            uncommented.slice(openParen + 1, closeParen(masked, openParen)).trim() !== '') continue
+        const receiver = match[1].replace(/\s/g, '').split('.')
+        // Bare it.skip/describe.skip calls are declarations. Runtime context skips may carry
+        // ignored arguments, while argument-carrying calls on unrelated receivers are not mocha skips.
+        if (receiver.length === 1 && MOCHA_DECLARERS.has(receiver[0])) continue
+        const hasArguments = uncommented.slice(openParen + 1, closeParen(masked, openParen)).trim() !== ''
+        const mochaContext = receiver[0] === 'this' || receiver[receiver.length - 1] === 'mocha'
+        if (hasArguments && !mochaContext) continue
         const container = calls
             .filter((call) => call.bodyOpen < match.index && call.bodyClose > match.index)
             .sort((a, b) => b.bodyOpen - a.bodyOpen)
