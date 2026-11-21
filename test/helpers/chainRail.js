@@ -75,15 +75,6 @@ const DEFAULT_PORTS = {
     DOGE: { node: 3120, tracker: 3121, decoder: 3122, encoder: 3123, indexer: 3124, miner: 3125 },
 };
 
-const PORT_FIELDS = [
-    ['node', 'NODE_PORT'],
-    ['tracker', 'UTXO_TRACKER_API_PORT'],
-    ['decoder', 'DECODER_API_PORT'],
-    ['encoder', 'ENCODER_API_PORT'],
-    ['indexer', 'INDEXER_API_PORT'],
-    ['miner', 'REGTEST_MINER_API_PORT'],
-];
-
 // Globals a rail owns. Restoring exactly this list is what makes withRail safe
 // to nest inside a suite bootstrapped by initialCheck.
 const RAIL_GLOBALS = [
@@ -105,15 +96,7 @@ const RAIL_GLOBALS = [
 // lock with `insufficient funds (FEE)`. A rail therefore carries its own value
 // or none, and none makes nativeFeeHelper ask that chain's `feeschedule`, the
 // source of truth.
-const HUB_ENV = [
-    'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS',
-    'HUB_SOURCE_DB_HOST', 'HUB_SOURCE_DB_PORT', 'HUB_SOURCE_DB_NAME',
-    'HUB_SOURCE_DB_USER', 'HUB_SOURCE_DB_PASS',
-];
-const RAIL_ENV = [
-    'COIN', 'NETWORK', 'INDEXER_DB_NAME', 'INDEXER_DB_USER', 'INDEXER_DB_PASS',
-    'FEE_DESTINATION', ...HUB_ENV,
-];
+const RAIL_ENV = ['COIN', 'NETWORK', 'INDEXER_DB_NAME', 'INDEXER_DB_USER', 'INDEXER_DB_PASS', 'FEE_DESTINATION'];
 
 // Helper modules that memoize chain-specific state at module scope.
 const MEMOIZING_HELPERS = [
@@ -122,37 +105,9 @@ const MEMOIZING_HELPERS = [
     require.resolve('./hubMirrorTopology'),
 ];
 
-function activeCoinCode() {
-    if (global.COIN_CODE) return String(global.COIN_CODE).toUpperCase();
-    const coin = global.COIN || process.env.COIN;
-    return COIN_CODE_MAP[coin] || (coin ? String(coin).toUpperCase().slice(0, 3) : null);
-}
-
-function activeRailIsIsolated(code) {
-    const defaults = DEFAULT_PORTS[code];
-    if (!defaults) return false;
-    return PORT_FIELDS.some(([field, key]) => {
-        const configured = parseInt(process.env[key], 10);
-        return Number.isFinite(configured) && configured !== defaults[field];
-    });
-}
-
-function resolveRailPorts(code) {
-    const defaults = DEFAULT_PORTS[code] || {};
-    const activeCode = activeCoinCode();
-    const isolated = activeCode && activeCode !== code && activeRailIsIsolated(activeCode);
-    const resolved = {};
-    for (const [field, key] of PORT_FIELDS) {
-        const envKey = code + '_' + key;
-        const configured = process.env[envKey];
-        if (isolated && !configured && defaults[field] !== undefined) {
-            throw new Error('[chainRail] isolated ' + activeCode + ' rail cannot use shared ' +
-                code + ' port ' + defaults[field] + '; set ' + envKey);
-        }
-        resolved[field] = configured ? parseInt(configured, 10) : defaults[field];
-    }
-    resolved.explorer = parseInt(process.env.EXPLORER_API_PORT, 10) || 18080;
-    return resolved;
+function envPort(code, key, fallback) {
+    const v = process.env[code + '_' + key];
+    return v ? parseInt(v, 10) : fallback;
 }
 
 // Per-chain env file (.env.ltc / .env.doge), the shape this suite already uses to
@@ -289,46 +244,6 @@ function resolveIndexerDb(code, chainEnv, ix) {
     };
 }
 
-function railEnvValue(code, chainEnv, key) {
-    return process.env[code + '_' + key] || chainEnv[key] || undefined;
-}
-
-function createRailEnv(coin, network, code, chainEnv, db, isolated) {
-    const env = {
-        COIN: coin,
-        NETWORK: network,
-        INDEXER_DB_NAME: db.name,
-        INDEXER_DB_USER: db.user,
-        INDEXER_DB_PASS: db.pass,
-        FEE_DESTINATION: process.env[code + '_FEE_DESTINATION']
-            || chainEnv['XCHAIN_FEE_DESTINATION_' + code + '_' + String(network).toUpperCase()]
-            || chainEnv.FEE_DESTINATION
-            || undefined,
-    };
-    for (const key of HUB_ENV) {
-        env[key] = isolated ? railEnvValue(code, chainEnv, key) : process.env[key];
-    }
-    return env;
-}
-
-function createRailGlobals(rail, nodeCreds) {
-    const { coin, network, code, host, db } = rail;
-    return {
-        COIN: coin,
-        NETWORK: network,
-        NETWORK_OBJECT: CryptoNetworks.getBitcoinJsNetwork(coin + '-' + network),
-        COIN_CODE: code,
-        nodeConnector: new BlockchainConnector(host, rail.ports.node, nodeCreds.user, nodeCreds.pass),
-        utxoTrackerConnector: new XChainUtxoTrackerConnector(host, rail.ports.tracker),
-        encoderConnector: new XChainEncoderConnector(host, rail.ports.encoder, process.env[code + '_ENCODER_API_KEY'] || process.env.ENCODER_API_KEY || null),
-        decoderConnector: new XChainDecoderConnector(host, rail.ports.decoder),
-        indexerConnector: new XChainIndexerConnector(host, rail.ports.indexer, process.env[code + '_INDEXER_API_KEY'] || process.env.INDEXER_API_KEY || null),
-        explorerConnector: new XChainExplorerConnector(host, rail.ports.explorer),
-        indexerDatabase: new Database(db.host, db.port, db.name, db.user, db.pass),
-        regtestMinerConnector: new RegtestMinerConnector(host, rail.ports.miner, process.env[code + '_MINER_API_KEY'] || process.env.MINER_API_KEY || null),
-    };
-}
-
 // Build a rail for `coin` on `network`, discovering the node RPC + indexer DB
 // credentials from the hub. Throws (never silently degrades) when the hub has no
 // config for the coin: a rail built on guessed credentials would fail later, deep
@@ -336,8 +251,7 @@ function createRailGlobals(rail, nodeCreds) {
 async function createRail(coin, network = 'regtest', opts = {}) {
     const code = COIN_CODE_MAP[coin] || String(coin).toUpperCase().slice(0, 3);
     const host = process.env[code + '_SERVICE_HOST'] || opts.host || 'localhost';
-    const isolated = activeRailIsIsolated(activeCoinCode());
-    const ports = resolveRailPorts(code);
+    const ports = DEFAULT_PORTS[code] || {};
 
     const hub = new XChainHubConnector(XChainHubConnector.parseEndpoints());
     if (!(await hub.ping())) {
@@ -371,16 +285,50 @@ async function createRail(coin, network = 'regtest', opts = {}) {
     const rail = {
         coin, network, code,
         host,
-        ports,
+        ports: {
+            node:    envPort(code, 'NODE_PORT', ports.node),
+            tracker: envPort(code, 'UTXO_TRACKER_API_PORT', ports.tracker),
+            decoder: envPort(code, 'DECODER_API_PORT', ports.decoder),
+            encoder: envPort(code, 'ENCODER_API_PORT', ports.encoder),
+            indexer: envPort(code, 'INDEXER_API_PORT', ports.indexer),
+            miner:   envPort(code, 'REGTEST_MINER_API_PORT', ports.miner),
+            explorer: parseInt(process.env.EXPLORER_API_PORT, 10) || 18080,
+        },
         db: { host: dbHost, port: dbPort, name: db.name, user: db.user, pass: db.pass },
         globals: null,
     };
 
-    rail.globals = createRailGlobals(rail, nodeCreds);
+    rail.globals = {
+        COIN:           coin,
+        NETWORK:        network,
+        NETWORK_OBJECT: CryptoNetworks.getBitcoinJsNetwork(coin + '-' + network),
+        COIN_CODE:      code,
+        nodeConnector:         new BlockchainConnector(host, rail.ports.node, nodeCreds.user, nodeCreds.pass),
+        utxoTrackerConnector:  new XChainUtxoTrackerConnector(host, rail.ports.tracker),
+        encoderConnector:      new XChainEncoderConnector(host, rail.ports.encoder, process.env[code + '_ENCODER_API_KEY'] || process.env.ENCODER_API_KEY || null),
+        decoderConnector:      new XChainDecoderConnector(host, rail.ports.decoder),
+        indexerConnector:      new XChainIndexerConnector(host, rail.ports.indexer, process.env[code + '_INDEXER_API_KEY'] || process.env.INDEXER_API_KEY || null),
+        explorerConnector:     new XChainExplorerConnector(host, rail.ports.explorer),
+        indexerDatabase:       new Database(dbHost, dbPort, db.name, db.user, db.pass),
+        regtestMinerConnector: new RegtestMinerConnector(host, rail.ports.miner, process.env[code + '_MINER_API_KEY'] || process.env.MINER_API_KEY || null),
+    };
 
-    // Shared rails keep their one hub database. Isolated rails install their
-    // target coordinates or clear them so helpers use this rail's indexer DB.
-    rail.env = createRailEnv(coin, network, code, chainEnv, db, isolated);
+    rail.env = {
+        COIN:            coin,
+        NETWORK:         network,
+        INDEXER_DB_NAME: db.name,
+        INDEXER_DB_USER: db.user,
+        INDEXER_DB_PASS: db.pass,
+        // This chain's own destination, on the same ladder as the credentials:
+        // <CODE>_FEE_DESTINATION in the environment, then .env.<code>. Unset
+        // (undefined) means enterRail DELETES the generic name for the duration of
+        // the swap, so the helpers discover it from this chain's indexer instead
+        // of inheriting the leg coin's.
+        FEE_DESTINATION: process.env[code + '_FEE_DESTINATION']
+            || chainEnv['XCHAIN_FEE_DESTINATION_' + code + '_' + String(network).toUpperCase()]
+            || chainEnv.FEE_DESTINATION
+            || undefined,
+    };
 
     return rail;
 }
