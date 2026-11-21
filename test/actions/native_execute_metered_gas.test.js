@@ -28,6 +28,7 @@ const cryptoHelper = require('../helpers/core/cryptoHelper')
 const transactionHelper = require('../helpers/core/transactionHelper')
 const vmHelper = require('../helpers/vmHelper')
 const nativeFeeHelper = require('../helpers/nativeFeeHelper')
+const addressHelper = require('../helpers/addressHelper')
 const {
     FIXTURE_ID_FLOOR,
     FIXTURE_INSERT_SQL,
@@ -173,20 +174,15 @@ async function waitForExecutionTx(txHash, timeMax = 90000) {
     return null
 }
 
-async function feeFor(actionIndex) {
-    const rows = await q(
-        `SELECT payment_mode, native_coin, native_coin_amount, oracle_round
-           FROM fees WHERE action_index = ? LIMIT 1`, [actionIndex])
-    return rows.length ? rows[0] : null
-}
-
-function assertNativeFeeKept(fee, paidSats) {
-    assert(fee, 'the EXECUTE must retain a fee row')
-    assert.strictEqual(Number(fee.payment_mode), 1, 'the fee must use native payment mode')
-    assert.strictEqual(fee.native_coin, COIN_CODE, 'the fee row must name the chain coin')
-    assert.strictEqual(Math.round(Number(fee.native_coin_amount) * 1e8), paidSats,
-        'the recorded native fee must equal the output that was paid')
-    assert(fee.oracle_round != null, 'the fee row must retain its oracle round')
+// EXECUTE writes no `fees` row: its native fee is the output the confirmed transaction
+// pays to the fee destination, and nothing can hand a confirmed output back. So the
+// kept fee is proved on the transaction itself.
+async function assertNativeFeeKept(txHash, paidSats) {
+    const raw = await nodeConnector['_rpc']('getrawtransaction', [txHash, true])
+    const out = addressHelper.findVoutPayingAddress(raw, feeDestination)
+    assert(out, 'the EXECUTE transaction must pay the native fee destination')
+    assert.strictEqual(Math.round(Number(out.value) * 1e8), paidSats,
+        'the native fee output must equal the amount that was paid')
 }
 
 async function setUp(suite) {
@@ -259,7 +255,7 @@ describe('Native EXECUTE metered gas (live stack)', function () {
             'recorded billed gas must stay within the gas bought by the native output')
         assert(Number(row.gas_limit) >= Number(quotedHeavyFee.gasCost),
             'the paid ceiling must cover the quote gas estimate and its margin')
-        assertNativeFeeKept(await feeFor(row.action_index), paidSats)
+        await assertNativeFeeKept(txHash, paidSats)
     })
 
     it('fails a heavy call paid only at the base fee as out-of-gas and keeps the fee', async function () {
@@ -278,7 +274,7 @@ describe('Native EXECUTE metered gas (live stack)', function () {
             'a base-fee output must not buy the quoted heavy-call budget')
         assert.strictEqual(Number(row.gas_used), Number(row.gas_limit),
             'an out-of-gas call must bill the full paid gas budget')
-        assertNativeFeeKept(await feeFor(row.action_index), baseFeeSats)
+        await assertNativeFeeKept(txHash, baseFeeSats)
     })
 
     it('accepts a cheap call paid at the base fee', async function () {
@@ -289,6 +285,6 @@ describe('Native EXECUTE metered gas (live stack)', function () {
         assert.strictEqual(row.status, 'valid', 'the base-paid cheap EXECUTE must be valid')
         assert(Number(row.gas_used) <= EXECUTE_BASE_GAS,
             'the cheap call must fit within the base gas budget')
-        assertNativeFeeKept(await feeFor(row.action_index), baseFeeSats)
+        await assertNativeFeeKept(txHash, baseFeeSats)
     })
 })
