@@ -41,6 +41,7 @@ const RegtestMinerConnector = require('../src/regtest_miner_connector.js')
 const Database = require('../src/db.js')
 const CryptoNetworks = require('../src/crypto_networks')
 const cryptoHelper = require('./helpers/core/cryptoHelper')
+const { hubCredential } = require('./helpers/hub_config/credential')
 const { hubNodePort } = require('./helpers/hub_node_port')
 const hubMirrorTopology = require('./helpers/hubMirrorTopology')
 const xchainPriceConstants = require('./helpers/xchainPriceConstants')
@@ -114,18 +115,6 @@ function allEnvironmentPresent() {
 // These diagnostics are commonly retained as build artifacts.
 function maskSecret(value) { return value == null || value === undefined ? '(not set)' : '(set)' }
 
-// Hub config uses a redaction sentinel when the caller lacks the credential
-// tier. Never pass that sentinel to a downstream service where it would become
-// a delayed authentication failure. An explicit environment value may supply
-// the credential because discovery runs only when some setup value is absent.
-// Failing here identifies the missing credential and avoids a later database
-// access denial or service 401 that looks like a topology problem.
-function hubCredential(hubValue, envValue, purpose) {
-    if (hubValue !== XChainHubConnector.REDACTED) return hubValue
-    if (envValue) return envValue
-    return XChainHubConnector.assertUnredactedCredential(hubValue, purpose)
-}
-
 function printEnvironment() {
     // Keep this object-shaped output so setup logs remain searchable by field
     // without exposing any credential content.
@@ -152,7 +141,8 @@ function applyHubConfig(coinNet) {
     // An explicit host-side node port wins over the hub's in-network port.
     NODE_PORT = hubNodePort(process.env.NODE_PORT, coinNet["node"]["port"])
     NODE_USER = coinNet.node.user
-    NODE_PASS = hubCredential(coinNet.node.pass, process.env.NODE_PASS, 'the node RPC password (NODE_PASS)')
+    NODE_PASS = hubCredential(coinNet.node.pass, process.env.NODE_PASSWORD,
+        'the node RPC password (NODE_PASSWORD)')
     DATABASE_URL = '127.0.0.1'
     DATABASE_PORT = coinNet['xchain-indexer'].db_port
     UTXO_TRACKER_URL = 'localhost'
@@ -166,7 +156,7 @@ function applyHubConfig(coinNet) {
     INDEXER_DATABASE_NAME = coinNet['xchain-indexer'].name
     INDEXER_DATABASE_USER = coinNet['xchain-indexer'].user
     INDEXER_DATABASE_PASS = hubCredential(coinNet['xchain-indexer'].pass,
-        process.env.INDEXER_DATABASE_PASS, 'the indexer database password (INDEXER_DATABASE_PASS)')
+        process.env.INDEXER_DB_PASS, 'the indexer database password (INDEXER_DB_PASS)')
     REGTEST_MINER_URL = 'localhost'
     REGTEST_MINER_PORT = coinNet['xchain-regtest-miner'] && coinNet['xchain-regtest-miner'].port
     if (!EXPLORER_URL || !EXPLORER_PORT)

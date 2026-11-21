@@ -52,6 +52,7 @@ function loadSDK() {
 const { XChainSDK } = loadSDK();
 const gasHelper = require('../../helpers/gasHelper');
 const { isNoUtxosRefusal } = require('../../helpers/core/no_utxos_refusal');
+const { mine } = require('./mine');
 
 // global.COIN / global.NETWORK are set by the initialCheck beforeAll hook;
 // fall back to raw env for standalone use.
@@ -274,11 +275,6 @@ async function fundedGasAddress(sdk, amountToFund = 1, gasAmount = GAS_FAUCET_MA
     const addr = await fundedSdkAddress(sdk, amountToFund, addressType);
     await mintGas(sdk, addr, gasAmount);
     return addr;
-}
-
-// Nudge the miner to keep two-phase (P2SH/P2WSH) flows snappy and deterministic.
-async function mine(blocks = 1) {
-    try { await global.regtestMinerConnector.generateBlocks(blocks); } catch (e) {}
 }
 
 let internalTickSeq = 0;

@@ -47,8 +47,9 @@
 
 const fs   = require('fs')
 const path = require('path')
-const { scanNamed, templateInterpolations } = require('./lib/template_literal')
-const { bodyCanExit, counterOnlyTest } = require('./lib/loop_shape')
+const { scanNamed } = require('./lib/template_literal')
+const { blankNonCode, loopMask } = require('./lib/sleep_flake_source')
+const { readBaseline } = require('./lib/sleep_flake_baseline')
 
 const ROOT         = path.join(__dirname, '..')
 const SCAN_DIR     = path.join(ROOT, 'test')
@@ -80,261 +81,6 @@ const VAR_HELPER = new RegExp('\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\
 // helper definitions (`const sleep = (ms) => new Promise(...)`) nor the race
 // arms reach the detector at all.
 const TIMER_INSIDE  = /\bsetTimeout\s*\(/
-
-// Blank out comments, strings and template literals so brace counting and call
-// detection see code only. Returns a same-length string (offsets stay valid).
-function blankRange(out, from, to) {
-    for (let k = from; k < to && k < out.length; k++) if (out[k] !== '\n') out[k] = ' '
-}
-
-function regexLiteralEnd(src, out, i) {
-    let p = i - 1
-    while (p >= 0 && /\s/.test(out[p])) p--
-    const prev = p >= 0 ? out[p] : ''
-    const word = src.slice(Math.max(0, p - 9), p + 1)
-    if (!(p < 0 || '(,=:[!&|?{};+-*%^~'.includes(prev) ||
-        /\b(?:return|typeof|case|in|of|do|else|yield|await)$/.test(word))) return -1
-    let j = i + 1
-    let inClass = false
-    while (j < src.length && src[j] !== '\n') {
-        if (src[j] === '\\') { j += 2; continue }
-        if (src[j] === '[') inClass = true
-        else if (src[j] === ']') inClass = false
-        else if (src[j] === '/' && !inClass) return j + 1
-        j++
-    }
-    return -1
-}
-
-// Index past a regex's closing slash, flags left as code like the guess below.
-function lexedRegexEnd(src, regexEnds, i) {
-    return regexEnds.has(i) ? src.lastIndexOf('/', regexEnds.get(i) - 1) + 1 : -1
-}
-
-// Inside interpolation code, regexEnds holds the lexer's regex spans and
-// replaces the context guess, which cannot see past the masked `${`.
-function blankRangeNonCode(src, out, from, to, regexEnds) {
-    let i = from
-    while (i < to) {
-        const c = src[i]
-        const d = src[i + 1]
-        if (c === '/' && d === '/') {
-            const end = src.indexOf('\n', i); const stop = end === -1 ? src.length : end
-            blankRange(out, i, Math.min(stop, to)); i = Math.min(stop, to); continue
-        }
-        if (c === '/' && d === '*') {
-            const end = src.indexOf('*/', i + 2); const stop = end === -1 ? src.length : end + 2
-            blankRange(out, i, Math.min(stop, to)); i = Math.min(stop, to); continue
-        }
-        // Regex literal, not division: decided by the previous code token. A
-        // regex may legitimately contain quotes and braces, so mislexing one as
-        // a string swallows the braces after it and unbalances the whole file.
-        if (c === '/') {
-            const end = regexEnds ? lexedRegexEnd(src, regexEnds, i) : regexLiteralEnd(src, out, i)
-            if (end !== -1) { blankRange(out, i + 1, Math.min(end - 1, to)); i = Math.min(end, to); continue }
-        }
-        if (c === '`') {
-            const template = templateInterpolations(src, i)
-            const stop = Math.min(template.end, to)
-            let literalStart = i + 1
-            for (const part of template.parts) {
-                if (part.codeStart >= stop) break
-                blankRange(out, literalStart, Math.min(part.codeStart, stop))
-                blankRangeNonCode(src, out, part.codeStart, Math.min(part.codeEnd, stop), part.regexEnds)
-                literalStart = Math.min(part.codeEnd, stop)
-            }
-            const close = src[stop - 1] === '`' ? stop - 1 : stop
-            blankRange(out, literalStart, close); i = stop; continue
-        }
-        if (c === '"' || c === "'") {
-            let j = i + 1
-            while (j < src.length) {
-                if (src[j] === '\\') { j += 2; continue }
-                if (src[j] === c) break
-                j++
-            }
-            const stop = Math.min(j + 1, to)
-            blankRange(out, i + 1, Math.min(j, to)); i = stop; continue
-        }
-        i++
-    }
-}
-
-function blankNonCode(src) {
-    const out = src.split('')
-    blankRangeNonCode(src, out, 0, src.length)
-    return out.join('')
-}
-
-// Index of the `(` matching the `)` at `close`, or -1. Counted over blanked code.
-function openParenOf(code, close) {
-    let d = 0
-    for (let i = close; i >= 0; i--) {
-        if (code[i] === ')') d++
-        else if (code[i] === '(') { d--; if (d === 0) return i }
-    }
-    return -1
-}
-
-// Index of the `}` matching the `{` at `open`, or the end of the code.
-function closeBraceOf(code, open) {
-    let d = 0
-    for (let i = open; i < code.length; i++) {
-        if (code[i] === '{') d++
-        else if (code[i] === '}') { d--; if (d === 0) return i }
-    }
-    return code.length
-}
-
-// Split a `for` header on its top-level semicolons: `i = 0`, the test, the step.
-function forClauses(header) {
-    const out = []
-    let d = 0, from = 0
-    for (let i = 0; i < header.length; i++) {
-        const c = header[i]
-        if (c === '(' || c === '[' || c === '{') d++
-        else if (c === ')' || c === ']' || c === '}') d--
-        else if (c === ';' && d === 0) { out.push(header.slice(from, i)); from = i + 1 }
-    }
-    out.push(header.slice(from))
-    return out
-}
-
-// A loop earns the poll-interval exemption only when it RE-CHECKS something: a
-// real (non-literal) test, or an early exit in its own body. Two shapes sit in a
-// loop without being polls, so they count:
-//   - data iteration, `for (const c of cases) { ... await sleep(n) }`: the loop
-//     re-checks nothing, so the wait inside it is an ordinary fixed settle;
-//   - indexed data iteration, `for (let i = 0; i < cases.length; i++)`, unless
-//     its body can exit early;
-//   - `while (true) { await sleep(n) }` with no way out, which re-checks nothing
-//     either and would spin forever if it were really a poll.
-function loopPolls(kind, header, body) {
-    if (kind === 'iteration') return false
-    let test = header
-    let indexedData = false
-    if (kind === 'for') {
-        const clauses = forClauses(header)
-        test = clauses.length >= 2 ? clauses[1] : ''
-        indexedData = counterOnlyTest(clauses)
-    }
-    const t = test.trim()
-    if (t && !indexedData && !/^(?:true|1|!0)$/.test(t)) return true
-    // `for (;;)` / `while (true)` poll only if the body can leave this loop.
-    return bodyCanExit(body)
-}
-
-// Classify the loop a header `(`..`)` pair belongs to, from its own text.
-function loopKind(before, header) {
-    if (!/\bfor(?:\s+await)?\s*$/.test(before)) return 'while'
-    if (forClauses(header).length >= 2) return 'for'
-    return 'iteration'   // for-of / for-in
-}
-
-// Walk the code and mark, per character offset, whether it sits inside the body
-// of a POLLING loop. Three boundaries are load-bearing and each was a false
-// negative before:
-//   - a non-polling loop does not exempt (see loopPolls);
-//   - a nested function body ends the exemption, so a callback that merely sits
-//     in a loop body is not treated as part of the poll;
-//   - a brace-less body stops at its own statement end, so the settle in
-//     `while (!ready) await sleep(100); await sleep(5000)` is not swallowed by
-//     the loop header that precedes it on the line.
-function loopMask(code) {
-    const mask = new Uint8Array(code.length)
-    const stack = []          // one frame per open brace, carrying its effective state
-    let depth  = 0
-    let inLoop = false
-
-    // What does the `{` at `i` open? Returns the effective in-a-polling-loop
-    // state for everything inside it.
-    const classify = (i) => {
-        let p = i - 1
-        while (p >= 0 && /\s/.test(code[p])) p--
-        if (p >= 0 && code[p] === '>' && code[p - 1] === '=') return false          // arrow body
-        const kw = code.slice(Math.max(0, p - 11), p + 1)
-        if (p >= 0 && code[p] === ')') {
-            const open = openParenOf(code, p)
-            if (open === -1) return inLoop
-            const before = code.slice(Math.max(0, open - 12), open)
-            if (/\b(?:while|for)(?:\s+await)?\s*$/.test(before)) {
-                const header = code.slice(open + 1, p)
-                const body   = code.slice(i + 1, closeBraceOf(code, i))
-                return loopPolls(loopKind(before, header), header, body)
-            }
-            // `if`/`else if`/`switch`/`catch` are transparent; anything else
-            // ending in a parameter list is a function and ends the exemption.
-            return /\b(?:if|switch|catch|with)\s*$/.test(before) ? inLoop : false
-        }
-        if (/\bdo\s*$/.test(kw)) {
-            // `do { ... } while (test)`: the test sits AFTER the body, so read it
-            // from the tail rather than from a header this loop shape has not got.
-            const end  = closeBraceOf(code, i)
-            const body = code.slice(i + 1, end)
-            const tail = /^\s*while\s*\(/.exec(code.slice(end + 1))
-            let test = ''
-            if (tail) {
-                const tOpen = end + tail[0].length          // index of the `(`
-                let d = 0
-                for (let j = tOpen; j < code.length; j++) {
-                    if (code[j] === '(') d++
-                    else if (code[j] === ')') { d--; if (d === 0) { test = code.slice(tOpen + 1, j); break } }
-                }
-            }
-            return loopPolls('while', test, body)
-        }
-        if (/\b(?:else|try|finally)\s*$/.test(kw)) return inLoop
-        return inLoop          // bare block, object literal, class body
-    }
-
-    for (let i = 0; i < code.length; i++) {
-        const c = code[i]
-        if (c === '{') {
-            const eff = classify(i)
-            stack.push(eff)
-            depth++
-            inLoop = eff
-            continue
-        }
-        if (c === '}') {
-            stack.pop()
-            depth--
-            inLoop = stack.length ? stack[stack.length - 1] : false
-            continue
-        }
-        if (inLoop) mask[i] = 1
-    }
-
-    // Brace-less loop bodies, marked as their own spans: `while (...) await x()`.
-    for (let i = 0; i < code.length; i++) {
-        if (code[i] !== '(') continue
-        const before = code.slice(Math.max(0, i - 12), i)
-        if (!/\b(?:while|for)(?:\s+await)?\s*$/.test(before)) continue
-        let d = 0, close = -1
-        for (let j = i; j < code.length; j++) {
-            if (code[j] === '(') d++
-            else if (code[j] === ')') { d--; if (d === 0) { close = j; break } }
-        }
-        if (close === -1) continue
-        let b = close + 1
-        while (b < code.length && /\s/.test(code[b])) b++
-        if (code[b] === '{') continue                       // braced body, handled above
-        // The body is one statement: it ends at the first `;` or newline at
-        // nesting depth zero, and NOT at the end of the line it started on.
-        let nest = 0, end = b
-        for (; end < code.length; end++) {
-            const ch = code[end]
-            if ('([{'.includes(ch)) nest++
-            else if (')]}'.includes(ch)) { if (nest === 0) break; nest-- }
-            else if (nest === 0 && (ch === ';' || ch === '\n')) break
-        }
-        const header = code.slice(i + 1, close)
-        if (!loopPolls(loopKind(before, header), header, code.slice(b, end))) continue
-        for (let k = b; k < end; k++) mask[k] = 1
-    }
-
-    return { mask, balanced: depth === 0 }
-}
 
 function walk(dir, acc) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -427,6 +173,22 @@ function scanFile(file) {
     return scanSource(fs.readFileSync(file, 'utf8'), path.relative(ROOT, file))
 }
 
+function writeBaseline(hits) {
+    // Keep the committed note: it carries the ratchet's history, which a
+    // fixed string here would silently truncate on every rewrite.
+    const prior = fs.existsSync(BASELINE) ? JSON.parse(fs.readFileSync(BASELINE, 'utf8')).note : null
+    fs.writeFileSync(BASELINE, JSON.stringify({
+        check: 'fixed-settle sleep call sites under test/',
+        note: prior || ('Ratchet only. Lower this when waits are converted to condition waits; never raise it. '
+            + 'Raised once, 26 to 38, when the detector was widened to read the inline '
+            + '`await new Promise(r => setTimeout(r, n))` form alongside `await sleep(n)`: that rise '
+            + 'was the gate seeing a shape it had been blind to, not new debt.'),
+        count: hits.length,
+    }, null, 4) + '\n')
+    console.log(`wrote ${BASELINE_REL}: ${hits.length}`)
+    return 0
+}
+
 function main() {
     const args  = process.argv.slice(2)
     const files = walk(SCAN_DIR, []).sort()
@@ -440,27 +202,18 @@ function main() {
 
     if (args.includes('--list')) hits.forEach((h) => console.log(`${h.file}:${h.line}  ${h.text}`))
 
-    if (args.includes('--write-baseline')) {
-        // Keep the committed note: it carries the ratchet's history, which a
-        // fixed string here would silently truncate on every rewrite.
-        const prior = fs.existsSync(BASELINE) ? JSON.parse(fs.readFileSync(BASELINE, 'utf8')).note : null
-        fs.writeFileSync(BASELINE, JSON.stringify({
-            check: 'fixed-settle sleep call sites under test/',
-            note: prior || ('Ratchet only. Lower this when waits are converted to condition waits; never raise it. '
-                + 'Raised once, 26 to 38, when the detector was widened to read the inline '
-                + '`await new Promise(r => setTimeout(r, n))` form alongside `await sleep(n)`: that rise '
-                + 'was the gate seeing a shape it had been blind to, not new debt.'),
-            count: hits.length,
-        }, null, 4) + '\n')
-        console.log(`wrote ${BASELINE_REL}: ${hits.length}`)
-        return 0
-    }
+    if (args.includes('--write-baseline')) return writeBaseline(hits)
 
     if (!fs.existsSync(BASELINE)) {
         console.error(`sleep-flake: missing ${BASELINE_REL}; run: node bin/check-sleep-flake.js --write-baseline`)
         return 1
     }
-    const baseline = JSON.parse(fs.readFileSync(BASELINE, 'utf8')).count
+    const baselineResult = readBaseline(BASELINE, BASELINE_REL)
+    if (!baselineResult.ok) {
+        console.error('sleep-flake: ' + baselineResult.error)
+        return 1
+    }
+    const baseline = baselineResult.count
 
     if (unbalanced.length) {
         console.error('sleep-flake: brace scan did not balance in these files, so their sleeps were all counted:')
