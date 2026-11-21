@@ -315,7 +315,7 @@ describe('gasHelper', () => {
     // rather than a hand-rolled parser.
     describe('bridgeGasIn', () => {
         let sendTxStub, getAddrStub, createRailStub
-        let destDb, btcDb, btcMiner, destMiner, savedDestMiner
+        let destDb, btcDb, btcMiner, destMiner, btcIndexer, savedDestMiner, savedDestIndexer
 
         beforeEach(() => {
             // This block drives the real mintHelper.sendMintV0/issueHelper.sendIssueV0
@@ -334,6 +334,18 @@ describe('gasHelper', () => {
             destMiner = fakeMiner('dest')
             savedDestMiner = global.regtestMinerConnector
             global.regtestMinerConnector = destMiner
+            savedDestIndexer = global.indexerConnector
+            global.indexerConnector = { call: sinon.stub() }
+
+            btcIndexer = {
+                call: sinon.stub().callsFake(async (method) => {
+                    if (method === 'getlatestblock') return { block_index: 42 }
+                    if (method === 'getstakeweightsbycapability') {
+                        return { count: 1, validators: [{ pubkey: 'relay-key' }] }
+                    }
+                    throw new Error('unexpected indexer RPC ' + method)
+                })
+            }
 
             destDb = {
                 checkIssue: sinon.stub().resolves(null),
@@ -362,7 +374,7 @@ describe('gasHelper', () => {
                 globals: {
                     COIN: 'bitcoin', NETWORK: 'regtest', NETWORK_OBJECT: null, COIN_CODE: 'BTC',
                     nodeConnector: null, utxoTrackerConnector: null, encoderConnector: null,
-                    decoderConnector: null, indexerConnector: null, explorerConnector: null,
+                    decoderConnector: null, indexerConnector: btcIndexer, explorerConnector: null,
                     indexerDatabase: btcDb, regtestMinerConnector: btcMiner,
                 },
                 env: { COIN: 'bitcoin', NETWORK: 'regtest', INDEXER_DB_NAME: 'x', INDEXER_DB_USER: 'x', INDEXER_DB_PASS: 'x' },
@@ -372,6 +384,8 @@ describe('gasHelper', () => {
         afterEach(() => {
             if (savedDestMiner === undefined) delete global.regtestMinerConnector
             else global.regtestMinerConnector = savedDestMiner
+            if (savedDestIndexer === undefined) delete global.indexerConnector
+            else global.indexerConnector = savedDestIndexer
         })
 
         it('mints on BTC and locks the amount to the destination with a real XBRIDGE v0 wire string, byte-equal to the SDK builder and round-tripping through the decoder', async () => {
@@ -380,6 +394,10 @@ describe('gasHelper', () => {
             const result = await helper.bridgeGasIn(destAddressInfo, '500')
 
             assert(createRailStub.calledOnceWith('bitcoin', 'regtest'))
+            assert.deepStrictEqual(btcIndexer.call.getCall(0).args, ['getlatestblock', {}])
+            assert.deepStrictEqual(btcIndexer.call.getCall(1).args, [
+                'getstakeweightsbycapability', { capability: 'cross_chain', block_index: 42 }
+            ])
             // GAS token already exists on BTC (btcDb.checkIssue resolves truthy):
             // only a funded LOCK address is needed, no fresh ISSUE.
             assert.strictEqual(getAddrStub.callCount, 1)
@@ -422,6 +440,19 @@ describe('gasHelper', () => {
             assert.strictEqual(global.COIN_CODE, 'DOGE')
             assert.strictEqual(global.indexerDatabase, destDb)
             assert.deepStrictEqual(result, { id: 500 })
+        })
+
+        it('refuses a standalone hub before broadcasting when no cross_chain staker exists', async () => {
+            btcIndexer.call.onSecondCall().resolves({ count: 0, validators: [] })
+
+            await assert.rejects(
+                () => helper.bridgeGasIn({ address: 'DNoRelay' }, '500'),
+                /the stack's hub has no cross_chain staker, so GAS can't be bridged in from BTC; fund the reservoir another way, or run on a stack whose hub is a validator/
+            )
+
+            assert(sendTxStub.notCalled, 'the refusal must precede every BTC broadcast')
+            assert(getAddrStub.notCalled, 'the refusal must not fund a BTC lock address')
+            assert(btcDb.waitForDebit.notCalled, 'no debit wait is possible without a lock')
         })
 
         it('mints an amount above MAX_MINT in MAX_MINT chunks on BTC, then locks the whole amount in ONE XBRIDGE', async () => {

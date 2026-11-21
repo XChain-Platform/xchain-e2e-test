@@ -160,6 +160,73 @@ async function faucetHolder(record){
     return holder
 }
 
+async function assertBridgeRelay(indexer){
+    if (!indexer || typeof indexer.call !== 'function')
+        throw new Error('bridgeGasIn: the BTC indexer connector is unavailable; cannot prove the hub can relay GAS')
+    const tip = await indexer.call('getlatestblock', {})
+    const blockIndex = tip && Number(tip.block_index)
+    if (!tip || tip.error || !Number.isInteger(blockIndex) || blockIndex < 0)
+        throw new Error('bridgeGasIn: could not read the BTC indexer tip needed to check cross_chain stake')
+    const weights = await indexer.call('getstakeweightsbycapability', {
+        capability: 'cross_chain', block_index: blockIndex
+    })
+    if (!weights || weights.error || !Array.isArray(weights.validators))
+        throw new Error('bridgeGasIn: could not read the hub cross_chain stake at BTC block ' + blockIndex)
+    if (weights.validators.length === 0)
+        throw new Error("bridgeGasIn: the stack's hub has no cross_chain staker, so GAS can't be bridged in from BTC; " +
+            "fund the reservoir another way, or run on a stack whose hub is a validator")
+}
+
+async function broadcastGasLock(helper, btcRail, bridge){
+    let lockTxHash, issuerAddress
+    await chainRail.withRail(btcRail, async () => {
+        await assertBridgeRelay(indexerConnector)
+        const gasTokenExists = await indexerDatabase.checkIssue({ tick: GAS_TICK, status: 'valid' })
+        const issuerInfo = await cryptoHelper.getNewFundedAddress(
+            gasTokenExists ? "GAS.LOCK" : "GAS.TOKEN", "bitcoin", bridge.network, null, "legacy", 0, 1, false
+        )
+        issuerAddress = issuerInfo["address"]
+
+        if (!gasTokenExists) {
+            await issueHelper.sendIssueV0(
+                issuerInfo, GAS_TICK,
+                100000000, GAS_MAX_MINT, 0,
+                "XChain GAS Token", 0
+            )
+        }
+        await helper.fundGas(issuerInfo, bridge.amount)
+        const lockMessage = "XBRIDGE|0|" + bridge.destCoin + "|" + bridge.destAddress + "|" + bridge.amount + "|"
+        console.log("Creating and sending XBRIDGE V0 (lock) tx...")
+        lockTxHash = await transactionHelper.createAndSendTransaction(issuerInfo, lockMessage)
+
+        console.log("Waiting for the XBRIDGE lock debit in the BTC database...")
+        requireRow(await indexerDatabase.waitForDebit({
+            txHash: lockTxHash, tick: GAS_TICK, address: issuerAddress, amount: bridge.amount
+        }), "bridgeGasIn: XBRIDGE v0 lock of " + bridge.amount + " " + GAS_TICK + " to "
+            + bridge.destCoin + ":" + bridge.destAddress + " (tx " + lockTxHash + ") never debited the BTC source")
+    })
+    return { lockTxHash, issuerAddress }
+}
+
+async function waitForBridgeCredit(bridge, lockTxHash){
+    const waitMs = bridgeCreditWaitMs(bridge.destCoin)
+    console.log("Waiting for the bridged " + GAS_TICK + " credit on " + bridge.destCoin
+        + " (up to " + Math.round(waitMs / 1000) + " s: relay margin "
+        + relayMarginFloorS(bridge.destCoin) + " s plus slack)...")
+    const credit = await indexerDatabase.waitForCredit({
+        address: bridge.destAddress, tick: GAS_TICK, amount: bridge.amount
+    }, waitMs)
+    const failure = "bridgeGasIn: the bridged " + GAS_TICK + " credit of " + bridge.amount + " to "
+        + bridge.destAddress + " on " + bridge.destCoin + " never landed (lock tx " + lockTxHash + ")"
+    const expected = {
+        lockTxHash, destCoin: bridge.destCoin, destAddress: bridge.destAddress,
+        tick: GAS_TICK, amount: bridge.amount
+    }
+    return await requireRow.withProbe(credit, failure,
+        () => requireRow.bridgeCreditAttribution(indexerDatabase, expected),
+        requireRow.bridgeCreditEvidence(expected))
+}
+
 module.exports = {
     BRIDGE_CREDIT_SLACK_MS,
     CHECKPOINT_COVERAGE_MS,
@@ -221,88 +288,20 @@ module.exports = {
     // (section 9), so a DOGE/LTC run can no longer self-seed XCHAIN with a local
     // ISSUE or open MINT once the bridge lands.
     async bridgeGasIn(addressInfo, amount){
-        const destCoin    = global.COIN_CODE
-        const destAddress = addressInfo["address"]
-        const network     = global.NETWORK
-
-        const btcRail = await chainRail.createRail('bitcoin', network)
+        const bridge = {
+            destCoin: global.COIN_CODE,
+            destAddress: addressInfo["address"],
+            network: global.NETWORK,
+            amount
+        }
+        const btcRail = await chainRail.createRail('bitcoin', bridge.network)
         // The destination's standing miner, taken BEFORE withRail swaps the globals
         // to the BTC rail's set; the rail's own miner sits on its captured globals.
         const destMiner = global.regtestMinerConnector
         const btcMiner  = btcRail.globals.regtestMinerConnector
-        let lockTxHash, issuerAddress
         return await withIdleMining([btcMiner, destMiner], async () => {
-            await chainRail.withRail(btcRail, async () => {
-                // A fresh funded BTC address per call. The first call on a fresh venue
-                // ISSUEs the GAS tick (the initialCheck bootstrap shape, idempotent
-                // the same way); every later call only needs a funded address to MINT
-                // into and lock from, since that ISSUE leaves minting open
-                // (mintStartBlock unset => 0, the e2e faucet convention).
-                const gasTokenExists = await indexerDatabase.checkIssue({ tick: GAS_TICK, status: 'valid' })
-                const issuerInfo = await cryptoHelper.getNewFundedAddress(
-                    gasTokenExists ? "GAS.LOCK" : "GAS.TOKEN", "bitcoin", network, null, "legacy", 0, 1, false
-                )
-                issuerAddress = issuerInfo["address"]
-
-                if (!gasTokenExists) {
-                    await issueHelper.sendIssueV0(
-                        issuerInfo, GAS_TICK,
-                        100000000, // MAX_SUPPLY
-                        GAS_MAX_MINT, // MAX_MINT (per tx): high for e2e; real faucet may cap tighter
-                        0,         // decimals
-                        "XChain GAS Token",
-                        0          // MINT_SUPPLY: faucet, no pre-minted supply
-                    )
-                }
-
-                // SEND from a faucet holder on a rail whose supply is spent, MINT otherwise.
-                await this.fundGas(issuerInfo, amount)
-
-                const lockMessage = "XBRIDGE|0|" + destCoin + "|" + destAddress + "|" + amount + "|"
-
-                console.log("Creating and sending XBRIDGE V0 (lock) tx...")
-                lockTxHash = await transactionHelper.createAndSendTransaction(issuerInfo, lockMessage)
-
-                console.log("Waiting for the XBRIDGE lock debit in the BTC database...")
-                requireRow(await indexerDatabase.waitForDebit({
-                    txHash: lockTxHash,
-                    tick: GAS_TICK,
-                    address: issuerAddress,
-                    amount: amount
-                }), "bridgeGasIn: XBRIDGE v0 lock of " + amount + " " + GAS_TICK + " to "
-                    + destCoin + ":" + destAddress + " (tx " + lockTxHash + ") never debited the BTC source")
-            })
-
-            // Globals are restored to the destination chain here: the mirrored v2
-            // credit lands in ITS OWN indexer once the federation attests at the
-            // pinned regtest depth (XCHAIN_CONFIRMATIONS_<COIN>=1) and the mirror
-            // ingest applies it. The budget is the destination's relay margin plus
-            // slack (bridgeCreditWaitMs): the credit cannot settle before the
-            // destination's protocol clock passes effective_time, which the hub
-            // stamps a full margin ahead, and the idle heartbeat above is what moves
-            // that clock while nothing else is being mined. The budget also covers
-            // the hub holding the lock until a BTC checkpoint covers it.
-            const waitMs = bridgeCreditWaitMs(destCoin)
-            console.log("Waiting for the bridged " + GAS_TICK + " credit on " + destCoin
-                + " (up to " + Math.round(waitMs / 1000) + " s: relay margin "
-                + relayMarginFloorS(destCoin) + " s plus slack)...")
-            const credit = await indexerDatabase.waitForCredit({
-                address: destAddress,
-                tick: GAS_TICK,
-                amount: amount
-            }, waitMs)
-            const failure = "bridgeGasIn: the bridged " + GAS_TICK + " credit of " + amount + " to "
-                + destAddress + " on " + destCoin + " never landed (lock tx " + lockTxHash + ")"
-            const expected = {
-                lockTxHash,
-                destCoin,
-                destAddress,
-                tick: GAS_TICK,
-                amount
-            }
-            return await requireRow.withProbe(credit, failure,
-                () => requireRow.bridgeCreditAttribution(indexerDatabase, expected),
-                requireRow.bridgeCreditEvidence(expected))
+            const lock = await broadcastGasLock(this, btcRail, bridge)
+            return await waitForBridgeCredit(bridge, lock.lockTxHash)
         })
     },
 
