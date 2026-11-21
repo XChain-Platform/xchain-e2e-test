@@ -160,27 +160,57 @@ async function faucetHolder(record){
     return holder
 }
 
-async function assertBridgeRelay(indexer){
+const RELAY_POLL_MS = 5000
+
+// One read of the committed cross_chain stake at the BTC tip: { count } on a good
+// read, { error } when the tip or the weights could not be read.
+async function readRelayStake(indexer){
+    try {
+        const tip = await indexer.call('getlatestblock', {})
+        const blockIndex = tip && Number(tip.block_index)
+        if (!tip || tip.error || !Number.isInteger(blockIndex) || blockIndex < 0)
+            return { error: 'could not read the BTC indexer tip' }
+        const weights = await indexer.call('getstakeweightsbycapability', {
+            capability: 'cross_chain', block_index: blockIndex
+        })
+        if (!weights || weights.error || !Array.isArray(weights.validators))
+            return { error: 'could not read the cross_chain stake at BTC block ' + blockIndex }
+        return { count: weights.validators.length }
+    } catch (e) {
+        return { error: e.message }
+    }
+}
+
+// A standalone hub has no cross_chain staker, so a BTC lock debits and the credit can
+// never land. The nightly stack seeds its validator only once both stacks are up, so
+// a stake may still arrive after the root hook starts: poll for it within the budget
+// the credit wait would have spent anyway, and refuse before any BTC is locked.
+async function waitForBridgeRelay(indexer, budgetMs){
     if (!indexer || typeof indexer.call !== 'function')
         throw new Error('bridgeGasIn: the BTC indexer connector is unavailable; cannot prove the hub can relay GAS')
-    const tip = await indexer.call('getlatestblock', {})
-    const blockIndex = tip && Number(tip.block_index)
-    if (!tip || tip.error || !Number.isInteger(blockIndex) || blockIndex < 0)
-        throw new Error('bridgeGasIn: could not read the BTC indexer tip needed to check cross_chain stake')
-    const weights = await indexer.call('getstakeweightsbycapability', {
-        capability: 'cross_chain', block_index: blockIndex
-    })
-    if (!weights || weights.error || !Array.isArray(weights.validators))
-        throw new Error('bridgeGasIn: could not read the hub cross_chain stake at BTC block ' + blockIndex)
-    if (weights.validators.length === 0)
-        throw new Error("bridgeGasIn: the stack's hub has no cross_chain staker, so GAS can't be bridged in from BTC; " +
-            "fund the reservoir another way, or run on a stack whose hub is a validator")
+    const deadline = Date.now() + budgetMs
+    let seen = await readRelayStake(indexer)
+    if (seen.count > 0) return
+    console.log('Waiting up to ' + Math.round(budgetMs / 1000) + ' s for a cross_chain staker on the hub...')
+    while (Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, RELAY_POLL_MS))
+        seen = await readRelayStake(indexer)
+        if (seen.count > 0) return
+    }
+    if (seen.error)
+        throw new Error('bridgeGasIn: ' + seen.error + ' after ' + Math.round(budgetMs / 1000) +
+            ' s, so the hub cross_chain stake is unproven and no BTC was locked')
+    throw new Error("bridgeGasIn: the stack's hub has no cross_chain staker, so GAS can't be bridged in from BTC; " +
+        "fund the reservoir another way, or run on a stack whose hub is a validator")
 }
 
 async function broadcastGasLock(helper, btcRail, bridge){
     let lockTxHash, issuerAddress
     await chainRail.withRail(btcRail, async () => {
-        await assertBridgeRelay(indexerConnector)
+        await waitForBridgeRelay(indexerConnector, bridgeCreditWaitMs(bridge.destCoin))
+        // A fresh funded BTC address per call. The first call on a fresh venue ISSUEs
+        // the GAS tick (the initialCheck bootstrap shape); later calls only need a funded
+        // address to MINT into and lock from, since that ISSUE leaves minting open.
         const gasTokenExists = await indexerDatabase.checkIssue({ tick: GAS_TICK, status: 'valid' })
         const issuerInfo = await cryptoHelper.getNewFundedAddress(
             gasTokenExists ? "GAS.LOCK" : "GAS.TOKEN", "bitcoin", bridge.network, null, "legacy", 0, 1, false
@@ -188,12 +218,15 @@ async function broadcastGasLock(helper, btcRail, bridge){
         issuerAddress = issuerInfo["address"]
 
         if (!gasTokenExists) {
+            // MAX_SUPPLY, MAX_MINT per tx (high for e2e), decimals, name, and no
+            // pre-minted supply: the e2e faucet convention.
             await issueHelper.sendIssueV0(
                 issuerInfo, GAS_TICK,
                 100000000, GAS_MAX_MINT, 0,
                 "XChain GAS Token", 0
             )
         }
+        // SEND from a faucet holder on a rail whose supply is spent, MINT otherwise.
         await helper.fundGas(issuerInfo, bridge.amount)
         const lockMessage = "XBRIDGE|0|" + bridge.destCoin + "|" + bridge.destAddress + "|" + bridge.amount + "|"
         console.log("Creating and sending XBRIDGE V0 (lock) tx...")
@@ -208,6 +241,10 @@ async function broadcastGasLock(helper, btcRail, bridge){
     return { lockTxHash, issuerAddress }
 }
 
+// Runs with the destination chain's globals restored: the mirrored v2 credit lands in
+// its own indexer once the federation attests and the mirror ingest applies it. The
+// budget is the relay margin plus checkpoint coverage and slack (bridgeCreditWaitMs),
+// and the idle heartbeat is what moves the destination's protocol clock meanwhile.
 async function waitForBridgeCredit(bridge, lockTxHash){
     const waitMs = bridgeCreditWaitMs(bridge.destCoin)
     console.log("Waiting for the bridged " + GAS_TICK + " credit on " + bridge.destCoin

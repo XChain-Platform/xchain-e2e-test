@@ -442,17 +442,49 @@ describe('gasHelper', () => {
             assert.deepStrictEqual(result, { id: 500 })
         })
 
-        it('refuses a standalone hub before broadcasting when no cross_chain staker exists', async () => {
-            btcIndexer.call.onSecondCall().resolves({ count: 0, validators: [] })
+        function stakeReads(counts) {
+            let read = 0
+            btcIndexer.call.callsFake(async (method) => {
+                if (method === 'getlatestblock') return { block_index: 42 }
+                const count = counts[Math.min(read++, counts.length - 1)]
+                return { count, validators: Array.from({ length: count }, (_, i) => ({ pubkey: 'k' + i })) }
+            })
+        }
 
-            await assert.rejects(
-                () => helper.bridgeGasIn({ address: 'DNoRelay' }, '500'),
-                /the stack's hub has no cross_chain staker, so GAS can't be bridged in from BTC; fund the reservoir another way, or run on a stack whose hub is a validator/
-            )
+        it('refuses a standalone hub before broadcasting once the relay budget passes with no cross_chain staker', async () => {
+            stakeReads([0])
+            const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+            try {
+                const run = helper.bridgeGasIn({ address: 'DNoRelay' }, '500')
+                const refused = assert.rejects(run,
+                    /the stack's hub has no cross_chain staker, so GAS can't be bridged in from BTC; fund the reservoir another way, or run on a stack whose hub is a validator/)
+                await clock.tickAsync(2 * 3600 * 1000)
+                await refused
+            } finally {
+                clock.restore()
+            }
 
             assert(sendTxStub.notCalled, 'the refusal must precede every BTC broadcast')
             assert(getAddrStub.notCalled, 'the refusal must not fund a BTC lock address')
             assert(btcDb.waitForDebit.notCalled, 'no debit wait is possible without a lock')
+        })
+
+        it('locks once a cross_chain staker appears on a later poll', async () => {
+            stakeReads([0, 0, 1])
+            const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+            let result
+            try {
+                const run = helper.bridgeGasIn({ address: 'DLateRelay' }, '500')
+                await clock.tickAsync(60 * 1000)
+                result = await run
+            } finally {
+                clock.restore()
+            }
+
+            assert.deepStrictEqual(result, { id: 500 })
+            const messages = sendTxStub.getCalls().map(c => c.args[1])
+            assert.strictEqual(messages[messages.length - 1], 'XBRIDGE|0|DOGE|DLateRelay|500|',
+                'the lock is broadcast once the staker is seen')
         })
 
         it('mints an amount above MAX_MINT in MAX_MINT chunks on BTC, then locks the whole amount in ONE XBRIDGE', async () => {
