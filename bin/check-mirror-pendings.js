@@ -4,6 +4,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const acorn = require('acorn')
 const { MIN_REASON_WORDS, reasonWords } = require('./lib/opt_out_marker')
 const { scanNamed, templateInterpolations } = require('./lib/template_literal')
 
@@ -26,6 +27,11 @@ function blankRange (target, from, to) {
     for (let i = from; i < to && i < target.length; i++) {
         if (target[i] !== '\n') target[i] = ' '
     }
+}
+
+function blankLiteral (source, target, from, to, closer) {
+    blankRange(target, from, to)
+    if (to - 1 > from && source[to - 1] === closer) target[to - 1] = closer
 }
 
 function quotedEnd (source, start, quote) {
@@ -61,8 +67,8 @@ function regexEnd (source, start) {
     return -1
 }
 
-// Inside interpolation code, regexEnds holds the lexer's regex spans and
-// replaces the context guess, which cannot see past the masked `${`.
+// Literals retain a closing boundary so a following division slash still sees an operand.
+// Inside interpolation code, regexEnds replaces the context guess, which cannot see past `${`.
 function maskRange (source, masked, uncommented, from, to, regexEnds) {
     let i = from
     while (i < to) {
@@ -94,13 +100,13 @@ function maskRange (source, masked, uncommented, from, to, regexEnds) {
                 maskRange(source, masked, uncommented, part.codeStart, Math.min(part.codeEnd, stop), part.regexEnds)
                 literalStart = Math.min(part.codeEnd, stop)
             }
-            blankRange(masked, literalStart, stop)
+            blankLiteral(source, masked, literalStart, stop, '`')
             i = stop
             continue
         }
         if (c === '"' || c === "'") {
             const stop = Math.min(quotedEnd(source, i, c), to)
-            blankRange(masked, i, stop)
+            blankLiteral(source, masked, i, stop, c)
             i = stop
             continue
         }
@@ -109,6 +115,7 @@ function maskRange (source, masked, uncommented, from, to, regexEnds) {
             if (end !== -1) {
                 const stop = Math.min(end, to)
                 blankRange(masked, i, stop)
+                if (end <= to && stop > i) masked[stop - 1] = source[stop - 1]
                 i = stop
                 continue
             }
@@ -351,11 +358,41 @@ function declaredPendings (source, file, calls) {
     return pending
 }
 
+function callAncestorMap (source) {
+    const ast = acorn.parse(source, {
+        ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true,
+        allowAwaitOutsideFunction: true, allowReturnOutsideFunction: true,
+    })
+    const calls = new Map()
+    function visit (node, ancestors) {
+        if (!node || typeof node.type !== 'string') return
+        if (node.type === 'CallExpression') calls.set(node.start, ancestors)
+        const next = ancestors.concat(node)
+        for (const value of Object.values(node)) {
+            if (Array.isArray(value)) value.forEach((child) => visit(child, next))
+            else visit(value, next)
+        }
+    }
+    visit(ast, [])
+    return calls
+}
+
+function isUnconditionalSkipStatement (callAncestors, container, offset) {
+    const ancestors = callAncestors.get(offset) || []
+    const statement = ancestors[ancestors.length - 1]
+    const direct = statement && (statement.type === 'ExpressionStatement' || statement.type === 'ReturnStatement')
+    const body = ancestors.findIndex((node) => node.type === 'BlockStatement' &&
+        node.start === container.bodyOpen && node.end - 1 === container.bodyClose)
+    return direct && body !== -1 && ancestors.slice(body + 1, -1)
+        .every((node) => node.type === 'BlockStatement')
+}
+
 // Report a runtime skip, except the standard unavailable-venue guard: this.skip(), or the mocha
 // context a hook passes into a helper (mocha.skip()). A skip outside any hook or test body is
 // charged to its helper function, since the gate cannot follow the call back to a test.
 function runtimePendings (source, file, calls, masked, uncommented) {
     const pending = []
+    const callAncestors = callAncestorMap(source)
     const skipCall = /(?<![.$\w])([A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*)\s*\.\s*skip\s*\(/g
     let match
     while ((match = skipCall.exec(masked)) !== null) {
@@ -383,11 +420,18 @@ function runtimePendings (source, file, calls, masked, uncommented) {
         const suite = parentSuite(container, calls)
         if (TESTS.has(container.kind)) {
             const title = container.title || '<untitled test>'
-            pending.push(pendingEntry(file, line, underSuite(suite, title), title, comment, 'body'))
+            const entry = pendingEntry(file, line, underSuite(suite, title), title, comment, 'body')
+            if (isUnconditionalSkipStatement(callAncestors, container, match.index)) {
+                entry.scope = { offset: container.offset }
+            }
+            pending.push(entry)
             continue
         }
         const suiteTitle = (suite && suite.title) || '<unnamed suite>'
-        pending.push(pendingEntry(file, line, suiteTitle + ' [' + container.kind + ' hook]', suiteTitle, comment, 'hook'))
+        const entry = pendingEntry(file, line, suiteTitle + ' [' + container.kind + ' hook]', suiteTitle, comment, 'hook')
+        if (isUnconditionalSkipStatement(callAncestors, container, match.index))
+            entry.scope = suite ? { from: suite.bodyOpen, to: suite.bodyClose } : { from: -1, to: source.length }
+        pending.push(entry)
     }
     return pending
 }
@@ -445,12 +489,18 @@ function titleMatchesClaim (anchor, caseTitle) {
     return normalizeTitle(anchor) !== '' && normalizeTitle(anchor) === normalizeTitle(caseTitle)
 }
 
-// Collect the titles of cases that run: not skipped and under no skipped suite.
-function activeCaseTitles (calls) {
+function runtimeSkipCovers (call, pending) {
+    return pending.some((item) => item.scope && (item.scope.offset === call.offset ||
+        (item.scope.from < call.offset && item.scope.to > call.offset)))
+}
+
+// Collect case titles that run: not declaration-skipped, suite-skipped or unconditionally skipped.
+function activeCaseTitles ({ calls, pending }) {
     const suites = calls.filter((call) => SUITES.has(call.kind) && call.skipped)
     return calls
         .filter((call) => TESTS.has(call.kind) && !call.skipped && call.title)
         .filter((call) => !suites.some((suite) => suite.bodyOpen < call.offset && suite.bodyClose > call.offset))
+        .filter((call) => !runtimeSkipCovers(call, pending))
         .map((call) => call.title)
 }
 
@@ -471,7 +521,7 @@ function checkCrossref (item, ref, parsedFiles) {
         return fail('leg has no matching active case title: the reference quotes no target case; ' +
             'quote the active case title after the leg name')
     }
-    const titles = targets.flatMap(([, parsed]) => activeCaseTitles(parsed.calls))
+    const titles = targets.flatMap(([, parsed]) => activeCaseTitles(parsed))
     const missing = ref.anchors.find((anchor) => !titles.some((title) => titleMatchesClaim(anchor, title)))
     if (missing !== undefined) return fail('leg has no matching active case title: no active case titled "' + missing + '"')
     return { item, name: ref.name, ok: true, why: '' }
