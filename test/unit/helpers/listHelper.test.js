@@ -50,6 +50,37 @@ describe('listHelper', () => {
             await helper.sendListV0(addressInfo, 'type', ['a'])
             assert(global.indexerDatabase.waitForList.calledOnce)
         })
+
+        it('rejects a qualified TICK item before broadcasting when stored expectations are omitted', async () => {
+            await assert.rejects(
+                helper.sendListV0(addressInfo, '1', ['BTC:FOO']),
+                /BTC:FOO.*expectedItems/
+            )
+            assert.strictEqual(createTxStub.called, false)
+        })
+
+        it('sends raw qualified items and checks the explicit stored items', async () => {
+            await helper.sendListV0(
+                addressInfo, '1', ['BTC:FOO', 'doge:BAR'], '', ['FOO', 'DOGE:BAR']
+            )
+            assert.strictEqual(
+                createTxStub.firstCall.args[1],
+                'LIST|0|1||BTC:FOO|doge:BAR'
+            )
+            const waitArg = global.indexerDatabase.waitForList.firstCall.args[0]
+            assert.deepStrictEqual(waitArg.items, ['FOO', 'DOGE:BAR'])
+        })
+
+        it('keeps raw plain TICK items as the stored expectations', async () => {
+            await helper.sendListV0(addressInfo, 1, ['FOO', 'BAR'])
+            const waitArg = global.indexerDatabase.waitForList.firstCall.args[0]
+            assert.deepStrictEqual(waitArg.items, ['FOO', 'BAR'])
+        })
+
+        it('allows a colon in a non-TICK list without explicit expectations', async () => {
+            await helper.sendListV0(addressInfo, 2, ['scheme:value'])
+            assert.strictEqual(createTxStub.calledOnce, true)
+        })
     })
 
     describe('sendListV1', () => {

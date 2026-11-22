@@ -13,9 +13,14 @@ const requireRow = require('./requireRow')
 
 module.exports = {
     // MEMO sits BEFORE the variadic ITEM tail, so a memo-less LIST still spends an
-    // empty segment on it (LIST|0|1||JDOG|BRRR). Omit it and the first item is
-    // parsed AS the memo, silently landing a list one item short.
-    async sendListV0(addressInfo, type, items, memo = ''){
+    // empty segment on it (LIST|0|1||JDOG|BRRR). Qualified TICK items require
+    // explicit expectedItems because the indexer stores their canonical form.
+    async sendListV0(addressInfo, type, items, memo = '', expectedItems = null){
+        const qualifiedItems = items.filter((item) => String(item).includes(':'))
+        if (String(type) === '1' && expectedItems == null && qualifiedItems.length > 0){
+            throw new Error('sendListV0: coin-qualified TICK item(s) ' + qualifiedItems.join(', ') +
+                ' require expectedItems in the canonical stored form')
+        }
         const address = addressInfo["address"]
         const listMessage = "LIST|0|"+type+"|"+memo+"|"+items.join("|")
 
@@ -24,7 +29,7 @@ module.exports = {
 
         const listRow = requireRow(await indexerDatabase.waitForList({
             source: address, txHash: txHash, type: type,
-            status: "valid", items
+            status: "valid", items: expectedItems ?? items
         }), "sendListV0: LIST type " + type + " of " + items.length + " items (tx "
             + txHash + ") at status=valid")
 

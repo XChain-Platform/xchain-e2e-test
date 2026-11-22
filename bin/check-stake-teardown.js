@@ -171,27 +171,29 @@ function quotedToken(source, start, quote, line){
 
 function templateToken(source, start, line){
     const template = templateInterpolations(source, start)
+    const quasis = ['']
     let partIndex = 0
-    let i = start + 1, value = '', tokenLine = line
+    let i = start + 1, tokenLine = line
     while (i < source.length){
-        if (source[i] === '`') return { end: i + 1, line: tokenLine, value, parts: template.parts }
+        if (source[i] === '`')
+            return { end: i + 1, line: tokenLine, value: quasis.join(UNKNOWN), parts: template.parts, quasis }
         if (source[i] === '$' && source[i + 1] === '{'){
             const part = template.parts[partIndex++]
             const end = source[part.codeEnd] === '}' ? part.codeEnd + 1 : part.codeEnd
             tokenLine += (source.slice(i, end).match(/\n/g) || []).length
-            value += UNKNOWN
+            quasis.push('')
             i = end
             continue
         }
         if (source[i] === '\n') tokenLine++
         if (source[i] === '\\' && i + 1 < source.length){
             const decoded = decodeEscape(source, i)
-            value += decoded.value
+            quasis[quasis.length - 1] += decoded.value
             tokenLine += decoded.newlines
             i = decoded.next
-        } else value += source[i++]
+        } else quasis[quasis.length - 1] += source[i++]
     }
-    return { end: i, line: tokenLine, value, parts: template.parts }
+    return { end: i, line: tokenLine, value: quasis.join(UNKNOWN), parts: template.parts, quasis }
 }
 
 // A deliberately small lexer is enough here and keeps this gate runnable before
@@ -234,9 +236,16 @@ function tokensFor(source, from = 0, to = source.length, firstLine = 1, nested =
         }
         if (source[i] === '`'){
             const parsed = templateToken(source, i, line)
-            tokens.push({ type: 'template', value: parsed.value, line, endLine: parsed.line, start })
+            tokens.push({ type: 'template', value: parsed.value, line, endLine: parsed.line, start,
+                parts: parsed.parts, quasis: parsed.quasis })
             nested.push(...parsed.parts)
             i = parsed.end; line = parsed.line
+            continue
+        }
+        const number = /^(?:0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)(?:n)?/.exec(source.slice(i))
+        if (number){
+            tokens.push({ type: 'number', value: number[0], line, endLine: line, start })
+            i += number[0].length
             continue
         }
         const identifier = /^[A-Za-z_$][\w$]*/.exec(source.slice(i))
@@ -264,7 +273,7 @@ function tokenStreams(source){
         const line = 1 + (source.slice(0, part.codeStart).match(/\n/g) || []).length
         const tokens = tokensFor(source, part.codeStart, part.codeEnd, line, nested, part.regexEnds)
         nested.forEach((inner) => pending.push({ part: inner, parent: streams.length }))
-        streams.push({ tokens, parent })
+        streams.push({ tokens, parent, part })
     }
     return streams
 }
@@ -341,12 +350,31 @@ function expressionValue(tokens, bindings, start, end, seen = new Set()){
     if (sums.length > 1) return sums.map((p) => expressionValue(tokens, bindings, p.start, p.end, seen)).join('')
     if (end === start + 1){
         const token = tokens[start]
-        if (token.type === 'string' || token.type === 'template') return token.value
+        if (token.type === 'string') return token.value
+        if (token.type === 'number'){
+            try {
+                return token.value.endsWith('n')
+                    ? String(BigInt(token.value.slice(0, -1))) : String(Number(token.value))
+            } catch {
+                return UNKNOWN
+            }
+        }
+        if (token.type === 'template'){
+            let value = token.quasis[0]
+            token.parts.forEach((part, index) => {
+                const resolved = part.tokens
+                    ? expressionValue(part.tokens, part.scope, 0, part.tokens.length, seen) : UNKNOWN
+                value += resolved + token.quasis[index + 1]
+            })
+            return value
+        }
         if (token.type === 'identifier' && bindings.has(token.value) && !seen.has(token.value)){
             const nextSeen = new Set(seen); nextSeen.add(token.value)
             const bound = bindings.get(token.value)
             return expressionValue(bound.tokens, bound.scope, bound.start, bound.end, nextSeen)
         }
+        if (token.type === 'identifier' && ['true', 'false', 'null', 'undefined'].includes(token.value))
+            return token.value
         return UNKNOWN
     }
     if (tokens[start].value === '['){
@@ -368,6 +396,24 @@ function isStake(value){
     return value === 'STAKE' || /^STAKE(?:\u0000)*\|/.test(value)
 }
 
+function unknownPatternMatchesStake(value){
+    if (!value.includes(UNKNOWN)) return false
+    const escaped = value.split(UNKNOWN).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    return new RegExp('^' + escaped.join('.*') + '$').test('STAKE')
+}
+
+function couldStartStake(value){
+    if (isStake(value)) return true
+    const separator = value.indexOf('|')
+    const head = separator < 0 ? value : value.slice(0, separator)
+    return unknownPatternMatchesStake(head)
+}
+
+function couldEqualStake(value){
+    if (value === 'STAKE') return true
+    return !value.startsWith(UNKNOWN) && unknownPatternMatchesStake(value)
+}
+
 function originFor(tokens, bindings, start, end, seen = new Set()){
     ({ start, end } = stripParens(tokens, start, end))
     if (end === start + 1 && tokens[start].type === 'identifier' && bindings.has(tokens[start].value) &&
@@ -378,8 +424,10 @@ function originFor(tokens, bindings, start, end, seen = new Set()){
     }
     for (let i = start; i < end; i++){
         const token = tokens[i]
+        const value = token.type === 'string' || token.type === 'template'
+            ? expressionValue(tokens, bindings, i, i + 1, seen) : ''
         if ((token.type === 'string' || token.type === 'template') &&
-            (token.value.startsWith('STAKE') || token.value === 'ST')) return token
+            (value.startsWith('STAKE') || value === 'ST')) return token
         const bound = token.type === 'identifier' && !seen.has(token.value) && bindings.get(token.value)
         if (bound && isStake(expressionValue(bound.tokens, bound.scope, bound.start, bound.end))){
             return originFor(bound.tokens, bound.scope, bound.start, bound.end, new Set([...seen, token.value]))
@@ -397,7 +445,7 @@ function joinedStake(tokens, bindings, start){
     const separator = expressionValue(tokens, bindings, close + 4, callClose)
     if (separator !== '|') return null
     for (const part of splitTopLevel(tokens, start + 1, close, ',')){
-        if (expressionValue(tokens, bindings, part.start, part.end) === 'STAKE')
+        if (couldEqualStake(expressionValue(tokens, bindings, part.start, part.end)))
             return originFor(tokens, bindings, part.start, part.end)
     }
     return null
@@ -546,10 +594,12 @@ function siteCollector(lines, comments, rel){
 function scanTokenStream(tokens, bindings, collector, rel){
     for (let i = 0; i < tokens.length; i++){
         const token = tokens[i]
-        if ((token.type === 'string' || token.type === 'template') && token.value !== 'STAKE' && isStake(token.value)) collector.add(token)
+        const literalValue = token.type === 'string' || token.type === 'template'
+            ? expressionValue(tokens, bindings, i, i + 1) : ''
+        if (literalValue !== 'STAKE' && isStake(literalValue)) collector.add(token)
         if (token.value === '[') collector.add(joinedStake(tokens, bindings, i))
         const action = actionValueSpan(tokens, i)
-        if (action && expressionValue(tokens, bindings, action.start, action.end) === 'STAKE')
+        if (action && couldEqualStake(expressionValue(tokens, bindings, action.start, action.end)))
             collector.add(originFor(tokens, bindings, action.start, action.end))
         if (token.value !== 'createAndSendTransaction' || tokens[i + 1]?.value !== '(') continue
         const close = matching(tokens, i + 1, '(', ')')
@@ -565,7 +615,7 @@ function scanTokenStream(tokens, bindings, collector, rel){
         if (isStake(value)) origin = originFor(tokens, bindings, payload.start, payload.end)
         else if (joined) origin = joined
         // Treat an unresolved head as unresolved even when the payload tail is literal.
-        else if (value.startsWith(UNKNOWN) &&
+        else if (couldStartStake(value) &&
             !isStakeHelperBuilt(tokens, bindings, payload.start, payload.end) &&
             !isKnownNonStakePayload(tokens, rel, payload.start, payload.end)){
             const builder = calledBuilder(tokens, bindings, payload.start, payload.end)
@@ -581,6 +631,10 @@ function scanLines(lines, rel){
     const streams = scanNamed(rel, () => tokenStreams(source))
     const scopes = []
     for (const stream of streams) scopes.push(bindingMap(stream.tokens, scopes[stream.parent]))
+    streams.forEach((stream, k) => {
+        stream.part.tokens = stream.tokens
+        stream.part.scope = scopes[k]
+    })
     const comments = scanNamed(rel, () => lineComments(source))
     const collector = siteCollector(lines, comments, rel)
 
