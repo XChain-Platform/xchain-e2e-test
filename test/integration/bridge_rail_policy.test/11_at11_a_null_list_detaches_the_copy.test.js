@@ -52,7 +52,7 @@ async function armEngine() {
     if (state.baseline) return;
     const overlay = await state.venue.rewireHubs();
     const settled = await state.venue.waitForRailSettled(GAS_TICK, { timeoutMs: 60 * 60 * 1000 });
-    assert.ok(settled, 'the XCHAIN backlog never drained: ' + JSON.stringify(state.venue._lastSettlePoll) +
+    assert.ok(settled, 'the XCHAIN backlog never drained: ' + JSON.stringify(state.venue['_lastSettlePoll']) +
         '\n' + state.venue.indexerTails(40));
     const dupes = await state.venue.duplicateSourceTransfers();
     assert.deepStrictEqual(dupes, [],

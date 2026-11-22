@@ -12,14 +12,16 @@
 
 const sinon = require('sinon')
 const assert = require('assert')
-const transactionHelper = require('../../transactionHelper')
-const cryptoHelper = require('../../cryptoHelper')
+const transactionHelper = require('../../helpers/core/transactionHelper')
+const cryptoHelper = require('../../helpers/core/cryptoHelper')
 const mintHelper = require('../../helpers/mintHelper')
 const issueHelper = require('../../helpers/issueHelper')
 const sendHelper = require('../../helpers/sendHelper')
 const chainRail = require('../../helpers/chainRail')
 const helper = require('../../helpers/gasHelper')
 const path = require('path')
+const os = require('os')
+const fs = require('fs')
 // The hub's own relay-margin table, resolved the way loadSdk resolves the SDK so
 // the numbers asserted below are the hub's, not a copy typed into this file.
 function loadRelayMargin() {
@@ -32,11 +34,17 @@ const relay = loadRelayMargin()
 
 // A regtest miner that records every heartbeat setting in order, and can be told
 // to refuse the disable so the restore path is exercised, not just the happy one.
+// startInterval is the heartbeat it booted with, as its status call reports it.
 function fakeMiner(name, opts = {}) {
+    const startInterval = Object.prototype.hasOwnProperty.call(opts, 'startInterval') ? opts.startInterval : 0
+    const bootInterval = Object.prototype.hasOwnProperty.call(opts, 'bootInterval') ? opts.bootInterval : startInterval
     return {
         name,
+        url: 'http://' + name + ':1',
         intervals: [],
-        interval: 0,
+        interval: startInterval,
+        async getIdleMineInterval() { return this.interval },
+        async getIdleMineIntervalBoot() { return bootInterval },
         async setIdleMineInterval(ms) {
             if (ms === 0 && opts.failRestore) throw new Error(name + ' refused the restore')
             this.intervals.push(ms)
@@ -60,8 +68,13 @@ const addressInfo = { address: 'addr1', privateKey: Buffer.alloc(32), publicKey:
 
 describe('gasHelper', () => {
     let mintStub
+    let savedFaucetFile
 
     beforeEach(() => {
+        // Keeps the developer's own drill-keys/ faucet out of these cases.
+        savedFaucetFile = process.env.E2E_GAS_FAUCET_FILE
+        process.env.E2E_GAS_FAUCET_FILE = path.join(os.tmpdir(), 'gas-faucet-absent-' + process.pid + '.json')
+        helper['_resetGasFaucet']()
         mintStub = sinon.stub(mintHelper, 'sendMintV0').resolves({
             txHash: 'abc123',
             mint: { id: 200 },
@@ -77,9 +90,85 @@ describe('gasHelper', () => {
 
     afterEach(() => {
         sinon.restore()
+        helper['_resetHeartbeatBaselines']()
         delete global.COIN
         delete global.COIN_CODE
         delete global.NETWORK
+        if (savedFaucetFile === undefined) delete process.env.E2E_GAS_FAUCET_FILE
+        else process.env.E2E_GAS_FAUCET_FILE = savedFaucetFile
+        helper['_resetGasFaucet']()
+    })
+
+    // A long-lived BTC regtest spends the gas tick's MAX_SUPPLY, so a grant there is a
+    // SEND from a keyed faucet holder; a fresh chain keeps the MINT.
+    describe('fundGas', () => {
+        const faucetPath = path.join(os.tmpdir(), 'gas-faucet-test-' + process.pid + '.json')
+        let sendStub, deriveStub
+
+        function supplyDb(supply, maxSupply, balances) {
+            return {
+                async getConnection() { return { async query() { return [{ supply, max_supply: maxSupply }] }, async release() {} } },
+                async getBalance({ address }) { return balances[address] || '0' },
+            }
+        }
+
+        beforeEach(() => {
+            global.COIN = 'bitcoin'
+            global.COIN_CODE = 'BTC'
+            global.NETWORK = 'regtest'
+            fs.writeFileSync(faucetPath, JSON.stringify([
+                { address: 'faucetA', mnemonic: 'words a' },
+                { address: 'faucetB', mnemonic: 'words b' },
+                { address: 'wrongKey', mnemonic: 'words c' },
+            ]))
+            process.env.E2E_GAS_FAUCET_FILE = faucetPath
+            sendStub = sinon.stub(sendHelper, 'sendSendV0').resolves({ txHash: 'send1' })
+            // A record signs only when its mnemonic derives its own address.
+            deriveStub = sinon.stub(cryptoHelper, 'getNewAddress').callsFake(async (label, coin, network, mnemonic) => ({
+                address: mnemonic === 'words a' ? 'faucetA' : mnemonic === 'words b' ? 'faucetB' : 'somethingElse',
+                privateKey: Buffer.alloc(32), publicKey: Buffer.alloc(33),
+            }))
+        })
+
+        afterEach(() => { try { fs.unlinkSync(faucetPath) } catch (e) {} })
+
+        it('SENDs from the faucet holder instead of minting on a spent chain', async () => {
+            global.indexerDatabase = supplyDb('99999796', '100000000', { faucetA: '26244473', faucetB: '10', wrongKey: '99999999' })
+            await helper.ensureGasBalance(addressInfo, '5000')
+            assert(mintStub.notCalled, 'no MINT once the supply is spent')
+            assert.strictEqual(sendStub.callCount, 1)
+            const [holder, tick, amount, dest, memo] = sendStub.firstCall.args
+            assert.deepStrictEqual([holder.address, tick, amount, dest, memo], ['faucetA', 'XCHAIN', '5000', 'addr1', ''])
+            assert.strictEqual(deriveStub.firstCall.args[3], 'words a', 'the holder signs with its own record key')
+            assert.strictEqual(deriveStub.firstCall.args[1], 'bitcoin')
+        })
+
+        it('never picks a record whose key does not derive its address, however large its balance', async () => {
+            global.indexerDatabase = supplyDb('99999796', '100000000', { faucetA: '1', faucetB: '1', wrongKey: '99999999' })
+            await assert.rejects(helper.fundGas(addressInfo, '5000'), /no faucet holder covers 5000 XCHAIN \(2 holder/)
+            assert(sendStub.notCalled)
+            assert(mintStub.notCalled)
+        })
+
+        it('alternates holders on back-to-back grants', async () => {
+            global.indexerDatabase = supplyDb('99999796', '100000000', { faucetA: '900000', faucetB: '800000' })
+            await helper.fundGas(addressInfo, '100')
+            await helper.fundGas(addressInfo, '100')
+            assert.deepStrictEqual(sendStub.getCalls().map((c) => c.args[0].address), ['faucetA', 'faucetB'])
+        })
+
+        it('MINTs on a fresh chain with no faucet file, chunked to MAX_MINT', async () => {
+            process.env.E2E_GAS_FAUCET_FILE = faucetPath + '.absent'
+            global.indexerDatabase = supplyDb('0', '100000000', {})
+            await helper.fundGas(addressInfo, '250000')
+            assert.deepStrictEqual(mintStub.getCalls().map((c) => c.args[2]), ['100000', '100000', '50000'])
+            assert(sendStub.notCalled)
+        })
+
+        it('refuses off BTC: XCHAIN has no local supply there', async () => {
+            global.COIN_CODE = 'DOGE'
+            await assert.rejects(helper.fundGas(addressInfo, '1'), /funded on BTC only, not DOGE/)
+        })
     })
 
     describe('mintGas', () => {
@@ -142,7 +231,7 @@ describe('gasHelper', () => {
         let bridgeStub, sendStub, fundStub
 
         beforeEach(() => {
-            helper._resetGasReservoirs()
+            helper['_resetGasReservoirs']()
             global.COIN = 'litecoin'
             global.COIN_CODE = 'LTC'
             global.NETWORK = 'regtest'
@@ -152,7 +241,7 @@ describe('gasHelper', () => {
             fundStub = sinon.stub(cryptoHelper, 'getNewFundedAddress').callsFake(async () => ({ address: 'Lres' + (++n) }))
         })
 
-        afterEach(() => helper._resetGasReservoirs())
+        afterEach(() => helper['_resetGasReservoirs']())
 
         it('bridges the reservoir amount once, then pays each address with a local SEND of the gas tick', async () => {
             await helper.ensureGasBalance({ address: 'Lrecv1' }, 100)
@@ -440,17 +529,37 @@ describe('gasHelper', () => {
     })
 
     describe('bridgeCreditWaitMs', () => {
-        it('is the destination relay margin plus the slack, read from the hub table, so it always exceeds the margin', () => {
+        it('is the destination relay margin plus checkpoint coverage and slack, read from the hub table, so it always exceeds the margin', () => {
             for (const coin of ['LTC', 'DOGE', 'BTC']) {
                 const wait = helper.bridgeCreditWaitMs(coin)
-                assert.strictEqual(wait, relay.relayMarginFloorS(coin) * 1000 + helper.BRIDGE_CREDIT_SLACK_MS, coin)
+                assert.strictEqual(wait, relay.relayMarginFloorS(coin) * 1000 +
+                    helper.CHECKPOINT_COVERAGE_MS + helper.BRIDGE_CREDIT_SLACK_MS, coin)
                 assert.ok(wait > relay.relayMarginFloorS(coin) * 1000, coin + ': the wait must exceed the margin')
             }
         })
 
-        it('lands on the margins the hub stamps, LTC 600 s and DOGE 240 s, plus 180 s slack', () => {
-            assert.strictEqual(helper.bridgeCreditWaitMs('LTC'), 780000)
-            assert.strictEqual(helper.bridgeCreditWaitMs('DOGE'), 420000)
+        it('lands on the margins the hub stamps, LTC 600 s and DOGE 240 s, plus checkpoint coverage and slack', () => {
+            assert.strictEqual(helper.bridgeCreditWaitMs('LTC'), 1020000)
+            assert.strictEqual(helper.bridgeCreditWaitMs('DOGE'), 660000)
+        })
+
+        // Release matrix run 41267102555: the hub held the BTC lock ("no finalized BTC
+        // checkpoint at or above the source block") for 180 s, finalized the transfer at
+        // +185 s, and the destination settles it once its median-time-past (about 60 s
+        // behind the wall clock at the 10 s idle cadence) passes effective_time, so the
+        // credit needed about 185 + margin + 60 s and every 780 s / 420 s wait gave up.
+        it('covers the longest proof-ready checkpoint hold seen on the regtest matrix', () => {
+            const finalizedAfterMs = 185000
+            const destinationClockLagMs = 60000
+            for (const coin of ['LTC', 'DOGE']) {
+                const needed = finalizedAfterMs + relay.relayMarginFloorS(coin) * 1000 + destinationClockLagMs
+                assert.ok(helper.bridgeCreditWaitMs(coin) > needed,
+                    coin + ': a ' + helper.bridgeCreditWaitMs(coin) + ' ms wait cannot see a credit that needs ' + needed + ' ms')
+            }
+        })
+
+        it('budgets the checkpoint coverage from the regtest cadence: confirmations plus one interval of idle blocks and two polls', () => {
+            assert.strictEqual(helper.CHECKPOINT_COVERAGE_MS, (6 + 6) * helper.IDLE_MINE_INTERVAL_MS + 2 * 60000)
         })
     })
 
@@ -497,6 +606,65 @@ describe('gasHelper', () => {
             const a = fakeMiner('btc')
             await helper.withIdleMining([a], async () => {}, 5000)
             assert.deepStrictEqual(a.intervals, [5000, 0])
+        })
+
+        it('keeps the pre-run snapshot of a pinned miner across a withIdleMining run', async () => {
+            const a = fakeMiner('dest', { startInterval: 60000 })
+            await helper.pinHeartbeatOff(a)
+            await helper.withIdleMining([a], async () => {})
+            await helper.restoreHeartbeatBaselines()
+            assert.deepStrictEqual(a.intervals, [0, helper.IDLE_MINE_INTERVAL_MS, 0, 60000],
+                'the in-run 0 must not overwrite the startup value recorded when it was pinned')
+        })
+    })
+
+    describe('run heartbeat baseline', () => {
+        it('restores the boot interval when an earlier run left the live interval off', async () => {
+            const a = fakeMiner('btc', { startInterval: 0, bootInterval: 60000 })
+            await helper.pinHeartbeatOff(a)
+            await helper.restoreHeartbeatBaselines()
+            assert.deepStrictEqual(a.intervals, [0, 60000])
+        })
+
+        it('falls back to the live interval when an older miner omits the boot field', async () => {
+            const a = fakeMiner('btc', { startInterval: 10000, bootInterval: null })
+            await helper.pinHeartbeatOff(a)
+            await helper.restoreHeartbeatBaselines()
+            assert.deepStrictEqual(a.intervals, [0, 10000])
+        })
+
+        it('pins a miner off once per URL, keeping the first snapshot', async () => {
+            const a = fakeMiner('dest', { startInterval: 60000 })
+            const sameMiner = Object.assign(fakeMiner('dest'), { interval: 0 })
+            await helper.pinHeartbeatOff(a)
+            await helper.pinHeartbeatOff(sameMiner)
+            await helper.restoreHeartbeatBaselines()
+            assert.deepStrictEqual(a.intervals, [0, 60000])
+            assert.deepStrictEqual(sameMiner.intervals, [0], 'a second connector for the same URL is not a new baseline')
+        })
+
+        it('never restores a miner whose interval could not be read', async () => {
+            const a = fakeMiner('btc', { startInterval: 60000 })
+            a.getIdleMineIntervalBoot = async () => { throw new Error('status unavailable') }
+            a.getIdleMineInterval = async () => { throw new Error('status unavailable') }
+            await helper.pinHeartbeatOff(a)
+            assert.deepStrictEqual(await helper.restoreHeartbeatBaselines(), [])
+            assert.deepStrictEqual(a.intervals, [0], 'no guess is written back')
+        })
+
+        it('attempts every miner and returns each restore failure instead of throwing', async () => {
+            const a = fakeMiner('btc', { startInterval: 60000 }), b = fakeMiner('dest', { startInterval: 30000 })
+            a.setIdleMineInterval = async function (ms) {
+                if (ms !== 0) throw new Error('btc would not answer')
+                this.intervals.push(ms)
+            }
+            await helper.pinHeartbeatOff(a)
+            await helper.pinHeartbeatOff(b)
+            const failures = await helper.restoreHeartbeatBaselines()
+            assert.strictEqual(failures.length, 1)
+            assert.match(failures[0], /btc would not answer/)
+            assert.deepStrictEqual(b.intervals, [0, 30000], 'the other miner is still restored')
+            assert.deepStrictEqual(await helper.restoreHeartbeatBaselines(), [], 'the record is cleared after a restore')
         })
     })
 })

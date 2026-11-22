@@ -35,7 +35,7 @@
 'use strict';
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const path   = require('path');
 const assert = require('assert');
@@ -43,6 +43,7 @@ const { MultiValidatorHub }      = require('../helpers/multiValidatorHubHelper')
 const { startDisposableHubDb }   = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }     = require('../helpers/seededWeightSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
+const { withGiveDecimals } = require('../attestMirror/helpers/crossChainOfferDecimals');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
 const CrossSettle    = require(path.resolve(__dirname, '../../../xchain-indexer/src/actions/cross_settle/index.js'));
@@ -60,7 +61,7 @@ const BLOCK_INDEX  = 100;
 const NETWORK      = 'regtest';
 
 function crossingPair({ ltcIdx, dogeIdx, ltcGive = '90', dogeGive = '40' }) {
-    return {
+    return withGiveDecimals({
         LTC: [ makeOrder({
             action_index: ltcIdx,
             give: { coin: 'LTC',  tick: 'TOKA', amount: ltcGive },
@@ -75,12 +76,15 @@ function crossingPair({ ltcIdx, dogeIdx, ltcGive = '90', dogeGive = '40' }) {
             get_address: 'addr_doge_order_' + dogeIdx + '_on_ltc',
             block_index: BLOCK_INDEX
         }) ]
-    };
+    });
 }
 
 // Inline mock indexer context. Pure stake-weighted-quorum math runs through a
 // real IndexerUtility prototype; impure DB/ledger calls are stubbed and counted.
-function makeCtx(coin, pubkeys) {
+// The local offer rows give what the match's a leg names (tick, ownership, amount), as
+// the real rows do: the indexer settles a leg only against its own offer's give side.
+function makeCtx(coin, pubkeys, matchRow) {
+    const give = { GIVE_TICK: matchRow.a_tick, GIVE_OWNERSHIP: Number(matchRow.a_ownership || 0), GIVE_AMOUNT: String(matchRow.a_amount) };
     const calls = { getOrderInfo: 0, getSwapInfo: 0, createOrderStatus: 0, createSwapStatus: 0, recordSettlement: 0 };
     const util = Object.create(IndexerUtility.prototype);
     util.processTransactionLedgerChanges = async () => {};
@@ -91,8 +95,8 @@ function makeCtx(coin, pubkeys) {
     const indexerDb = {
         getStakeWeightsByCapability: async () => validators,
         getValidatorsByCapability:   async () => pubkeys.map((pk) => ({ pubkey: pk })),
-        getOrderInfo: async () => { calls.getOrderInfo++; return { ORDER_STATUS: 'open', SOURCE: 'srcaddr' }; },
-        getSwapInfo:  async () => { calls.getSwapInfo++;  return { SWAP_STATUS:  'open', SOURCE: 'srcaddr' }; },
+        getOrderInfo: async () => { calls.getOrderInfo++; return { ORDER_STATUS: 'open', SOURCE: 'srcaddr', ...give }; },
+        getSwapInfo:  async () => { calls.getSwapInfo++;  return { SWAP_STATUS:  'open', SOURCE: 'srcaddr', ...give }; },
         createActionIndex: async () => 9001,
         recordCrossChainOrderFill: async () => {},
         getOrderAmountsRemaining: async () => ['0'],
@@ -104,6 +108,95 @@ function makeCtx(coin, pubkeys) {
     const mapper = { createMappings: async () => {} };
     const ctx = { config: { COIN: coin, NETWORK: NETWORK }, util, mapper, decoderDb: {}, indexerDb };
     return { ctx, calls };
+}
+
+// Drive one DEX discovery round and return the finalized cross_chain_matches row (if any).
+async function driveFinalizedMatch(mvh, book) {
+    book.setBook('shared', { network: NETWORK, latestBlockIndex: 200, ordersByCoin: crossingPair({ ltcIdx: 10, dogeIdx: 20 }) });
+    const dexes = mvh.getCrossChainDexes();
+    const events = [];
+    const listeners = dexes.map((d, i) => { const fn = (ev) => events.push(Object.assign({ hubIndex: i }, ev)); d.consensus.on('match:finalized', fn); return fn; });
+    await Promise.all(dexes.map((d) => d.discoverAndMatch().catch(() => {})));
+    // Every case below reads matchRow, a PERSISTED cross_chain_matches row, and
+    // the finalize event only STARTS that write: CrossChainDexEngine subscribes
+    // to 'match:finalized' with an un-awaited `this._writeFinalizedMatch(ev)`,
+    // so an event-count poll clears while the INSERT is still in flight and the
+    // SELECT below can miss its own row. Poll the row itself on every hub,
+    // keyed by the match_id the round finalized, exactly as matchRow is keyed.
+    await waitFor(async () => {
+        if (!events.length) return { ok: false, held: 0 };
+        const matchId = events[0].matchId;
+        let held = 0;
+        for (const hub of mvh.hubs) {
+            try {
+                const r = await hub.db.doQuery(
+                    "SELECT match_id FROM cross_chain_matches WHERE match_id = ? AND status = 'finalized'",
+                    [matchId]);
+                if (r.length >= 1) held++;
+            } catch (internal) { /* a hub that cannot be read has not persisted it */ }
+        }
+        return { ok: held === mvh.hubs.length, held: held };
+    }, { timeoutMs: SETTLE_MS, intervalMs: 100 });
+    dexes.forEach((d, i) => d.consensus.removeListener('match:finalized', listeners[i]));
+    if (!events.length) return undefined;
+    const rows = await mvh.hubs[0].db.doQuery('SELECT * FROM cross_chain_matches WHERE match_id = ?', [events[0].matchId]);
+    return rows[0];
+}
+
+async function startSettleFederation(book) {
+    const mvh = new MultiValidatorHub({
+        count: COUNT, basePort: 26300,
+        startCrossChain: true, startAttestation: false,
+        crossChainIndexerUrls: { LTC: book.urlFor('shared', 'LTC'), DOGE: book.urlFor('shared', 'DOGE') }
+    });
+    await mvh.start();
+    await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
+    // regtest activates stake-weighted quorum (height 0); the DEX round needs
+    // a weight snapshot. Equal weights → quorum behaves as count-3 → ≥3 sigs.
+    const ids = mvh.identities;
+    const seed = seedWeightSnapshot(mvh, {
+        blockIndex: BLOCK_INDEX,
+        validators: [
+            { pubkey: ids[0].pubkeyHex, source: 'sA', weight: '1000' },
+            { pubkey: ids[1].pubkeyHex, source: 'sB', weight: '1000' },
+            { pubkey: ids[2].pubkeyHex, source: 'sC', weight: '1000' },
+            { pubkey: ids[3].pubkeyHex, source: 'sD', weight: '1000' },
+        ],
+    });
+    return { mvh, seed };
+}
+
+async function assertTamperedBundleRejected(matchRow, pubkeys) {
+    assert.ok(matchRow, 'no finalized match row from before()');
+    const tampered = Object.assign({}, matchRow);
+    const sigs = JSON.parse(matchRow.validator_signatures || '[]').map((s) => ({
+        pubkey: s.pubkey,
+        // Flip the last hex nibble of each sig → every signature fails to verify.
+        sig: String(s.sig).slice(0, -1) + (String(s.sig).slice(-1) === '0' ? '1' : '0')
+    }));
+    tampered.validator_signatures = JSON.stringify(sigs);
+
+    const { ctx, calls } = makeCtx(tampered.a_chain, pubkeys, tampered);
+    const handler = new CrossSettle(ctx);
+    const data = { MATCH: tampered, BLOCK_INDEX: 200 };
+
+    await handler.parse(null, data, null);
+
+    assert.notStrictEqual(data.STATUS, 'valid', 'a tampered bundle was accepted: quorum/signature check failed open');
+    assert.strictEqual(calls.recordSettlement, 0, 'a settlement was recorded for a tampered (sub-quorum) match');
+}
+
+async function assertFederatedMatchSettles(matchRow, pubkeys) {
+    assert.ok(matchRow, 'no finalized match row from before()');
+    const { ctx, calls } = makeCtx(matchRow.a_chain, pubkeys, matchRow);
+    const handler = new CrossSettle(ctx);
+    const data = { MATCH: matchRow, BLOCK_INDEX: 200 };
+
+    await handler.parse(null, data, null);
+
+    assert.strictEqual(data.STATUS, 'valid', 'cross_settle did not validate the real federated match (canonical/quorum mismatch?)');
+    assert.ok(calls.recordSettlement >= 1, 'settlement was not recorded for a valid federated match');
+    assert.ok(calls.createOrderStatus + calls.createSwapStatus >= 1, 'the settled leg was not completed');
 }
 
 describe('MultiValidatorHub: cross-chain DEX match to indexer CROSS_SETTLE e2e (C.2)', function () {
@@ -118,59 +211,12 @@ describe('MultiValidatorHub: cross-chain DEX match to indexer CROSS_SETTLE e2e (
         book = new MockCrossChainOfferBook();
         await book.start();
 
-        mvh = new MultiValidatorHub({
-            count: COUNT, basePort: 26300,
-            startCrossChain: true, startAttestation: false,
-            crossChainIndexerUrls: { LTC: book.urlFor('shared', 'LTC'), DOGE: book.urlFor('shared', 'DOGE') }
-        });
-        await mvh.start();
-        await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
-        // regtest activates stake-weighted quorum (height 0); the DEX round needs
-        // a weight snapshot. Equal weights → quorum behaves as count-3 → ≥3 sigs.
-        const ids = mvh.identities;
-        seed = seedWeightSnapshot(mvh, {
-            blockIndex: BLOCK_INDEX,
-            validators: [
-                { pubkey: ids[0].pubkeyHex, source: 'sA', weight: '1000' },
-                { pubkey: ids[1].pubkeyHex, source: 'sB', weight: '1000' },
-                { pubkey: ids[2].pubkeyHex, source: 'sC', weight: '1000' },
-                { pubkey: ids[3].pubkeyHex, source: 'sD', weight: '1000' },
-            ],
-        });
+        const started = await startSettleFederation(book);
+        mvh = started.mvh;
+        seed = started.seed;
         pubkeys = mvh.getPubkeys().map((p) => String(p).toLowerCase());
 
-        book.setBook('shared', { network: NETWORK, latestBlockIndex: 200, ordersByCoin: crossingPair({ ltcIdx: 10, dogeIdx: 20 }) });
-        const dexes = mvh.getCrossChainDexes();
-        const events = [];
-        const listeners = dexes.map((d, i) => { const fn = (ev) => events.push(Object.assign({ hubIndex: i }, ev)); d.consensus.on('match:finalized', fn); return fn; });
-        await Promise.all(dexes.map((d) => d.discoverAndMatch().catch(() => {})));
-        // Every case below reads matchRow, a PERSISTED cross_chain_matches row, and
-        // the finalize event only STARTS that write: CrossChainDexEngine subscribes
-        // to 'match:finalized' with an un-awaited `this._writeFinalizedMatch(ev)`,
-        // so an event-count poll clears while the INSERT is still in flight and the
-        // SELECT below can miss its own row. Poll the row itself on every hub,
-        // keyed by the match_id the round finalized, exactly as matchRow is keyed.
-        await waitFor(async () => {
-            if (!events.length) return { ok: false, held: 0 };
-            const matchId = events[0].matchId;
-            let held = 0;
-            for (const hub of mvh.hubs) {
-                try {
-                    const r = await hub.db.doQuery(
-                        "SELECT match_id FROM cross_chain_matches WHERE match_id = ? AND status = 'finalized'",
-                        [matchId]);
-                    if (r.length >= 1) held++;
-                } catch (_) { /* a hub that cannot be read has not persisted it */ }
-            }
-            return { ok: held === mvh.hubs.length, held: held };
-        }, { timeoutMs: SETTLE_MS, intervalMs: 100 });
-        dexes.forEach((d, i) => d.consensus.removeListener('match:finalized', listeners[i]));
-
-        if (events.length) {
-            const matchId = events[0].matchId;
-            const rows = await mvh.hubs[0].db.doQuery('SELECT * FROM cross_chain_matches WHERE match_id = ?', [matchId]);
-            matchRow = rows[0];
-        }
+        matchRow = await driveFinalizedMatch(mvh, book);
     });
 
     after(async function () {
@@ -188,35 +234,10 @@ describe('MultiValidatorHub: cross-chain DEX match to indexer CROSS_SETTLE e2e (
     });
 
     it('the federated match passes indexer signature + weighted-quorum verification and settles', async function () {
-        assert.ok(matchRow, 'no finalized match row from before()');
-        const { ctx, calls } = makeCtx(matchRow.a_chain, pubkeys);
-        const handler = new CrossSettle(ctx);
-        const data = { MATCH: matchRow, BLOCK_INDEX: 200 };
-
-        await handler.parse(null, data, null);
-
-        assert.strictEqual(data.STATUS, 'valid', 'cross_settle did not validate the real federated match (canonical/quorum mismatch?)');
-        assert.ok(calls.recordSettlement >= 1, 'settlement was not recorded for a valid federated match');
-        assert.ok(calls.createOrderStatus + calls.createSwapStatus >= 1, 'the settled leg was not completed');
+        return assertFederatedMatchSettles(matchRow, pubkeys);
     });
 
     it('a tampered signature bundle fails quorum: no settlement', async function () {
-        assert.ok(matchRow, 'no finalized match row from before()');
-        const tampered = Object.assign({}, matchRow);
-        const sigs = JSON.parse(matchRow.validator_signatures || '[]').map((s) => ({
-            pubkey: s.pubkey,
-            // Flip the last hex nibble of each sig → every signature fails to verify.
-            sig: String(s.sig).slice(0, -1) + (String(s.sig).slice(-1) === '0' ? '1' : '0')
-        }));
-        tampered.validator_signatures = JSON.stringify(sigs);
-
-        const { ctx, calls } = makeCtx(tampered.a_chain, pubkeys);
-        const handler = new CrossSettle(ctx);
-        const data = { MATCH: tampered, BLOCK_INDEX: 200 };
-
-        await handler.parse(null, data, null);
-
-        assert.notStrictEqual(data.STATUS, 'valid', 'a tampered bundle was accepted: quorum/signature check failed open');
-        assert.strictEqual(calls.recordSettlement, 0, 'a settlement was recorded for a tampered (sub-quorum) match');
+        return assertTamperedBundleRejected(matchRow, pubkeys);
     });
 });

@@ -42,7 +42,7 @@
 'use strict';
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const assert = require('assert');
 const crypto = require('crypto');
@@ -50,7 +50,8 @@ const { MultiValidatorHub, ValidatorIdentity, loadHubModule } = require('../help
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
-const { waitForMesh, waitFor } = require('../helpers/consensusWait');
+const { withGiveDecimals } = require('../attestMirror/helpers/crossChainOfferDecimals');
+const { waitForMesh, waitFor, nominalOracleRoundTime } = require('../helpers/consensusWait');
 
 const OracleConsensus = loadHubModule('src/oracle/consensus.js');
 const OracleRound     = loadHubModule('src/oracle/round.js');
@@ -63,7 +64,6 @@ const QUORUM_SIGS  = 7;          // tally > 2S/3 with equal weights => >=7 of 10
 const PEER_WAIT_MS = 60_000;     // 10-node mesh (45 connections)
 const SETTLE_MS    = 60_000;     // COMMIT propagation across 10 hubs
 const BLOCK_INDEX  = 100;
-const BLOCK_TIME   = 1700000000;
 const NETWORK      = 'regtest';
 
 // Equal-weight snapshot over the COUNT live hubs (S = COUNT*1000). No single
@@ -76,6 +76,27 @@ function equalWeights(mvh) {
 
 const ORACLE_ROUND = 100, PAIR = 'BTC/USD', PRICE = '60000';
 
+// The weight seed leaves getActiveValidatorSnapshot on its live path, an
+// indexer getactivevalidators fetch that no in-process hub can answer; serve the
+// same equal-weight set from memory so the oracle round never leaves the process.
+function seedActiveValidators(mvh, weights) {
+    const validators = weights.map((w) => ({ pubkey: w.pubkey, amount: w.weight }));
+    const restores = mvh.hubs.map((hub) => {
+        const cs = hub.capabilitySnapshot;
+        const orig = cs.getActiveValidatorSnapshot;
+        cs.getActiveValidatorSnapshot = async () => ({ validators: validators.slice(), count: validators.length, blockIndex: BLOCK_INDEX, capability: null });
+        return () => { cs.getActiveValidatorSnapshot = orig; };
+    });
+    return { restore() { restores.forEach((r) => r()); restores.length = 0; } };
+}
+
+function seedOracleWeights(mvh) {
+    const weights = equalWeights(mvh);
+    const seed = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators: weights });
+    const active = seedActiveValidators(mvh, weights);
+    return { restore() { active.restore(); seed.restore(); } };
+}
+
 async function attachOracle(mvh) {
     const stops = [];
     for (const hub of mvh.hubs) {
@@ -84,11 +105,11 @@ async function attachOracle(mvh) {
         round.setConsensus(oc);
         oc.setValidatorSet(await hub.loadValidatorSet());
         await oc.start();
-        hub._wtOracle = oc;
-        hub._wtRound  = round;
+        hub['_wtOracle'] = oc;
+        hub['_wtRound']  = round;
         stops.push(() => oc.stop && oc.stop());
     }
-    return { stop() { stops.forEach((s) => { try { s(); } catch (_) {} }); } };
+    return { stop() { stops.forEach((s) => { try { s(); } catch (internal) {} }); } };
 }
 
 function injectSubmissions(mvh) {
@@ -96,7 +117,7 @@ function injectSubmissions(mvh) {
     for (const hub of mvh.hubs) {
         const subs = new Map();
         for (const addr of addrs) subs.set(addr, { prices: [{ coinPair: PAIR, price: PRICE }] });
-        hub._wtRound.submissions.set(ORACLE_ROUND, subs);
+        hub['_wtRound'].submissions.set(ORACLE_ROUND, subs);
     }
 }
 
@@ -105,7 +126,7 @@ function callIdFrom(seed) { return crypto.createHash('sha256').update(String(see
 function dispatchRow(roundId, callId) {
     return {
         round_id: roundId, call_id: callId, phase: 'dispatch', snapshot_block: BLOCK_INDEX,
-        network: NETWORK, source_chain: 'DOGE', source_action_index: 5, source_contract_index: 1,
+        network: NETWORK, source_chain: 'DOGE', source_action_index: 5, push_generation: 0, source_contract_index: 1,
         target_chain: 'LTC', target_contract_index: 2, method: 'ping', params_json: '[]',
         gas_limit: 100000, cross_hops: 0, effective_time: 1700000000,
         result_status: null, return_payload_b64: null
@@ -133,7 +154,7 @@ async function driveDispatch(mvh, validators, seedBase) {
                 const r = await hub.db.doQuery(
                     "SELECT call_id FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch'", [callId]);
                 if (r.length >= 1) held++;
-            } catch (_) { /* a hub that cannot be read has not persisted it */ }
+            } catch (internal) { /* a hub that cannot be read has not persisted it */ }
         }
         return { ok: held === mvh.hubs.length, held: held };
     }, { timeoutMs: SETTLE_MS, intervalMs: 100 });
@@ -142,12 +163,12 @@ async function driveDispatch(mvh, validators, seedBase) {
 }
 
 function crossingPair({ ltcIdx, dogeIdx, amount = '40' }) {
-    return {
+    return withGiveDecimals({
         LTC:  [ makeOrder({ action_index: ltcIdx,  give: { coin: 'LTC',  tick: 'TOKA', amount },
                             get: { coin: 'DOGE', tick: 'TOKB', amount }, get_address: 'addr_ltc_' + ltcIdx, block_index: BLOCK_INDEX }) ],
         DOGE: [ makeOrder({ action_index: dogeIdx, give: { coin: 'DOGE', tick: 'TOKB', amount },
                             get: { coin: 'LTC',  tick: 'TOKA', amount }, get_address: 'addr_doge_' + dogeIdx, block_index: BLOCK_INDEX }) ]
-    };
+    });
 }
 
 async function driveDexRound(mvh) {
@@ -169,7 +190,7 @@ async function driveDexRound(mvh) {
                 const r = await hub.db.doQuery(
                     "SELECT match_id FROM cross_chain_matches WHERE match_id = ? AND status = 'finalized'", [matchId]);
                 if (r.length >= 1) held++;
-            } catch (_) { /* a hub that cannot be read has not persisted it */ }
+            } catch (internal) { /* a hub that cannot be read has not persisted it */ }
         }
         return { ok: held === mvh.hubs.length, held: held };
     }, { timeoutMs: SETTLE_MS, intervalMs: 100 });
@@ -202,7 +223,7 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
             mvh = new MultiValidatorHub({ count: COUNT, basePort: 25000, startAttestation: false });
             await mvh.start();
             await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
-            seed   = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators: equalWeights(mvh) });
+            seed   = seedOracleWeights(mvh);
             oracle = await attachOracle(mvh);
             injectSubmissions(mvh);
         });
@@ -215,7 +236,7 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
         });
 
         it('the weighted quorum (>=7 of 10) finalizes the identical price snapshot on EVERY hub', async function () {
-            await Promise.all(mvh.hubs.map((h) => h._wtOracle.finalizeRound(ORACLE_ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
+            await Promise.all(mvh.hubs.map((h) => h['_wtOracle'].finalizeRound(ORACLE_ROUND, BLOCK_INDEX, nominalOracleRoundTime(h['_wtOracle'], ORACLE_ROUND)).catch(() => {})));
             // Each hub's own price_snapshots row is the post-condition asserted below.
             await waitFor(async () => {
                 const counts = [];
@@ -224,7 +245,7 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
                         counts.push((await h.db.doQuery(
                             'SELECT round_number FROM price_snapshots WHERE round_number = ? AND coin_pair = ?',
                             [ORACLE_ROUND, PAIR])).length);
-                    } catch (_) { counts.push(0); }
+                    } catch (internal) { counts.push(0); }
                 }
                 return { ok: counts.length > 0 && counts.every((c) => c >= 1), counts: counts };
             }, { timeoutMs: SETTLE_MS });
@@ -245,5 +266,6 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
 });
 
 // Run the split parts in this suite's lane; the stubbed lane ignores their directory.
+require('../attestMirror/helpers/crossChainOfferDecimals').installCrossChainSeeds();
 require('./multiHubFeaturesN10.integration.test/02_cross_chain_dex_match.test');
 require('./multiHubFeaturesN10.integration.test/03_xcall_dispatch_relay.test');

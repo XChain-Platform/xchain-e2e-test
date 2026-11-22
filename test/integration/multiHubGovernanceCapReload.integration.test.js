@@ -44,7 +44,7 @@
 'use strict';
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const assert = require('assert');
 const fs     = require('fs');
@@ -52,7 +52,7 @@ const os     = require('os');
 const path   = require('path');
 const { MultiValidatorHub } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
-const { waitForMesh } = require('../helpers/consensusWait');
+const { waitForMesh, waitUntil } = require('../helpers/consensusWait');
 
 const COUNT = 3;
 // A deadline, not a settle: waitForMesh returns the moment every hub holds an open
@@ -75,13 +75,88 @@ const CAPS = {
     },
     price:          { sources: ['coingecko'], fiats: ['USD'] },
     cross_chain:    { chains: { BTC: { rpc: 'http://node:8332' } } },
-    // A REGTEST-format DOGE address ('n' prefix, 34 chars). The hub's oracle_publish
-    // self-test validates doge_address against HUB_NETWORK, so a mainnet 'D' address
-    // fails closed on the regtest hubs this harness stands up.
-    oracle_publish: { doge_address: 'nsTake195wjCuVwLHf26EsZnRjwpm2LJtb', doge_wallet: '/data/.dogecoin/wallet.dat' }
+    // A DOGE REGTEST address (version byte 0x6f, valid checksum; the registry EXPLORER
+    // literal). The hub's oracle_publish self-test decodes doge_address against
+    // HUB_NETWORK, so a mainnet 0x1e or DOGE-testnet 0x71 address fails on these hubs.
+    oracle_publish: { doge_address: 'n1AvTJLLSA1NHamHd5KFj9mRn6BEcwnVbf', doge_wallet: '/data/.dogecoin/wallet.dat' }
 };
 
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+async function assertFollowersDropRoguePropose(mvh) {
+    const proposer = mvh.hubs[0];
+    const proposerPubkey = proposer.getIdentity().getPubkeyHex();
+
+    // Simulate a malicious or pre-#4352 peer that bypasses propose()'s guard
+    // and gossips a CAPABILITY_*_MIN_STAKE proposal directly onto the mesh.
+    // GOV_PROPOSE is the governance proposal message type (validators/governance.js).
+    const rogueId = 'gov:CAPABILITY_PRICE_MIN_STAKE:rogue-' + Date.now();
+    const handledFollowers = new Set();
+    const restores = mvh.hubs.slice(1).map((hub, index) => {
+        const descriptor = Object.getOwnPropertyDescriptor(hub.governance, 'handlePropose');
+        const original = hub.governance.handlePropose;
+        hub.governance.handlePropose = async function (envelope) {
+            const result = await original.call(this, envelope);
+            if (envelope.data && envelope.data.proposalId === rogueId) handledFollowers.add(index + 1);
+            return result;
+        };
+        return () => {
+            if (descriptor) Object.defineProperty(hub.governance, 'handlePropose', descriptor);
+            else delete hub.governance.handlePropose;
+        };
+    });
+
+    proposer.peerManager.broadcast('GOV_PROPOSE', {
+        proposalId:      rogueId,
+        parameter:       'CAPABILITY_PRICE_MIN_STAKE',
+        currentValue:    OLD_MIN_STAKE,
+        proposedValue:   NEW_MIN_STAKE,
+        rationale:       'rogue inbound proposal',
+        proposerPubkey,
+        votingEnd:       new Date(Date.now() + 60_000).toISOString(),
+        activationBlock: null
+    });
+    try {
+        await waitUntil(() => ({
+            ok: handledFollowers.size === mvh.hubs.length - 1,
+            saw: [...handledFollowers]
+        }), {
+            timeoutMs: 2500,
+            what: 'every follower to finish handling the rogue governance proposal'
+        });
+    } finally {
+        restores.forEach(restore => restore());
+    }
+
+    for (const hub of mvh.hubs) {
+        const rows = await hub.db.doQuery(
+            'SELECT proposal_id FROM governance_proposals WHERE proposal_id = ? OR parameter = ?',
+            [rogueId, 'CAPABILITY_PRICE_MIN_STAKE']);
+        assert.strictEqual(rows.length, 0,
+            'follower must drop the inbound CAPABILITY_*_MIN_STAKE proposal (no row recorded)');
+    }
+
+    const stakes = mvh.hubs.map(h => String(h.capabilityRegistry.getMinStake('price')));
+    assert.ok(stakes.every(s => s === OLD_MIN_STAKE),
+        'every hub must still serve the pinned MIN_STAKE ' + OLD_MIN_STAKE + ', got ' + stakes.join(','));
+}
+
+async function assertProposerRefusesPinnedProposal(mvh) {
+    const proposer = mvh.hubs[0];
+
+    // propose() must reject before any row is written or gossiped.
+    await assert.rejects(
+        () => proposer.propose('CAPABILITY_PRICE_MIN_STAKE', OLD_MIN_STAKE, NEW_MIN_STAKE, 'raise price min stake'),
+        /#4352/,
+        'propose() must reject a pinned CAPABILITY_*_MIN_STAKE change'
+    );
+
+    for (const hub of mvh.hubs) {
+        const rows = await hub.db.doQuery(
+            'SELECT proposal_id FROM governance_proposals WHERE parameter = ?',
+            ['CAPABILITY_PRICE_MIN_STAKE']);
+        assert.strictEqual(rows.length, 0,
+            'no CAPABILITY_*_MIN_STAKE proposal row should exist after a refused propose()');
+    }
+}
 
 describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', function () {
     this.timeout(180_000);
@@ -112,8 +187,8 @@ describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', funct
             await hub.startCapabilities(capsPath);
             await hub.startAttestation();
             // Quiet the live stake poll / recheck so they can't perturb capConfig.
-            if (hub._stakePollTimer)         clearInterval(hub._stakePollTimer);
-            if (hub._capabilityRecheckTimer) clearInterval(hub._capabilityRecheckTimer);
+            if (hub['_stakePollTimer'])         clearInterval(hub['_stakePollTimer']);
+            if (hub['_capabilityRecheckTimer']) clearInterval(hub['_capabilityRecheckTimer']);
         }
 
         await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS }); // peers ARE connected
@@ -121,7 +196,7 @@ describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', funct
 
     after(async function () {
         if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
-        if (capsPath) { try { fs.unlinkSync(capsPath); } catch (_) {} }
+        if (capsPath) { try { fs.unlinkSync(capsPath); } catch (internal) {} }
         if (db) await db.stop();
     });
 
@@ -132,53 +207,10 @@ describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', funct
     });
 
     it('refuses to CREATE a CAPABILITY_*_MIN_STAKE proposal on the proposer (#4352)', async function () {
-        const proposer = mvh.hubs[0];
-
-        // propose() must reject before any row is written or gossiped.
-        await assert.rejects(
-            () => proposer.propose('CAPABILITY_PRICE_MIN_STAKE', OLD_MIN_STAKE, NEW_MIN_STAKE, 'raise price min stake'),
-            /#4352/,
-            'propose() must reject a pinned CAPABILITY_*_MIN_STAKE change'
-        );
-
-        for (const hub of mvh.hubs) {
-            const rows = await hub.db.doQuery(
-                'SELECT proposal_id FROM governance_proposals WHERE parameter = ?',
-                ['CAPABILITY_PRICE_MIN_STAKE']);
-            assert.strictEqual(rows.length, 0,
-                'no CAPABILITY_*_MIN_STAKE proposal row should exist after a refused propose()');
-        }
+        return assertProposerRefusesPinnedProposal(mvh);
     });
 
     it('every follower DROPS an inbound CAPABILITY_*_MIN_STAKE proposal; threshold stays pinned', async function () {
-        const proposer = mvh.hubs[0];
-        const proposerPubkey = proposer.getIdentity().getPubkeyHex();
-
-        // Simulate a malicious or pre-#4352 peer that bypasses propose()'s guard
-        // and gossips a CAPABILITY_*_MIN_STAKE proposal directly onto the mesh.
-        // GOV_PROPOSE is the governance proposal message type (validators/governance.js).
-        const rogueId = 'gov:CAPABILITY_PRICE_MIN_STAKE:rogue-' + Date.now();
-        proposer.peerManager.broadcast('GOV_PROPOSE', {
-            proposalId:      rogueId,
-            parameter:       'CAPABILITY_PRICE_MIN_STAKE',
-            currentValue:    OLD_MIN_STAKE,
-            proposedValue:   NEW_MIN_STAKE,
-            rationale:       'rogue inbound proposal',
-            proposerPubkey,
-            votingEnd:       new Date(Date.now() + 60_000).toISOString(),
-            activationBlock: null
-        });
-        await sleep(2500); // let the gossip reach every follower + handlePropose run
-        for (const hub of mvh.hubs) {
-            const rows = await hub.db.doQuery(
-                'SELECT proposal_id FROM governance_proposals WHERE proposal_id = ? OR parameter = ?',
-                [rogueId, 'CAPABILITY_PRICE_MIN_STAKE']);
-            assert.strictEqual(rows.length, 0,
-                'follower must drop the inbound CAPABILITY_*_MIN_STAKE proposal (no row recorded)');
-        }
-
-        const stakes = mvh.hubs.map(h => String(h.capabilityRegistry.getMinStake('price')));
-        assert.ok(stakes.every(s => s === OLD_MIN_STAKE),
-            'every hub must still serve the pinned MIN_STAKE ' + OLD_MIN_STAKE + ', got ' + stakes.join(','));
+        return assertFollowersDropRoguePropose(mvh);
     });
 });

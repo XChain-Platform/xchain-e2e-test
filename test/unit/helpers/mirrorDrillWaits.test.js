@@ -31,7 +31,7 @@ const assert = require('assert')
 const {
     APPLIED_FIELDS, STATE_HASH_FIELDS, ROLLCALL_STALL_AFTER_MS,
     until, diffRows, diffStateHashes, rewardFingerprint, firstSatisfyingBlock, wedgeVerdict, happyPathVerdict,
-} = require('../../attestMirror/mirrorDrillWaits')
+} = require('../../attestMirror/helpers/mirrorDrillWaits')
 
 describe('mirrorDrillWaits: the shared comparison layer for AT2 to AT6', () => {
 
@@ -364,7 +364,7 @@ describe('mirrorDrillWaits: the shared comparison layer for AT2 to AT6', () => {
 
 describe('captureFederationState: an unreadable probe is never counted as evidence', () => {
 
-    const { captureFederationState } = require('../../attestMirror/mirrorDrillWaits')
+    const { captureFederationState } = require('../../attestMirror/helpers/mirrorDrillWaits')
 
     // A venue shaped exactly as the helper reads it, with three live hubs.
     const venue = () => ({
@@ -438,7 +438,7 @@ describe('captureFederationState: an unreadable probe is never counted as eviden
 
 describe('queryDb opens the connection WITH a database selected', () => {
 
-    const { queryDb } = require('../../attestMirror/mirrorDrillWaits')
+    const { queryDb } = require('../../attestMirror/helpers/mirrorDrillWaits')
     const venue = { hubDb: { host: 'h', port: '3306', user: 'u', pass: 'p' } }
 
     // THE WHOLE DEFECT THIS GUARDS. The helper it replaces took a database name,

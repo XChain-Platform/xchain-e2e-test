@@ -22,7 +22,7 @@ const REPLACE = `    assert.strictEqual(replayDigest.slice(0, -1) + (replayDiges
 function readReport(reportFile) {
     try {
         return JSON.parse(fs.readFileSync(reportFile, 'utf8'))
-    } catch (_) {
+    } catch (internal) {
         return null
     }
 }
@@ -37,7 +37,7 @@ function runDriver() {
         maxBuffer: 64 * 1024 * 1024,
     })
     const report = readReport(reportFile)
-    try { fs.unlinkSync(reportFile) } catch (_) {}
+    try { fs.unlinkSync(reportFile) } catch (internal) {}
     return { child, report }
 }
 

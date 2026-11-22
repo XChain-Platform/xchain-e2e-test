@@ -5,20 +5,47 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 const assert = require('assert')
+const net = require('net')
 const sinon = require('sinon')
 const XChainIndexerConnector = require('../../../src/XChainIndexerConnector')
-const { OracleBatchReplayNode } = require('../../helpers/oracleBatchReplay')
+const { OracleBatchReplayNode, processListening } = require('../../helpers/oracleBatchReplay')
 const { CANONICAL_REORG_BUFFER } = require('../../helpers/oracleBatchVenue')
+const { pickFreePorts } = require('../../helpers/oracle_batch_replay/port_allocation')
 
 function replayNode() {
     const node = new OracleBatchReplayNode({ label: 'unit' })
-    node._live = {
+    node['_live'] = {
         btcOracle: { host: null, port: null, apiKey: null, url: null }
     }
-    node._btcOracleProof = { coin: 'BTC', height: 120 }
-    node._priceMinStake = '10'
+    node['_btcOracleProof'] = { coin: 'BTC', height: 120 }
+    node['_priceMinStake'] = '10'
     return node
 }
+
+describe('oracleBatchReplay hub listener readiness', function () {
+    it('reports ready only while the child port is accepting connections', async function () {
+        const server = net.createServer()
+        const [port] = await pickFreePorts(1, 25000)
+        await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve))
+
+        try {
+            assert.deepStrictEqual(await processListening({ exitCode: null, signalCode: null }, '127.0.0.1', port),
+                { ok: true })
+        } finally {
+            await new Promise((resolve) => server.close(resolve))
+        }
+
+        assert.deepStrictEqual(await processListening({ exitCode: null, signalCode: null }, '127.0.0.1', port),
+            { ok: false })
+    })
+
+    it('stops waiting when the child exited by status or signal', async function () {
+        assert.deepStrictEqual(await processListening({ exitCode: 1, signalCode: null }, '127.0.0.1', 1),
+            { ok: false, dead: true })
+        assert.deepStrictEqual(await processListening({ exitCode: null, signalCode: 'SIGKILL' }, '127.0.0.1', 1),
+            { ok: false, dead: true })
+    })
+})
 
 describe('oracleBatchReplay Bitcoin oracle diagnostics', function () {
     let sandbox
@@ -38,7 +65,7 @@ describe('oracleBatchReplay Bitcoin oracle diagnostics', function () {
         const warn = sandbox.stub(console, 'warn')
         const node = replayNode()
 
-        await node._probeBtcOracle([{ snapshotBlock: anchor }])
+        await node['_probeBtcOracle']([{ snapshotBlock: anchor }])
 
         assert.deepStrictEqual(node.btcOracleEvidence(), {
             coin: 'BTC',
@@ -75,7 +102,7 @@ describe('oracleBatchReplay Bitcoin oracle diagnostics', function () {
         const warn = sandbox.stub(console, 'warn')
         const node = replayNode()
 
-        await node._probeBtcOracle([{ snapshotBlock: 100 }])
+        await node['_probeBtcOracle']([{ snapshotBlock: 100 }])
 
         assert.strictEqual(node.btcOracleEvidence().priceWeightSetAtAnchor, 3)
         assert.strictEqual(node.btcOracleEvidence().priceWeightSetAtBuried, 3)

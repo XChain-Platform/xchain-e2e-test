@@ -43,11 +43,13 @@
  ********************************************************************/
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
-const nativeFeeHelper = require('../helpers/nativeFeeHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const envelopeHelper = require('../helpers/envelopeHelper')
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
 const { NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
+
+// bitcoinjs-lib 7 returns output scripts as Uint8Array, which has no equals().
+function sameScript(a, b){ return Buffer.from(a).equals(Buffer.from(b)) }
 
 // The synthetic round that carries the mid-flight requirement change. Registered
 // in SEED_SENTINEL_ROUNDS so clearSeedSentinels can retract it: a seeded round
@@ -67,6 +69,7 @@ const CHEAP_COIN_USD = '1000.00000000'
 const GAP_BLOCKS = 6
 
 let FEE_DEST = null
+let nativeFeeHelper = null
 
 async function q(sql, params){
     const conn = await indexerDatabase.getConnection()
@@ -130,6 +133,7 @@ async function setupFeeDestination(mochaContext){
 
     // The fee destination has to be the one the decoder and indexer were
     // configured with, so it is discovered rather than assumed.
+    nativeFeeHelper = require('../helpers/nativeFeeHelper')
     const mode = await nativeFeeHelper.discoverFeeMode()
     if (!mode.enabled) mochaContext.skip()                          // a gas-only venue cannot carry this
     assert(mode.destination, 'native fees enabled but no FEE_DESTINATION resolvable')
@@ -167,13 +171,13 @@ async function seedFeeSpike(commitHeight){
 async function publishSplit(pair){
     await nodeConnector.broadcastTx(pair.commitHex)
     await regtestMinerConnector.generateBlocks(1)
-    const commitHeight = await nodeConnector.getBlockCount()
+    const commitHeight = await envelopeHelper.confirmingHeight(nodeConnector, pair.commitTxid)
 
     await regtestMinerConnector.generateBlocks(GAP_BLOCKS)
 
     await nodeConnector.broadcastTx(pair.revealHex)
     await regtestMinerConnector.generateBlocks(1)
-    const revealHeight = await nodeConnector.getBlockCount()
+    const revealHeight = await envelopeHelper.confirmingHeight(nodeConnector, pair.revealTxid)
 
     assert(revealHeight - commitHeight >= GAP_BLOCKS,
         'the reveal must land well after the commit (' + commitHeight + ' -> ' + revealHeight + ')')
@@ -209,8 +213,8 @@ describe('Taproot Envelope fee lifecycle across a block gap (§3.5)', function (
         // transactions themselves, before either is broadcast, because this is the
         // structural claim the rest of the test depends on.
         const feeScript = require('bitcoinjs-lib').address.toOutputScript(FEE_DEST, NETWORK_OBJECT)
-        const onCommit = pair.commitTx.outs.filter(o => o.script.equals(feeScript))
-        const onReveal = pair.revealTx.outs.filter(o => o.script.equals(feeScript))
+        const onCommit = pair.commitTx.outs.filter(o => sameScript(o.script, feeScript))
+        const onReveal = pair.revealTx.outs.filter(o => sameScript(o.script, feeScript))
         assert.strictEqual(onCommit.length, 1, 'the native fee output must ride the COMMIT (§3.5)')
         assert.strictEqual(Number(onCommit[0].value), nativeFeeHelper.FLAT_FEE_SATS)
         assert.strictEqual(onReveal.length, 0,
@@ -258,7 +262,7 @@ describe('Taproot Envelope fee lifecycle across a block gap (§3.5)', function (
         })
 
         const feeScript = require('bitcoinjs-lib').address.toOutputScript(FEE_DEST, NETWORK_OBJECT)
-        assert.strictEqual(pair.commitTx.outs.filter(o => o.script.equals(feeScript)).length, 0,
+        assert.strictEqual(pair.commitTx.outs.filter(o => sameScript(o.script, feeScript)).length, 0,
             'this case requires a commit with no fee output')
 
         const { revealHeight } = await publishSplit(pair)
@@ -301,7 +305,7 @@ describe('Taproot Envelope fee lifecycle across a block gap (§3.5)', function (
         try {
             await nodeConnector.broadcastTx(pair.commitHex)
             await regtestMinerConnector.generateBlocks(1)
-            commitHeight = await nodeConnector.getBlockCount()
+            commitHeight = await envelopeHelper.confirmingHeight(nodeConnector, pair.commitTxid)
 
             // The requirement moves, between the two halves.
             // Seeded as an ADDITIONAL row at a higher round rather than a replacement:
@@ -314,7 +318,7 @@ describe('Taproot Envelope fee lifecycle across a block gap (§3.5)', function (
             await regtestMinerConnector.generateBlocks(GAP_BLOCKS)
             await nodeConnector.broadcastTx(pair.revealHex)
             await regtestMinerConnector.generateBlocks(1)
-            const revealHeight = await nodeConnector.getBlockCount()
+            const revealHeight = await envelopeHelper.confirmingHeight(nodeConnector, pair.revealTxid)
             assert(revealHeight - commitHeight >= GAP_BLOCKS, 'the reveal must land well after the commit')
 
             const rows = await waitForActionRow(pair.revealTxid)

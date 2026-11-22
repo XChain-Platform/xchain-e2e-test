@@ -55,7 +55,7 @@ function silenceDexValidator(hub) {
 // helper (hub._wtOracle) or the harness's startOracle: true toggle, which
 // leaves it on hub.oracleConsensus.
 function silenceOracleValidator(hub) {
-    const oc = hub._wtOracle || hub.oracleConsensus;
+    const oc = hub['_wtOracle'] || hub.oracleConsensus;
     if (!oc) throw new Error('silenceOracleValidator: hub has no oracle consensus; attachOracle() or start the harness with startOracle: true first');
     const orig = oc.handleMessage;
     oc.handleMessage = () => {};

@@ -125,7 +125,7 @@ function legacyEraBlock (armHeight) {
     return armHeight - 1
 }
 
-// The nine watermark-keyed reasons in BLOCK-LOOP order, which is the order BF1's
+// The ten watermark-keyed reasons in BLOCK-LOOP order, which is the order BF1's
 // enumeration must observe as each member's grace is raised in turn. `/status` is
 // the only source of the order at run time; this is the expected sequence, and the
 // unit tier pins its SET equal to the family derived from the indexer's source.
@@ -136,6 +136,7 @@ const FAMILY_REASONS_LOOP_ORDER = Object.freeze([
     'call_sync_barrier',
     'bridge_sync_barrier',
     'policy_sync_barrier',
+    'list_share_sync_barrier',
     'anchor_attest_barrier',
     'attest_response_sync_barrier',
     'snapshot_sync_barrier',

@@ -35,8 +35,8 @@ global.utxoTrackerConnector = {
 }
 global.encoderConnector = { createTx: async () => {} }
 
-const cryptoHelper = require('../cryptoHelper')
-const transactionHelper = require('../transactionHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 
 const mockMariadb = require('../integration/fixtures/mockMariadb')
 const Database = require('../../src/db')
@@ -190,32 +190,28 @@ describe('Boundary: Error Propagation', function () {
             const { db, mockConn } = createDb()
             mockConn.query.rejects(new Error('Table does not exist'))
 
-            const result = await db.checkIssue({ tick: 'TOK' })
-            assert.strictEqual(result, null)
+            await assert.rejects(db.checkIssue({ tick: 'TOK' }), /Table does not exist/)
         })
 
         it('checkSend returns null on query error', async function () {
             const { db, mockConn } = createDb()
             mockConn.query.rejects(new Error('Unknown column'))
 
-            const result = await db.checkSend({ source: 'addr1' })
-            assert.strictEqual(result, null)
+            await assert.rejects(db.checkSend({ source: 'addr1' }), /Unknown column/)
         })
 
         it('checkCredit returns null on query error', async function () {
             const { db, mockConn } = createDb()
             mockConn.query.rejects(new Error('Deadlock detected'))
 
-            const result = await db.checkCredit({ tick: 'TOK' })
-            assert.strictEqual(result, null)
+            await assert.rejects(db.checkCredit({ tick: 'TOK' }), /Deadlock detected/)
         })
 
         it('checkDebit returns null on query error', async function () {
             const { db, mockConn } = createDb()
             mockConn.query.rejects(new Error('Lock timeout'))
 
-            const result = await db.checkDebit({ tick: 'TOK' })
-            assert.strictEqual(result, null)
+            await assert.rejects(db.checkDebit({ tick: 'TOK' }), /Lock timeout/)
         })
     })
 })

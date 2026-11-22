@@ -37,7 +37,7 @@
 const assert = require('assert')
 const path = require('path')
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const { gracedBarrierReason } = require('../../helpers/attestMirrorVenue')
 const fixture = require('../helpers/barrierFamilyFixture')
@@ -70,6 +70,7 @@ describe('BF1: the RED baseline, and the family enumerated from the running node
     before(async function () {
         const up = await drive.bootFamilyVenue({
             label: 'bf1', repoRoot: BUILD_ROOT, indexerGraces: { [WALKER]: LADDER },
+            venue: { freshIndexers: true },
         })
         Object.assign(ctx, up, { coin: up.evidence.coinCode })
         console.log('BF1 ladder on indexer ' + WALKER + ': ' + JSON.stringify(LADDER))
@@ -80,7 +81,7 @@ describe('BF1: the RED baseline, and the family enumerated from the running node
         // held baseline and the walker block must not hand the next leg a paused chain.
         await drive.releaseChain(ctx.btc)
         if (!ctx.venue) return
-        try { ctx.venue.releaseMirrorTable(WALKER, 'capability_snapshots') } catch (_) { /* never armed */ }
+        try { ctx.venue.releaseMirrorTable(WALKER, 'capability_snapshots') } catch (internal) { /* never armed */ }
         await ctx.venue.stop()
     })
 
@@ -105,9 +106,9 @@ describe('BF1: the RED baseline, and the family enumerated from the running node
     })
 })
 
-// One inert row per member table, plus the capability snapshot the match and call rows
-// point at. The snapshot is withheld from the WALKER first, so the ninth member holds
-// there and nowhere else; the inert node receives it and stays clear of that member.
+// One inert row per member table, plus the stake-derived capability snapshots the match
+// and call rows need. They are withheld from the WALKER first, so the ninth member holds
+// there and nowhere else; the inert node receives them and wedges at the red block.
 //
 // THE CHAIN IS HELD STILL BEFORE ANYTHING IS ARMED. The snapshot member is content-keyed
 // and runs on EVERY block, so once the rows are seeded and the snapshot withheld, the first
@@ -127,16 +128,16 @@ async function seedFamily (ctx) {
     ctx.markerAddress = held.before
     const tip = held.tip
     const now = Math.floor(Date.now() / 1000)
-    // Snapshot at the drill height, not the reached tip: a fresh node's stake re-derivation rejects a synthetic capability row at a reached height.
+    // Stake-derived snapshot coverage lets the inert node reach the red block instead of wedging one block early on the snapshot barrier.
     const spec = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: now, snapshotBlock: tip + 1, tag: 'bf1|' + tip }
     ctx.venue.withholdMirrorTable(WALKER, 'capability_snapshots')
-    await drive.seedMirrors(ctx.venue, [rows.inertRow('capability_snapshots', spec)])
+    const snapshots = await drive.seedSnapshotsFromStake(ctx.venue, INERT, rows.familySeedRows(spec), tip)
     await drive.seedMirrors(ctx.venue, rows.familySeedRows(spec))
     for (const t of SEED_TABLES) {
         await drive.waitForMirrorRows(ctx.venue, INERT, t, 1)
         await drive.waitForMirrorRows(ctx.venue, WALKER, t, 1)
     }
-    await drive.waitForMirrorRows(ctx.venue, INERT, 'capability_snapshots', 1)
+    await drive.waitForMirrorRows(ctx.venue, INERT, 'capability_snapshots', snapshots.length)
     await drive.assertChainHeld(ctx.btc, tip, 'the BTC chain, across the seed,')
     ctx.seedTime = now
     console.log('BF1 seeded one finalized row per member at effective_time ' + now + ', snapshot_block ' + tip)
@@ -222,12 +223,23 @@ function assertRedBaseline (ctx) {
 // reason a rung deferred under stays on `/status` for one barrier cycle after the rung opens, and
 // reads `wedged` there (rail 2026-09-17, oracle), which is the node's health verdict on a stale
 // label, not the future-stamp wait this leg enumerates.
+
+// The walker names only members this leg can hold: the eight the ladder graces and the withheld
+// snapshot. list_share has no grace and runs only once mirror admission is armed, which this
+// leg keeps inert, so it is never reached.
+function reachableReasons () {
+    const reachable = new Set(rows.ladderReasons().concat(['snapshot_sync_barrier']))
+    return fixture.FAMILY_REASONS_LOOP_ORDER.filter((r) => reachable.has(r))
+}
+
 function assertEnumeration (ctx) {
     const seen = rows.distinctRuns(ctx.walk.map((x) => x.stallReason))
-    assert.deepStrictEqual(seen, fixture.FAMILY_REASONS_LOOP_ORDER.slice(),
-        'the walker named ' + JSON.stringify(seen) + ' rather than the nine reasons in loop order')
+    const expected = reachableReasons()
+    assert.strictEqual(expected.length, 9, 'the reachable members are ' + JSON.stringify(expected) + ', not nine')
+    assert.deepStrictEqual(seen, expected,
+        'the walker named ' + JSON.stringify(seen) + ' rather than the nine reachable reasons in loop order')
     assert.ok(rows.inLoopOrder(seen), 'the sequence is not in block-loop order')
-    assert.strictEqual(new Set(fixture.mirrorBarrierReasons()).size, 9, 'the indexer source no longer carries nine reasons')
+    assert.strictEqual(new Set(fixture.mirrorBarrierReasons()).size, 10, 'the indexer source no longer carries ten reasons')
     const ladderByReason = {}
     for (const key of Object.keys(LADDER)) ladderByReason[gracedBarrierReason(key)] = LADDER[key]
     const faults = rows.enumerationClassFaults(ctx.walk, ladderByReason, ctx.blocks.walk.blockTime, UNCLOCKED_REASONS)

@@ -69,8 +69,8 @@
 'use strict';
 
 const { expect } = require('chai');
-const cryptoHelper = require('../../cryptoHelper');
-const { makeSdk, fundedGasAddress, mine, submitOpts, uniqueTick } = require('../sdkHelper');
+const cryptoHelper = require('../../helpers/core/cryptoHelper');
+const { makeSdk, fundedGasAddress, mine, submitOpts, uniqueTick } = require('../helpers/sdkHelper');
 const { snapshotWindow, replayWindowInOrder, unconfirmedAncestors, placeBlockInOrder } = require('../helpers/rawHexBlocks');
 const { chunkHelper } = require('xchain-sdk');
 const {

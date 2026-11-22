@@ -23,6 +23,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { validatePin } = require('./suite-title-map');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const SUITE_TITLE_PIN = 'bin/pins/at1-suite-titles.json';
@@ -52,7 +53,6 @@ function buildIdentity() {
     const suiteTitlePin = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, SUITE_TITLE_PIN), 'utf8'));
     const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
     const expectedScripts = Object.keys(pkg.scripts || {}).filter((name) => name.startsWith('test'));
-    const { validatePin } = require('./suite-title-map');
     const suiteProblems = validatePin(suiteTitlePin, expectedScripts);
     if (suiteProblems.length) throw new Error(`invalid suite-title pin: ${suiteProblems.join('; ')}`);
     return {

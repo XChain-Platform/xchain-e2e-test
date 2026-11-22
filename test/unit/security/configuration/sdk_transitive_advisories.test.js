@@ -17,13 +17,13 @@ const path   = require('path');
 // Third file in this directory, and deliberately separate from both of its
 // neighbours. dependency-advisories.test.js is byte-identical across every
 // sibling repo that carries it, so nothing repo-specific may be added there,
-// and sibling-tree-advisories.test.js asserts that its own floor list matches
+// and sibling_tree_advisories.test.js asserts that its own floor list matches
 // that shared file exactly. The advisories guarded here arrive through the
 // staged xchain-sdk rather than through anything this repo declares, so they
 // belong in neither list.
 //
-// Two of the three are closed; the third cannot be, and saying so precisely is
-// most of the point of this file.
+// All three are closed. The first two remain pinned, while the third is guarded
+// as an empty runtime residual so a future dependency cannot reintroduce it.
 const root = path.resolve(__dirname, '..', '..', '..', '..');
 const pkg  = require(path.join(root, 'package.json'));
 const lock = require(path.join(root, 'package-lock.json'));
@@ -32,12 +32,8 @@ const lock = require(path.join(root, 'package-lock.json'));
 // @modelcontextprotocol/sdk, which xchain-sdk declares. Neither is a
 // dependency of this repo, so both are held down by overrides.
 //
-// @hono/node-server <1.19.15 (GHSA-frvp-7c67-39w9): serve-static resolves
-// an encoded backslash (%5C) as a path separator on Windows, so a request
-// escapes the served root. The platform serves nothing from Windows, which
-// is why this sat as a residual rather than a hotfix, but the fix is a
-// patch release inside the range @modelcontextprotocol/sdk already asks
-// for (^1.19.9), so there is no reason to keep carrying it.
+// @hono/node-server <2.1.8 has multiple serve-static path handling flaws.
+// @modelcontextprotocol/sdk already allows the patched 2.x series.
 //
 // hono <4.12.34 carries four at once: ReDoS in the CORS middleware via
 // Access-Control-Request-Headers (GHSA-8j4g-w8fx-2239), memo() retaining
@@ -53,7 +49,7 @@ const lock = require(path.join(root, 'package-lock.json'));
 // package-lock.json and installed, so assert the resolved version rather
 // than trusting the pin.
 const advisories = [
-    { name: '@hono/node-server', minSafe: [1, 19, 15], majorSeries: 1 },
+    { name: '@hono/node-server', minSafe: [2, 1, 8], majorSeries: 2 },
     { name: 'hono',              minSafe: [4, 12, 34], majorSeries: 4 }
 ];
 
@@ -121,29 +117,12 @@ function advisoryChecks() {
     });
 }
 
-// The residual, and the reason this file exists rather than another line in
-// the shared list.
-//
-// GHSA-848j-6mx2-7j84 (elliptic, low): the vulnerable range is every
-// published version up to and including 6.6.1, which is also the newest
-// release upstream has ever cut. There is no patched elliptic to move to,
-// so no pin, override or lockfile splice can clear it. The only remediation
-// npm offers is bitcoinjs-message@1.0.0, a downgrade across a major that
-// rewrites the message-signing API xchain-sdk's auth path calls, so taking
-// it would break signing to silence a low-severity finding on a dependency
-// the platform does not use for consensus signatures.
-//
-// What can be guarded is the shape of the residual: exactly one runtime
-// path, and no second one appearing later. If a new runtime dependency ever
-// pulls elliptic in by another route, this fails and the acceptance above
-// has to be re-argued rather than silently extended. Dev-only reachers
-// (browserify's crypto-browserify, via browserify-sign and create-ecdh) are
-// excluded because `npm audit --omit=dev` is the gate this documents.
-const RESIDUAL_CHAIN = [
-    { child: 'elliptic',          expectedParents: ['secp256k1'] },
-    { child: 'secp256k1',         expectedParents: ['bitcoinjs-message'] },
-    { child: 'bitcoinjs-message', expectedParents: ['xchain-sdk'] }
-];
+// GHSA-848j-6mx2-7j84 (elliptic, low) has no patched release, but the staged
+// SDK no longer depends on bitcoinjs-message or secp256k1. Nothing reaches
+// elliptic at runtime now, so the accepted production residual is empty.
+// Keep that exact shape recorded rather than dropping the check: a future
+// runtime dependency on elliptic must fail this gate and be reviewed.
+const ACCEPTED_RUNTIME_RESIDUAL = [];
 
 // Every non-dev lockfile entry declaring `child`, named the way npm audit
 // names it: the package name for a node_modules entry, the lockfile key for
@@ -160,32 +139,10 @@ function runtimeParentsOf(child) {
 }
 
 function residualChecks() {
-    RESIDUAL_CHAIN.forEach(function (link) {
-        it(`ADV-14: ${link.child} is reached at runtime only through ${link.expectedParents.join(', ')}`, function () {
-            if (!lockEntries(link.child).length && !lock.packages[link.child]) return this.skip();
-
-            assert.deepStrictEqual(runtimeParentsOf(link.child), link.expectedParents.slice().sort(),
-                `the accepted elliptic residual changed shape: ${link.child} is now pulled in by a different `
-                + 'set of runtime packages than the one this file documents. Re-read GHSA-848j-6mx2-7j84 and '
-                + 'decide the acceptance again rather than widening it by default.');
-        });
-    });
-
-    // The acceptance rests on elliptic having no patched release. That is a
-    // fact about upstream, not about this tree, and it will stop being true one
-    // day. Pinning the tree at the top of the vulnerable range means the day a
-    // 6.6.2 (or a 7.x) ships carrying the fix, an ordinary bump clears the
-    // finding with no further argument, and a tree that drifted BELOW 6.6.1 in
-    // the meantime is a regression this catches now rather than at the bump.
-    it('ADV-15: elliptic sits at the top of the vulnerable range, not somewhere inside it', function () {
-        const entries = lockEntries('elliptic');
-        if (!entries.length) return this.skip();
-
-        entries.forEach(([key, entry]) => {
-            assert.ok(cmp(parse(entry.version), [6, 6, 1]) >= 0,
-                `${key} is elliptic@${entry.version}; 6.6.1 is the newest published release and the `
-                + 'floor this tree holds while GHSA-848j-6mx2-7j84 has no fix');
-        });
+    it('ADV-14: elliptic has no accepted runtime reachers', function () {
+        assert.deepStrictEqual(runtimeParentsOf('elliptic'), ACCEPTED_RUNTIME_RESIDUAL,
+            'the accepted elliptic residual changed from empty. Re-read GHSA-848j-6mx2-7j84 and '
+            + 'decide the acceptance again rather than widening it by default.');
     });
 }
 

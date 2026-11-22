@@ -52,12 +52,14 @@
 #     ../xchain-hub and ../xchain-indexer for the same reason.
 # Full sweeps skip no ci.yml work; fast runs name every deferred tier.
 #
-# The last two tiers are LOCAL-ONLY additions rather than transcriptions, and
-# are marked as such: they are the part of `npm run ci` (the command this gate
-# ran before ci:full) that no GitHub job runs, because GitHub would need five
-# more sibling deploy keys to run it. Replacing the gate command without them
-# would have quietly shrunk the gate. They cost seconds plus the parity
-# suites; ci:live is not repeated here, it is the live-tier job above.
+# The last eight tiers are LOCAL-ONLY additions rather than transcriptions, and
+# are marked as such. Six lint tiers run their checkers over the real tree, so a
+# fast run grades them even when it selects none of their unit files. The
+# cross-repo parity suites are work no GitHub job runs, because GitHub would
+# need five more sibling deploy keys to run it. They cost seconds plus the
+# parity suites; ci:live is not repeated here, it is the live-tier job above.
+# The protocol size-limit guard also needs the encoder, decoder, vm and wallet
+# siblings that GitHub CI does not check out.
 #
 # All tiers run even after one fails (GitHub reports every red job, so this
 # reports every red tier); the exit code is red if any tier was.
@@ -69,16 +71,20 @@ SELF="$(pwd)"
 SIB="$(cd .. && pwd)"
 
 FAILED=""
+# >>> ci-tier timer (generated block; re-run the tier wirer to update) >>>
 run_tier() {
+  if [ "${CI_TIER:-full}" = "fast" ] && [ -n "${FAILED:-}" ]; then echo; echo "ci:full ===== $1 NOT RUN (a push stops at its first red tier, its verdict already red; the full sweep runs it) ====="; return 0; fi  # ci-tier stop (generated)
   local name="$1"; shift
+  local __ci_tier_t0=$SECONDS
   echo; echo "ci:full ===== $name ====="
   if "$@"; then
-    echo "ci:full ----- $name PASS"
+    echo "ci:full ----- $name PASS ($(( SECONDS - __ci_tier_t0 ))s)"
   else
     FAILED="$FAILED [$name]"
-    echo "ci:full ----- $name FAIL"
+    echo "ci:full ----- $name FAIL ($(( SECONDS - __ci_tier_t0 ))s)"
   fi
 }
+# <<< ci-tier timer <<<
 fast_defer() {
   local name="$1"
   DEFERRED="${DEFERRED:-} [$name]"
@@ -158,7 +164,7 @@ else
 fi
 
 # --- job: live-tier --------------------------------------------------------
-# Full runs call scripts/run-live-tier.js over test/integration/live-tier.json.
+# Full runs call bin/run-live-tier.js over test/integration/live-tier.json.
 # HUB_DB_* stays unset so the fixture uses Docker instead of external credentials.
 if [ "${CI_TIER:-}" = "fast" ]; then
   fast_defer "live-tier (ci:live)"
@@ -187,9 +193,19 @@ run_tier "drift: coin consensus-pin conformance" node -e '
 # constants out of five more siblings, which would be five more deploy-key
 # secrets. The venue has all five, so the gate keeps covering them.
 run_tier "local: sleep-flake lint (lint:sleep-flake)" npm run lint:sleep-flake
+run_tier "local: request-row-wait lint (lint:request-row-wait)" npm run lint:request-row-wait
+run_tier "local: barrier fresh-indexers lint (lint:barrier-fresh-indexers)" npm run lint:barrier-fresh-indexers
+# Scan the real attest-mirror tree: the checker's unit file reads only temp fixtures.
+run_tier "local: mirror-pendings lint (lint:mirror-pendings)" npm run lint:mirror-pendings
+# A fast run may not select the unit files that also scan the real tree, so these gates run directly.
+run_tier "local: stake-teardown lint (lint:stake-teardown)" npm run lint:stake-teardown
+run_tier "local: wait-swallow lint (lint:wait-swallow)" npm run lint:wait-swallow
 run_tier "local: cross-repo parity suites (siblings required)" \
   env XCHAIN_REQUIRE_SIBLINGS=1 \
   ./node_modules/.bin/mocha --no-config --timeout 30000 --exit 'test/integration/parity/**/*.test.js'
+run_tier "local: protocol size-limit drift guard (siblings required)" \
+  env XCHAIN_REQUIRE_SIBLINGS=1 XCHAIN_SIZE_CAPS_ONLY=1 \
+  ./node_modules/.bin/mocha --no-config --timeout 30000 --exit 'test/regression/protocol-size-limits.regression.js'
 
 echo
 if [ "${CI_TIER:-}" = "fast" ]; then

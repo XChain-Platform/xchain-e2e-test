@@ -40,12 +40,12 @@ const Module = require('module')
 
 const mariadbPath = require.resolve('mariadb')
 
-if (!require.cache[mariadbPath] || !require.cache[mariadbPath]._isMock) {
+if (!require.cache[mariadbPath] || !require.cache[mariadbPath]['_isMock']) {
     const mockMariadb = {
         // Marked on the exports too, not just the module record, so a live-DB suite
         // can assert it did NOT get the mock: require('mariadb')._isMock is the
         // difference between "queried an empty database" and "queried a stub".
-        _isMock: true,
+        ['_isMock']: true,
         createPool: sinon.stub().returns({
             getConnection: sinon.stub().resolves({
                 query: sinon.stub().resolves([]),
@@ -57,7 +57,7 @@ if (!require.cache[mariadbPath] || !require.cache[mariadbPath]._isMock) {
     const mariadbModule = new Module(mariadbPath, module)
     mariadbModule.exports = mockMariadb
     mariadbModule.loaded = true
-    mariadbModule._isMock = true
+    mariadbModule['_isMock'] = true
     require.cache[mariadbPath] = mariadbModule
 }
 

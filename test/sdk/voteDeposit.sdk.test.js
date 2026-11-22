@@ -27,7 +27,7 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, mine, uniqueTick, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mine, uniqueTick, submitOpts } = require('./helpers/sdkHelper');
 
 // BTC regtest protocol treasury (src/coins/BTC.js regtest.addresses.DONATE1).
 const DONATE1 = 'muYHF9MMnK6Nmd5zx7EBtqEYZdaf2Xy8JX';

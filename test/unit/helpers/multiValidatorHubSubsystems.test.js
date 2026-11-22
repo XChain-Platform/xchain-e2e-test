@@ -34,28 +34,28 @@ const { MultiValidatorHub } = require('../../helpers/multiValidatorHubHelper.js'
 // the teardown path (registerValidator, close). No DB, no sockets.
 function makeFakeHubFactory(calls) {
     return function fakeHubFactory() {
-        const oracle = { _kind: 'OracleRound' };
-        const reorgHandler = { _kind: 'ReorgHandler' };
-        const governance = { _kind: 'Governance' };
+        const oracle = { ['_kind']: 'OracleRound' };
+        const reorgHandler = { ['_kind']: 'ReorgHandler' };
+        const governance = { ['_kind']: 'Governance' };
         const hub = {
             oracle: null,
             oracleConsensus: null,
             reorgHandler: null,
             governance: null,
-            _log: [],
-            async start()            { this._log.push('start'); },
-            async startP2P()         { this._log.push('startP2P'); },
-            async startConsensus()   { this._log.push('startConsensus'); },
-            async startOracle()      { this._log.push('startOracle'); this.oracle = oracle; this.oracleConsensus = { _kind: 'OracleConsensus' }; },
-            async startCrossChain()  { this._log.push('startCrossChain'); },
-            async startReorgHandler(){ this._log.push('startReorgHandler'); this.reorgHandler = reorgHandler; },
-            async startGovernance()  { this._log.push('startGovernance'); this.governance = governance; },
-            async startAttestation() { this._log.push('startAttestation'); },
-            async startCapabilities(cfg){ this._log.push('startCapabilities:' + String(cfg)); },
+            ['_log']: [],
+            async start()            { this['_log'].push('start'); },
+            async startP2P()         { this['_log'].push('startP2P'); },
+            async startConsensus()   { this['_log'].push('startConsensus'); },
+            async startOracle()      { this['_log'].push('startOracle'); this.oracle = oracle; this.oracleConsensus = { ['_kind']: 'OracleConsensus' }; },
+            async startCrossChain()  { this['_log'].push('startCrossChain'); },
+            async startReorgHandler(){ this['_log'].push('startReorgHandler'); this.reorgHandler = reorgHandler; },
+            async startGovernance()  { this['_log'].push('startGovernance'); this.governance = governance; },
+            async startAttestation() { this['_log'].push('startAttestation'); },
+            async startCapabilities(cfg){ this['_log'].push('startCapabilities:' + String(cfg)); },
             getOracle()              { return this.oracle; },
             getCrossChainDex()       { return null; },
             async registerValidator(){ /* mesh bootstrap, no-op */ },
-            async close()            { this._log.push('close'); }
+            async close()            { this['_log'].push('close'); }
         };
         calls.push(hub);
         return hub;
@@ -103,15 +103,15 @@ describe('MultiValidatorHub consensus-subsystem bring-up', function () {
         try {
             assert.strictEqual(calls.length, 2, 'one fake hub built per validator');
             for (const hub of calls) {
-                assert.deepStrictEqual(hub._log, [
+                assert.deepStrictEqual(hub['_log'], [
                     'start', 'startP2P', 'startConsensus',
                     'startOracle', 'startReorgHandler', 'startGovernance'
                 ], 'subsystems fired in canonical boot order, attestation skipped');
             }
             // Getters surface the live subsystem objects per hub.
-            assert.deepStrictEqual(mvh.getOracles().map(o => o && o._kind), ['OracleRound', 'OracleRound']);
-            assert.deepStrictEqual(mvh.getGovernances().map(g => g && g._kind), ['Governance', 'Governance']);
-            assert.deepStrictEqual(mvh.getReorgHandlers().map(r => r && r._kind), ['ReorgHandler', 'ReorgHandler']);
+            assert.deepStrictEqual(mvh.getOracles().map(o => o && o['_kind']), ['OracleRound', 'OracleRound']);
+            assert.deepStrictEqual(mvh.getGovernances().map(g => g && g['_kind']), ['Governance', 'Governance']);
+            assert.deepStrictEqual(mvh.getReorgHandlers().map(r => r && r['_kind']), ['ReorgHandler', 'ReorgHandler']);
         } finally {
             await mvh.stop();
         }
@@ -126,7 +126,7 @@ describe('MultiValidatorHub consensus-subsystem bring-up', function () {
         });
         await mvh.start();
         try {
-            const log = calls[0]._log;
+            const log = calls[0]['_log'];
             const gIdx = log.indexOf('startGovernance');
             const aIdx = log.indexOf('startAttestation');
             assert.ok(gIdx >= 0 && aIdx >= 0, 'both governance and attestation ran');
@@ -146,7 +146,7 @@ describe('MultiValidatorHub consensus-subsystem bring-up', function () {
         });
         await mvh.start();
         try {
-            assert.ok(calls[0]._log.includes('startCapabilities:/etc/xchain/caps.json'),
+            assert.ok(calls[0]['_log'].includes('startCapabilities:/etc/xchain/caps.json'),
                 'capability config path forwarded to hub.startCapabilities');
         } finally {
             await mvh.stop();
@@ -161,7 +161,7 @@ describe('MultiValidatorHub consensus-subsystem bring-up', function () {
         });
         await mvh.start();
         try {
-            const log = calls[0]._log;
+            const log = calls[0]['_log'];
             assert.deepStrictEqual(log, ['start', 'startP2P', 'startConsensus', 'startAttestation']);
             assert.deepStrictEqual(mvh.getOracles(), [null]);
             assert.deepStrictEqual(mvh.getGovernances(), [null]);

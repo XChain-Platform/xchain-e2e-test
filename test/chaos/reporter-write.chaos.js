@@ -21,7 +21,7 @@ const sinon = require('sinon')
 const fs = require('fs')
 const path = require('path')
 
-// Extract the write logic from performance-reporter.js into a testable function
+// Extract the write logic from performance_reporter.js into a testable function
 function writeResults(outputDir, results) {
     fs.mkdirSync(outputDir, { recursive: true })
     const ts = new Date().toISOString().replace(/[:.]/g, '-')

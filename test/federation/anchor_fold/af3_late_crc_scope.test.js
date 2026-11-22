@@ -15,8 +15,8 @@ const fs = require('fs');
 const path = require('path');
 const { encode: wifEncode } = require('wif');
 
-const cryptoHelper = require('../../cryptoHelper');
-const CryptoNetworks = require('../../../src/CryptoNetworks');
+const cryptoHelper = require('../../helpers/core/cryptoHelper');
+const CryptoNetworks = require('../../../src/crypto_networks');
 const Database = require('../../../src/db');
 const {
     MultiValidatorHub,
@@ -103,7 +103,9 @@ function stageProductionSigner(addressInfo){
     const network = CryptoNetworks.getBitcoinJsNetwork(COIN + '-' + NETWORK);
     process.env.DOGE_NETWORK = COIN + '-' + NETWORK;
     process.env.DOGE_ADDRESS = addressInfo.address;
-    process.env.DOGE_WIF = wifEncode(network.wif, Buffer.from(addressInfo.privateKey), true);
+    process.env.DOGE_WIF = wifEncode({
+        version: network.wif, privateKey: Buffer.from(addressInfo.privateKey), compressed: true
+    });
     process.env.DOGE_ENCODER_URL = 'http://' + (process.env.ENCODER_URL || 'localhost') + ':' +
         (process.env.ENCODER_API_PORT || '3023');
     process.env.HUB_SIGNER_MODULE = path.join(signerDir, 'signer.js');
@@ -196,9 +198,11 @@ function foldedWire(){
         chunks: archive.chunks,
         signatures: [{ pubkey, sig: identity.sign(canonical) }]
     };
-    const payload = publisher.buildV3Payload(
-        { network: 'regtest', snapshot_block: SNAPSHOT_BLOCK },
-        sections, archiveSection, pubkey, []);
+    // Signs the publisher attestation the indexer requires on every v3 bundle tail
+    // (ATTEST_SIG_COUNT at least 1); without it every chain section reads invalid.
+    const header = { network: 'regtest', snapshot_block: SNAPSHOT_BLOCK };
+    const attestSigs = [{ pubkey, sig: identity.sign(publisher.attestationCanonical(header, pubkey)) }];
+    const payload = publisher.buildV3Payload(header, sections, archiveSection, pubkey, attestSigs);
     return { payload, chunks: archive.chunks };
 }
 

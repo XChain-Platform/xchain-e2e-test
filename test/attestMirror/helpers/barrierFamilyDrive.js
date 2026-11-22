@@ -28,20 +28,43 @@ const fs = require('fs')
 const path = require('path')
 
 const { createRail, withRail } = require('../../helpers/chainRail')
-const { until, untilOrClearDogeStall, venueTipProbe, queryDb } = require('../mirrorDrillWaits')
+const { until, untilOrClearDogeStall, venueTipProbe, queryDb } = require('./mirrorDrillWaits')
 const XChainIndexerConnector = require('../../../src/XChainIndexerConnector.js')
 const fixture = require('./barrierFamilyFixture')
 const rows = require('./barrierFamilyRows')
+const { resolveVenueBasePort } = require('../../helpers/attestMirrorVenue')
+const { claimLegIsolation, claimOfflineSuite, PORT_WINDOW_SPAN } = require('./attestMirrorVenue')
 
 const LEVEL_TIMEOUT_MS = 25 * 60 * 1000
 const POLL_MS = 2000
 // No leg's mocha budget is below this: the venue boot alone (five hubs, two indexers, a
 // catch-up from the chain's genesis) has measured close to the at* legs' 45 minutes.
 const LEG_FLOOR_MS = 60 * 60 * 1000
+const BF5_DB_PREFIX = 'XChain_AM_MVH_bf5_'
 
 // The stamp every headline leg mines its drill block at: the full Bitcoin allowance.
 // BF_STAMP_AHEAD_S shortens it for a smoke drive; the acceptance record uses the default.
 const STAMP_AHEAD_S = Number(process.env.BF_STAMP_AHEAD_S || 7200)
+
+async function dropLeakedBf5Databases (venue) {
+    if (!venue || venue.label !== 'bf5') return []
+    const conn = venue['_conn']
+    assert.ok(conn && typeof conn.query === 'function', 'bootFamilyVenue: BF5 venue has no database connection for stale cleanup')
+    const live = new Set()
+    for (const hub of venue.hubs || []) if (hub.dbName) live.add(hub.dbName)
+    for (const ix of venue.indexers || []) {
+        if (ix.indexerDbName) live.add(ix.indexerDbName)
+        if (ix.mirrorDbName) live.add(ix.mirrorDbName)
+    }
+    const rows = await conn.query(
+        'SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE LEFT(SCHEMA_NAME, ?) = ?',
+        [BF5_DB_PREFIX.length, BF5_DB_PREFIX])
+    const stale = rows.map((row) => String(row.SCHEMA_NAME || ''))
+        .filter((name) => name.startsWith(BF5_DB_PREFIX) && /^[A-Za-z0-9_]+$/.test(name) && !live.has(name))
+    for (const name of stale) await conn.query('DROP DATABASE IF EXISTS `' + name + '`')
+    if (stale.length) console.log('BF5 stale database cleanup: dropped ' + stale.length + ' database(s)')
+    return stale
+}
 
 /**
  * Build and start the family venue from an EXPLICIT build root, level its indexers with
@@ -89,10 +112,26 @@ async function bootFamilyVenue (opts) {
     })
     const evidence = Object.assign(built.evidence, { armHubs: !!o.armHubs, stampAheadS: STAMP_AHEAD_S, legacyBlock })
     console.log('BF EVIDENCE ' + JSON.stringify(evidence))
-    const up = await built.venue.start()
-    assert.ok(up, 'FAILED DRIVE (not a skip): the family venue did not come up: ' + String(built.venue.unavailable))
-    await levelIndexers(built.venue, o.levelTimeoutMs, { requireMirrorReady: !!o.requireMirrorReady })
-    return { venue: built.venue, evidence, btc, armHeight, legacyBlock }
+    const claim = claimLegIsolation({
+        leg: o.leg || built.venue.label, label: built.venue.label, basePort: resolveVenueBasePort(venueOpts.basePort, process.env),
+    })
+    const stop = built.venue.stop && built.venue.stop.bind(built.venue)
+    if (stop) built.venue.stop = async (...args) => { try { return await stop(...args) } finally { claim.release() } }
+    const cleanupStale = async () => {
+        if (built.venue.label === 'bf5' && built.venue['_conn']) await dropLeakedBf5Databases(built.venue)
+    }
+    try {
+        const up = await built.venue.start()
+        await cleanupStale()
+        assert.ok(up, 'FAILED DRIVE (not a skip): the family venue did not come up: ' + String(built.venue.unavailable))
+        await levelIndexers(built.venue, o.levelTimeoutMs, { requireMirrorReady: !!o.requireMirrorReady })
+    } catch (e) {
+        try { await cleanupStale() } catch (cleanupErr) { console.log('BF stale database cleanup failed: ' + (cleanupErr && cleanupErr.message)) }
+        try { await built.venue.stop() } catch (stopErr) { console.log('BF boot teardown failed: ' + (stopErr && stopErr.message)) }
+        claim.release()
+        throw e
+    }
+    return { venue: built.venue, evidence, btc, armHeight, legacyBlock, claim }
 }
 
 /**
@@ -279,10 +318,25 @@ async function readBlockStamp (btc, height) {
     return { height: Number(height), hash: String(hash), blockTime: Number(block.time), mtp: Number(block.mediantime) }
 }
 
+async function restoreMinerState (helper, steps) {
+    let firstError = null
+    for (const step of steps) {
+        try {
+            await step.run()
+        } catch (err) {
+            if (!firstError) {
+                const message = err && err.message ? err.message : String(err)
+                firstError = new Error(helper + ': ' + step.name + ' failed: ' + message, { cause: err })
+            }
+        }
+    }
+    return firstError
+}
+
 /**
  * Mine ONE block with the node clock pinned at `stampS` (unpinned when null), the miner's
  * adaptive loop paused so nothing else lands in it, and read the stamp back from the node.
- * The pin is released in a finally so a failed leg never leaves the rail's clock pinned.
+ * The pin is released in a finally. A failed release or resume fails a successful call.
  *
  * `opts.resume === false` leaves the miner PAUSED after the block, for a leg whose next
  * drill block must be the very next height (BF5's B then B + 1 then B + 2, BF8's LTC run).
@@ -294,29 +348,45 @@ async function mineStamped (btc, stampS, opts) {
     const miner = btc.globals.regtestMinerConnector
     const before = Number(await btc.globals.nodeConnector.getBlockCount())
     await miner.pauseMining()
+    let bodyFailed = false
     try {
         if (stampS !== null && stampS !== undefined) await miner.setMockTime(Number(stampS))
         await miner.generateBlocks(1)
+    } catch (err) {
+        bodyFailed = true
+        throw err
     } finally {
-        if (stampS !== null && stampS !== undefined) await miner.setMockTime(0).catch(() => {})
-        if (resume) await miner.resumeMining().catch(() => {})
+        const steps = []
+        if (stampS !== null && stampS !== undefined) {
+            steps.push({ name: 'setMockTime(0)', run: () => miner.setMockTime(0) })
+        }
+        if (resume) steps.push({ name: 'resumeMining', run: () => miner.resumeMining() })
+        const restoreError = await restoreMinerState('mineStamped', steps)
+        if (restoreError && !bodyFailed) throw restoreError
     }
     const after = Number(await btc.globals.nodeConnector.getBlockCount())
     assert.strictEqual(after, before + 1, 'mineStamped: expected exactly one block, tip went ' + before + ' to ' + after)
     return readBlockStamp(btc, after)
 }
 
-/** Mine `count` blocks under one pin, for the parent's spaced 144-block run. */
+/** Mine `count` blocks under one pin. A failed release or resume fails a successful call. */
 async function mineSpacedRun (btc, count, stampS) {
     const miner = btc.globals.regtestMinerConnector
     const from = Number(await btc.globals.nodeConnector.getBlockCount())
     await miner.pauseMining()
+    let bodyFailed = false
     try {
         await miner.setMockTime(Number(stampS))
         await miner.generateBlocks(Number(count))
+    } catch (err) {
+        bodyFailed = true
+        throw err
     } finally {
-        await miner.setMockTime(0).catch(() => {})
-        await miner.resumeMining().catch(() => {})
+        const restoreError = await restoreMinerState('mineSpacedRun', [
+            { name: 'setMockTime(0)', run: () => miner.setMockTime(0) },
+            { name: 'resumeMining', run: () => miner.resumeMining() },
+        ])
+        if (restoreError && !bodyFailed) throw restoreError
     }
     const to = Number(await btc.globals.nodeConnector.getBlockCount())
     assert.strictEqual(to, from + Number(count), 'mineSpacedRun: tip went ' + from + ' to ' + to)
@@ -370,7 +440,7 @@ async function queueMarkerTransaction (btc, label) {
 /** Fund the marker's address with the miner RUNNING; the blocks this mines land now, not later. */
 async function fundMarkerAddress (btc, label) {
     return withRail(btc, async () => {
-        const cryptoHelper = require('../../cryptoHelper')
+        const cryptoHelper = require('../../helpers/core/cryptoHelper')
         return cryptoHelper.getNewFundedAddress(label, global.COIN, global.NETWORK, null, 'legacy', 0, 1)
     })
 }
@@ -378,7 +448,7 @@ async function fundMarkerAddress (btc, label) {
 /** Broadcast the marker from a funded address with the miner PAUSED, so it waits for the drill block. */
 async function broadcastMarker (btc, addr, label) {
     return withRail(btc, async () => {
-        const transactionHelper = require('../../transactionHelper')
+        const transactionHelper = require('../../helpers/core/transactionHelper')
         // Idempotent when the leg already holds the chain; the pause is what keeps the marker
         // out of any block but the one `mineStamped` mines next.
         await btc.globals.regtestMinerConnector.pauseMining()
@@ -435,7 +505,7 @@ async function releaseChain (rail) {
     try {
         await rail.globals.regtestMinerConnector.resumeMining()
         return true
-    } catch (_) {
+    } catch (internal) {
         return false
     }
 }
@@ -499,6 +569,30 @@ async function seedMirrors (venue, seeds) {
     }
     for (const ix of venue.indexers) ix.mirrorProxy.dropSockets()
     return written
+}
+
+/**
+ * Seed the stake-derived (or, past the tip, synthetic) cross_chain capability snapshots a
+ * set of joined rows needs, ahead of the rows themselves. Reached-ness is judged on the
+ * buried snapshot block. Refuses when the seeds leave any joined block uncovered.
+ *
+ * @returns {Promise<Array>} the snapshot seeds that were written
+ */
+async function seedSnapshotsFromStake (venue, i, members, reachedTip, opts) {
+    const o = opts || {}
+    const network = o.network || 'regtest'
+    const srb = o.reorgBuffer || require('../../helpers/multiValidatorHubHelper')
+        .loadHubModule('src/consensus/snapshot_reorg_buffer.js')
+    const weightsAt = o.weightsAt || stakeWeightsAt(venue, i)
+    const snapshots = await rows.requiredSnapshotSeeds(members, reachedTip, weightsAt,
+        (block) => srb.buriedSnapshotBlock(block, network))
+    const coverage = rows.snapshotCapabilityCoverage(members.concat(snapshots))
+    if (!coverage.satisfied) {
+        throw new Error('barrierFamilyDrive: capability snapshots leave blocks uncovered: ' +
+            JSON.stringify(coverage.missingBlocks) + (coverage.refusal ? ' (' + coverage.refusal + ')' : ''))
+    }
+    await seedMirrors(venue, snapshots)
+    return snapshots
 }
 
 /** Wait until indexer `i`'s mirror holds `n` rows of `table` (the seeds arrived). */
@@ -619,7 +713,7 @@ function corpusCoordinates (venue, i, coinCode) {
     const ix = venue.indexers[i]
     assert.ok(ix, 'corpusCoordinates: no indexer ' + i)
     // `_live` is the venue's resolved standing-stack record; the decoder schema has no public accessor.
-    const decoder = (venue._live && venue._live.decoder) || {}
+    const decoder = (venue['_live'] && venue['_live'].decoder) || {}
     return {
         coin: coinCode,
         network: venue.network,
@@ -644,10 +738,10 @@ function vmLinkProblem (repoRoot) {
     const entry = path.join(repoRoot, 'xchain-indexer', 'node_modules', 'xchain-vm')
     try {
         if (fs.existsSync(path.join(fs.realpathSync(entry), 'package.json'))) return null
-    } catch (_) { /* a dangling link lands here; the hops below name it */ }
+    } catch (internal) { /* a dangling link lands here; the hops below name it */ }
     const hops = [entry, path.join(repoRoot, 'xchain-indexer', 'xchain-vm')].map((p) => {
         let target = null
-        try { target = fs.readlinkSync(p) } catch (_) { target = fs.existsSync(p) ? '(not a link)' : '(missing)' }
+        try { target = fs.readlinkSync(p) } catch (internal) { target = fs.existsSync(p) ? '(not a link)' : '(missing)' }
         return path.relative(repoRoot, p) + ' -> ' + target
     })
     return 'the build root\'s indexer cannot load xchain-vm: ' + hops.join('; ') + '. Re-link it inside the tree: ' +
@@ -659,6 +753,9 @@ module.exports = {
     POLL_MS,
     LEG_FLOOR_MS,
     bootFamilyVenue,
+    claimLegIsolation,
+    claimOfflineSuite,
+    PORT_WINDOW_SPAN,
     levelIndexers,
     mirrorReady,
     statusSnapshot,
@@ -687,6 +784,7 @@ module.exports = {
     levelAtTip,
     holdBaseline,
     seedMirrors,
+    seedSnapshotsFromStake,
     waitForMirrorRows,
     assertFederationQuiet,
     mirrorReadableSet,

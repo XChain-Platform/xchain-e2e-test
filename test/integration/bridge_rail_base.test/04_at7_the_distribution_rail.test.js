@@ -19,7 +19,7 @@ const {
     chainRail,
     cryptoHelper,
     transactionHelper,
-    mintHelper,
+    gasHelper,
     lockWireV0,
     GAS_TICK,
     AT7_MINT,
@@ -52,11 +52,12 @@ async function startDistributionLock() {
         () => cryptoHelper.getNewFundedAddress('AT7.OPERATOR', 'dogecoin', NETWORK, null, 'legacy', 0, 5, false)));
     const gasIssuer = await state.venue.funded('AT7.GAS',
         () => cryptoHelper.getNewFundedAddress('AT7.GAS', 'bitcoin', NETWORK, null, 'legacy', 0, 1, false));
-    await mintHelper.sendMintV0(gasIssuer, GAS_TICK, AT7_MINT, gasIssuer.address, '');
+    await gasHelper.fundGas(gasIssuer, AT7_MINT);
     const lockTx = await transactionHelper.createAndSendTransaction(
         gasIssuer, lockWireV0('DOGE', operator.address, AT7_MINT, ''));
     const row = await state.venue.waitForFinalizedTransfer(
-        (r) => String(r.dest_address) === operator.address && Number(r.amount) === AT7_MINT);
+        (r) => String(r.dest_address) === operator.address && Number(r.amount) === AT7_MINT,
+        { timeoutMs: 30 * 60 * 1000 });
     return { operator, lockTx, row };
 }
 

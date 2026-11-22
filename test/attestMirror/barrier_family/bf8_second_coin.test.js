@@ -35,14 +35,14 @@
 const assert = require('assert')
 const path = require('path')
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const fixture = require('../helpers/barrierFamilyFixture')
 const rows = require('../helpers/barrierFamilyRows')
 const drive = require('../helpers/barrierFamilyDrive')
 const { createRail, withRail } = require('../../helpers/chainRail')
 const { attachedCoinVenueOpts, secondCoinHubEnv } = require('../../helpers/attestMirrorVenue')
-const { diffStateHashes, queryDb, until } = require('../mirrorDrillWaits')
+const { diffStateHashes, queryDb, until } = require('../helpers/mirrorDrillWaits')
 
 const BUILD_ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const { HUB_SCHEMA_VERSION } = require(path.join(BUILD_ROOT, 'xchain-indexer', 'src', 'hub', 'hub_schema_version.js'))
@@ -168,14 +168,14 @@ async function bootBothCoins (ctx) {
   ctx.ltc = await createRail(SECOND_COIN, 'regtest')
   const ltcIndexerUrl = 'http://' + ctx.ltc.host + ':' + ctx.ltc.ports.indexer
   const up = await drive.bootFamilyVenue({
-    label: 'bf8', repoRoot: BUILD_ROOT, armed: ARMED, venue: { hubExtraEnv: secondCoinHubEnv(LTC, ltcIndexerUrl) },
+    label: 'bf8', repoRoot: BUILD_ROOT, armed: ARMED, venue: { freshIndexers: true, hubExtraEnv: secondCoinHubEnv(LTC, ltcIndexerUrl) },
   })
   Object.assign(ctx, { venue: up.venue, btc: up.btc, evidence: up.evidence })
   assert.deepStrictEqual(Object.keys(ctx.venue.indexerEnv).map(Number), ARMED, 'both BTC indexers must be armed')
   ctx.ltcVenue = await withRail(ctx.ltc, async () => {
     const built = fixture.buildFamilyVenue({
       repoRoot: BUILD_ROOT, armed: ARMED, label: 'bf8ltc',
-      venue: attachedCoinVenueOpts(ctx.venue, { coin: SECOND_COIN, indexerCount: 2 }),
+      venue: { ...attachedCoinVenueOpts(ctx.venue, { coin: SECOND_COIN, indexerCount: 2 }), freshIndexers: true },
     })
     assert.strictEqual(built.venue.useEnvDecoderCredential, false, 'the LTC venue must not take the harness decoder credential')
     assert.strictEqual(built.venue.attachHubs, ctx.venue.hubs, 'the LTC indexers must follow the BTC venue\'s hubs')
@@ -202,12 +202,12 @@ async function seedRows (ctx) {
   ctx.tips = { [BTC]: btcTip, [LTC]: ltcTip }
   ctx.plan = planEntries(btcTip, ltcTip)
   const now = Math.floor(Date.now() / 1000)
-  // Snapshot at BTC's planned entry, not the reached tip: a fresh node's stake re-derivation rejects a synthetic capability row at a reached height.
   const base = { network: ctx.venue.network, coin: BTC, otherChain: LTC, snapshotBlock: ctx.plan[BTC], effectiveTime: now - 10 }
   const seeded = bf8Rows(ctx.plan, base)
   ctx.keys = { A: seeded.A.row.match_id, N: seeded.N.row.match_id }
-  const snap = rows.inertRow('capability_snapshots', Object.assign({ tag: 'bf8|snap|' + btcTip, effectiveTime: now }, base))
-  await drive.seedMirrors(ctx.venue, [snap, seeded.A, seeded.N])
+  const members = [seeded.A, seeded.N]
+  const snapshots = await drive.seedSnapshotsFromStake(ctx.venue, ARMED[0], members, btcTip)
+  await drive.seedMirrors(ctx.venue, members)
   for (const ix of ctx.ltcVenue.indexers) ix.mirrorProxy.dropSockets()
   for (const i of ARMED) {
     await drive.waitForMirrorRows(ctx.venue, i, TABLE, 2)

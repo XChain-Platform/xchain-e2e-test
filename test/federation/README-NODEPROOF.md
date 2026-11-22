@@ -19,7 +19,7 @@ epoch costs nothing.
 The standard federation prerequisites (same as `test:federation`):
 - regtest stack up: bitcoind + xchain-decoder + xchain-indexer + MariaDB
 - `E2E_REQUIRE_FEDERATION=1` and the federation env (`HUB_DB_*`,
-  `BTC_INDEXER_API_URL`, indexer DB vars) - see `test/initialCheck.test.js`
+  `BTC_INDEXER_API_URL`, indexer DB vars) - see `test/initial_check.test.js`
 
 Plus **one NODEPROOF-specific var**:
 - `FULLNODE_BTC_RPC_URL` - the regtest **bitcoind JSON-RPC** endpoint *with

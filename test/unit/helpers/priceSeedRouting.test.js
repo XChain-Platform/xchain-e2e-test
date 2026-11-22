@@ -153,7 +153,7 @@ describe('price seed routing', () => {
 
     describe('pushQuoteViaHub', () => {
         function stubHub(captured){
-            global.hubConnector = { _call: async (body) => { captured.body = body; return { accepted: true } } }
+            global.hubConnector = { ['_call']: async (body) => { captured.body = body; return { accepted: true } } }
         }
 
         it('advances push_generation past whatever the hub already holds', async () => {
@@ -219,7 +219,7 @@ describe('price seed routing', () => {
         it('throws rather than continuing when the hub refuses the quote', async () => {
             enableMirror()
             const { oracle } = freshHelpers()
-            global.hubConnector = { _call: async () => ({ accepted: false, reason: 'duplicate' }) }
+            global.hubConnector = { ['_call']: async () => ({ accepted: false, reason: 'duplicate' }) }
             oracle.currentPushGeneration = async () => 0
 
             await assert.rejects(
@@ -234,7 +234,7 @@ describe('price seed routing', () => {
         it('reports an unreachable hub distinctly from a refusal', async () => {
             enableMirror()
             const { oracle } = freshHelpers()
-            global.hubConnector = { _call: async () => null }
+            global.hubConnector = { ['_call']: async () => null }
             oracle.currentPushGeneration = async () => 0
 
             await assert.rejects(

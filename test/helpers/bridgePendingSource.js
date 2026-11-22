@@ -46,7 +46,7 @@ class BridgePendingSource {
         this.sources   = new Map();
         this.server    = null;
         this.port      = null;
-        this._reqCount = 0;          // observability: how many polls the engines made
+        this['_reqCount'] = 0;          // observability: how many polls the engines made
     }
 
     /**
@@ -72,7 +72,7 @@ class BridgePendingSource {
 
     start(){
         return new Promise((resolve, reject) => {
-            this.server = http.createServer((req, res) => this._handle(req, res));
+            this.server = http.createServer((req, res) => this['_handle'](req, res));
             this.server.once('error', reject);
             this.server.listen(0, '127.0.0.1', () => {
                 this.port = this.server.address().port;
@@ -84,7 +84,7 @@ class BridgePendingSource {
     stop(){
         return new Promise((resolve) => {
             if(!this.server) return resolve();
-            try { this.server.closeAllConnections && this.server.closeAllConnections(); } catch(_){}
+            try { this.server.closeAllConnections && this.server.closeAllConnections(); } catch(internal){}
             this.server.close(() => resolve());
             this.server = null;
         });
@@ -95,32 +95,32 @@ class BridgePendingSource {
 
     // How many RPC calls every engine has made against this source, for a drill that needs
     // to prove the followers really re-read rather than trusting the leader.
-    requestCount(){ return this._reqCount; }
+    requestCount(){ return this['_reqCount']; }
 
-    _handle(req, res){
+    ['_handle'](req, res){
         const m = /^\/pending\/([^/]+)\/([^/]+)\/?$/.exec(req.url || '');
         const chunks = [];
         req.on('data', (c) => chunks.push(c));
         req.on('end', () => {
-            this._reqCount++;
+            this['_reqCount']++;
             let rpcId = 1, method = '', params = {};
             try {
                 const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
                 rpcId  = body.id != null ? body.id : 1;
                 method = String(body.method || '');
                 params = body.params || {};
-            } catch(_){ /* a malformed body answers the unknown-method shape below */ }
+            } catch(internal){ /* a malformed body answers the unknown-method shape below */ }
 
             const payload = JSON.stringify({
                 jsonrpc: '2.0', id: rpcId,
-                result: this._result(m, method, params)
+                result: this['_result'](m, method, params)
             });
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(payload);
         });
     }
 
-    _result(match, method, params){
+    ['_result'](match, method, params){
         if(!match) return { error: 'unknown source path' };
         const name = match[1], coin = match[2];
         const src  = this.sources.get(name);

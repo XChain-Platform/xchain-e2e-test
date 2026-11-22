@@ -31,12 +31,12 @@
 const assert = require('assert')
 const path = require('path')
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const fixture = require('../helpers/barrierFamilyFixture')
 const rows = require('../helpers/barrierFamilyRows')
 const drive = require('../helpers/barrierFamilyDrive')
-const { diffStateHashes, queryDb } = require('../mirrorDrillWaits')
+const { diffStateHashes, queryDb } = require('../helpers/mirrorDrillWaits')
 
 const BUILD_ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const { HUB_SCHEMA_VERSION } = require(path.join(BUILD_ROOT, 'xchain-indexer', 'src', 'hub', 'hub_schema_version.js'))
@@ -100,10 +100,11 @@ async function seedDivergingRow (ctx) {
     const tip = held.tip
     ctx.B = tip + 1
     const now = Math.floor(Date.now() / 1000)
-    // Snapshot at B, not the reached tip: a fresh node's stake re-derivation rejects a synthetic capability row at a reached height.
     const base = { network: ctx.venue.network, coin: ctx.coin, snapshotBlock: ctx.B }
     const row = rows.inertRow(TABLE, Object.assign({ tag: 'bf5|' + tip, effectiveTime: now - 10, admitBlocks: { BTC: ctx.B + 2 } }, base))
-    await drive.seedMirrors(ctx.venue, [rows.inertRow('capability_snapshots', Object.assign({ tag: 'bf5|snap|' + tip, effectiveTime: now }, base)), row])
+    const members = [row]
+    const snapshots = await drive.seedSnapshotsFromStake(ctx.venue, ARMED, members, tip)
+    await drive.seedMirrors(ctx.venue, members)
     await drive.waitForMirrorRows(ctx.venue, ARMED, TABLE, 1)
     await drive.waitForMirrorRows(ctx.venue, INERT, TABLE, 1)
     ctx.key = row.row.match_id

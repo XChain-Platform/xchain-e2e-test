@@ -1,3 +1,13 @@
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 'use strict';
 
 const assert = require('assert');
@@ -19,14 +29,14 @@ function loadDrill(runCrossChainSettle = async () => ({ ok: true })) {
     }
 
     const submit = () => {};
-    const drill = proxyquire('../crossChainSettleTestnet.drill', {
-        '../sdk/sdkHelper': { XChainSDK: StubSdk, submit },
+    const drill = proxyquire('../cross_chain_settle_testnet.test', {
+        '../sdk/helpers/sdkHelper': { XChainSDK: StubSdk, submit },
         './lib/testnetSettleRunner': { runCrossChainSettle }
     });
     return { drill, submit };
 }
 
-describe('testnet cross-chain settlement drill', function () {
+function registerLoadAndDepsTests() {
     it('does not start the live run when required', function () {
         let runs = 0;
         const runCrossChainSettle = async () => {
@@ -58,7 +68,9 @@ describe('testnet cross-chain settlement drill', function () {
             explorerUrl: 'https://explorer.example'
         });
     });
+}
 
+function registerFailureAndRunnerTests() {
     it('names a missing treasury key without exposing the supplied wif', function () {
         const { drill } = loadDrill();
         const env = { ...ENV };
@@ -90,4 +102,9 @@ describe('testnet cross-chain settlement drill', function () {
         assert.strictEqual(runnerArgs.log instanceof Function, true);
         assert.deepStrictEqual(JSON.parse(output.at(-1)), verdict);
     });
+}
+
+describe('testnet cross-chain settlement drill', function () {
+    registerLoadAndDepsTests();
+    registerFailureAndRunnerTests();
 });

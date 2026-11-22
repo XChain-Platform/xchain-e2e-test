@@ -26,7 +26,7 @@
 
 const assert = require('assert')
 const bitcoin = require('bitcoinjs-lib')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const mintHelper = require('../helpers/mintHelper')
 const issueHelper = require('../helpers/issueHelper')
 

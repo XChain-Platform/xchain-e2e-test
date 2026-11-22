@@ -5,9 +5,9 @@
 
 const assert = require('assert');
 const proxyquire = require('proxyquire');
-const { PRICE_V1_CASES } = require('../../rail/flag_days/price_v1_cases');
+const { PRICE_V1_CASES } = require('../../rail/flag_days/helpers/price_v1_cases');
 
-const RAIL_SUITE = '../../rail/flag_days/price_v1_canonical.rail.test';
+const RAIL_SUITE = '../../rail/flag_days/price_v1_canonical.test';
 
 function loadRailSuite(resultFor) {
     const tests = [];
@@ -32,7 +32,7 @@ function loadRailSuite(resultFor) {
     global.it = (title, body) => tests.push({ title, body });
     try {
         proxyquire.noCallThru().noPreserveCache()(RAIL_SUITE, {
-            '../../cryptoHelper': cryptoHelper,
+            '../../helpers/core/cryptoHelper': cryptoHelper,
             '../../helpers/priceHelper': priceHelper
         });
     } finally {
@@ -64,7 +64,7 @@ async function runRailTests(tests) {
     }
 }
 
-describe('PRICE v1 canonical-bound rail cases', function () {
+function registerCaseListTests() {
     it('pins the ordered case list', function () {
         assert.deepStrictEqual(PRICE_V1_CASES, [
             { name: 'honest control', value: '1.5', fee: '0.01', expect: 'valid' },
@@ -94,10 +94,16 @@ describe('PRICE v1 canonical-bound rail cases', function () {
                 testCase.name + ' must prepend exactly one zero');
         }
     });
+}
 
+function registerRailExecutionTests() {
     it('executes every rail case with a fresh oracle and the expected status', async function () {
         const harness = loadRailSuite((address, price, validationStatus) => ({
-            price: { validation_status: validationStatus }
+            price: {
+                validation_status: validationStatus,
+                status: PRICE_V1_CASES.find(testCase =>
+                    testCase.value === price.value && testCase.fee === price.fee).expect
+            }
         }));
 
         assert.deepStrictEqual(harness.tests.map(test => test.title), PRICE_V1_CASES.map(testCase =>
@@ -114,10 +120,12 @@ describe('PRICE v1 canonical-bound rail cases', function () {
             const call = harness.sendCalls[i];
             assert.strictEqual(call[1].value, PRICE_V1_CASES[i].value);
             assert.strictEqual(call[1].fee, PRICE_V1_CASES[i].fee);
-            assert.strictEqual(call[2], PRICE_V1_CASES[i].expect);
+            assert.strictEqual(call[2], PRICE_V1_CASES[i].expect === 'valid' ? 'valid' : 'invalid');
         }
     });
+}
 
+function registerFailureTests() {
     it('fails when the indexed PRICE row is absent', async function () {
         const harness = loadRailSuite(() => ({ price: null }));
 
@@ -135,4 +143,23 @@ describe('PRICE v1 canonical-bound rail cases', function () {
             return true;
         });
     });
+
+    it('fails when the indexed refusal reason differs', async function () {
+        const harness = loadRailSuite(() => ({
+            price: { validation_status: 'invalid', status: 'invalid: FEE (format)' }
+        }));
+
+        await assert.rejects(() => runRailTests([harness.tests[1]]), error => {
+            assert.strictEqual(error.code, 'ERR_ASSERTION');
+            assert.strictEqual(error.actual, 'invalid: FEE (format)');
+            assert.strictEqual(error.expected, PRICE_V1_CASES[1].expect);
+            return true;
+        });
+    });
+}
+
+describe('PRICE v1 canonical-bound rail cases', function () {
+    registerCaseListTests();
+    registerRailExecutionTests();
+    registerFailureTests();
 });

@@ -23,6 +23,12 @@ const nodeUtil = require('node:util');
 const { getLogger } = require('./lib/logger');
 const logger = getLogger();
 
+// Cap each call the deadline loops poll: axios has no default timeout and the
+// loops check the deadline only between requests, so a silent tracker would hang
+// quiesce/waitForSync/waitForUtxos past their budget.
+const PROBE_TIMEOUT_MS = 5000;
+const READ_TIMEOUT_MS = 15000;
+
 class UtxoTracker {
     constructor(url, port) {
         this.url = "http://"+url+":"+port
@@ -42,7 +48,8 @@ class UtxoTracker {
 
         try {
             const response = await axios.post(this.url, data, {
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
+                timeout: PROBE_TIMEOUT_MS
             });
 
             const responseData = response.data;
@@ -65,7 +72,8 @@ class UtxoTracker {
                 id: 1
             };
             const response = await axios.post(this.url, data, {
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
+                timeout: PROBE_TIMEOUT_MS
             });
             const responseData = response.data;
             return responseData.result === undefined ? null : responseData.result;
@@ -80,7 +88,8 @@ class UtxoTracker {
         try {
             const data = { jsonrpc: '2.0', method: 'is_quiescent', id: 1 };
             const response = await axios.post(this.url, data, {
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
+                timeout: PROBE_TIMEOUT_MS
             });
             const responseData = response.data;
             return responseData.result === undefined ? null : responseData.result;
@@ -99,17 +108,21 @@ class UtxoTracker {
     // Deliberately does NOT throw on timeout: transactionHelper.submit and
     // anchorElection drive it inside retry loops and need the status object back
     // to decide whether to retry. The hook that must fail on a non-ready status
-    // is the root afterEach in test/initialCheck.test.js, and mineErrors below is
+    // is the root afterEach in test/initial_check.test.js, and mineErrors below is
     // what makes such a failure diagnosable.
     async quiesce({ timeoutMs = 30000, pollMs = 250, regtestMiner = null } = {}){
         const deadline = Date.now() + timeoutMs
         let last = null
         let mineErrors = 0
+        let noResponses = 0
         let lastMineError = null
         while (Date.now() < deadline){
             const status = await this.getQuiescentStatus()
-            last = status
-            if (status && status.ready) return this.withMineErrors(status, mineErrors, lastMineError)
+            // Keep the last probe that actually answered: a later timed-out probe
+            // must not erase the evidence of where the stack stood, only be tallied.
+            if (status) last = status
+            else noResponses++
+            if (status && status.ready) return this.withMineErrors(status, mineErrors, lastMineError, noResponses)
             // Not ready yet: if a regtestMiner was passed, mine a block to
             // unblock mempool/batch progression.
             if (regtestMiner && status && status.mempool_size > 0){
@@ -127,17 +140,20 @@ class UtxoTracker {
             }
             await this.sleep(pollMs)
         }
-        // Last status seen, which may carry ready=false. Callers that are a barrier
-        // rather than a retry loop must inspect .ready; the root afterEach does.
-        return this.withMineErrors(last, mineErrors, lastMineError)
+        // Last answered status, which may carry ready=false, with the count of
+        // probes that got no answer. Null only if no probe ever answered. Callers
+        // that are a barrier rather than a retry loop must inspect .ready; the
+        // root afterEach does.
+        return this.withMineErrors(last, mineErrors, lastMineError, noResponses)
     }
 
-    // Attach the nudge-failure tally to whatever quiesce returns, without
-    // rewriting a null status into an object (callers distinguish no-response
-    // from a status body).
-    withMineErrors(status, mineErrors, lastMineError){
+    // Attach the nudge-failure and no-response tallies to whatever quiesce
+    // returns, without rewriting a null status into an object (callers
+    // distinguish no-response from a status body).
+    withMineErrors(status, mineErrors, lastMineError, noResponses = 0){
         if (!status || typeof status !== 'object') return status
         status.mineErrors = mineErrors
+        status.noResponses = noResponses
         if (lastMineError) status.lastMineError = lastMineError
         return status
     }
@@ -193,7 +209,7 @@ class UtxoTracker {
 
         while (Date.now() < endTime){
             try {
-                let addressUtxos = await this.getUtxosFromAddress(address)
+                const addressUtxos = await this.getUtxosFromAddress(address)
 
                 if (addressUtxos["utxos"].length > 0){
                     return true
@@ -218,7 +234,8 @@ class UtxoTracker {
             };
 
             const response = await axios.post(this.url, data, {
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
+                timeout: READ_TIMEOUT_MS
             });
 
             const responseData = response.data;

@@ -12,8 +12,8 @@ const { encode: wifEncode } = require('wif');
 const previousBundleOrderActivation = process.env.ANCHOR_BUNDLE_ORDER_ACTIVATION;
 process.env.ANCHOR_BUNDLE_ORDER_ACTIVATION = '0';
 
-const cryptoHelper = require('../../cryptoHelper');
-const CryptoNetworks = require('../../../src/CryptoNetworks');
+const cryptoHelper = require('../../helpers/core/cryptoHelper');
+const CryptoNetworks = require('../../../src/crypto_networks');
 const {
     MultiValidatorHub,
     ValidatorIdentity,
@@ -28,23 +28,27 @@ const {
     reverseSections,
     reverseSectionPairs
 } = require('../../helpers/flag_days/anchor_order_tamper');
+const { unusedBtcSnapshotBlock, pinMeshSignerSet } = require('../../helpers/flag_days/snapshot_block');
+const { armHeight } = require('../../helpers/anchorArmHeight');
 
 const VALIDATOR_COUNT = 2;
 const HUB_DB_PORT = 14100 + (process.pid % 300);
 const HUB_DB_NAME = 'xchain-anchor-order-hubdb-' + process.pid;
-const SNAPSHOT_BLOCK = Number(process.env.ANCHOR_ORDER_SNAPSHOT_BLOCK) ||
-    (1600000 + (Date.now() % 300000));
+// Set in bootFederation to an unused committed BTC block (ANCHOR_ORDER_SNAPSHOT_BLOCK pins one).
+let SNAPSHOT_BLOCK = null;
+// The hubs read the fold arm at every gate lookup. A rehearsal arms it mid-chain, and at or
+// past that height they build ANCHOR v3, which this v0 suite never captures (R-3 attempt 4
+// gap C), so the bundle is prepared with the fold off for the in-process hubs only.
+const FOLD_ENV = 'XC_ANCHOR_FOLD_REGTEST_ACTIVATION';
+const FOLD_OFF_HEIGHT = '999999999';
 
-describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
-    this.timeout(20 * 60 * 1000);
-
-    let hubDb = null;
-    let mvh = null;
-    let weightSeed = null;
-    let identities = [];
-    let signerDir = null;
-    let signerHooks = null;
-    let preparedPayload = null;
+let hubDb = null;
+let mvh = null;
+let weightSeed = null;
+let identities = [];
+let signerDir = null;
+let signerHooks = null;
+let preparedPayload = null;
 
     async function indexerQuery(sql, params){
         const conn = await indexerDatabase.getConnection();
@@ -76,7 +80,9 @@ describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
         const network = CryptoNetworks.getBitcoinJsNetwork(COIN + '-' + NETWORK);
         process.env.DOGE_NETWORK = COIN + '-' + NETWORK;
         process.env.DOGE_ADDRESS = addressInfo.address;
-        process.env.DOGE_WIF = wifEncode(network.wif, Buffer.from(addressInfo.privateKey), true);
+        process.env.DOGE_WIF = wifEncode({
+            version: network.wif, privateKey: Buffer.from(addressInfo.privateKey), compressed: true
+        });
         process.env.DOGE_ENCODER_URL = 'http://' + (process.env.ENCODER_URL || 'localhost') + ':' +
             (process.env.ENCODER_API_PORT || '3023');
         process.env.HUB_SIGNER_MODULE = path.join(signerDir, 'signer.js');
@@ -140,6 +146,9 @@ describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
     }
 
     async function bootFederation(){
+        SNAPSHOT_BLOCK = await unusedBtcSnapshotBlock({
+            indexerQuery, override: process.env.ANCHOR_ORDER_SNAPSHOT_BLOCK
+        });
         process.env.XDEX_SNAPSHOT_BLOCK = String(SNAPSHOT_BLOCK);
         process.env.CHECKPOINT_CHAINS = 'DOGE';
         process.env.CHECKPOINT_POLL_MS = '600000000';
@@ -160,6 +169,7 @@ describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
         await mvh.start();
         identities = mvh.identities.map(id => new ValidatorIdentity(id.privkeyHex));
         weightSeed = seedWeightSnapshot(mvh, { blockIndex: SNAPSHOT_BLOCK, network: 'regtest' });
+        pinMeshSignerSet(mvh);
         for(const hub of mvh.hubs){
             hub.stateAnchorPublisher.network = 'regtest';
             hub.stateAnchorPublisher.roundTimeoutMs = 20000;
@@ -180,10 +190,21 @@ describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
                 return { txid: 'f'.repeat(64) };
             });
         }
-        for(const hub of mvh.hubs) await hub.stateAnchorPublisher.flush();
-        await waitUntil(() => ({ ok: captured.length > 0, saw: captured.length }), {
-            timeoutMs: 30000, intervalMs: 100, what: 'the publisher to build a v0 bundle'
-        });
+        const priorFold = process.env[FOLD_ENV];
+        process.env[FOLD_ENV] = FOLD_OFF_HEIGHT;
+        try {
+            // Each summary names the gate that held a flush (skipped) or the error it hit.
+            const summaries = [];
+            for(const hub of mvh.hubs) summaries.push(await hub.stateAnchorPublisher.flush());
+            console.log('    anchor bundle flush summaries: ' + JSON.stringify(summaries));
+            await waitUntil(() => ({ ok: captured.length > 0, saw: captured.length }), {
+                timeoutMs: 30000, intervalMs: 100,
+                what: 'the publisher to build a v0 bundle (flush summaries ' + JSON.stringify(summaries) + ')'
+            });
+        } finally {
+            if(priorFold === undefined) delete process.env[FOLD_ENV];
+            else process.env[FOLD_ENV] = priorFold;
+        }
         assert.strictEqual(captured.length, 1, 'one elected publisher builds the bundle');
         preparedPayload = captured[0];
 
@@ -197,8 +218,9 @@ describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
     }
 
     async function fundProductionSigner(){
+        // Funds native coin only: the publisher pays no XCHAIN, and the DOGE gas seed is a bridge.
         const addressInfo = await cryptoHelper.getNewFundedAddress(
-            'anchor-order-publisher', COIN, NETWORK, null, 'legacy', 0, 5.0
+            'anchor-order-publisher', COIN, NETWORK, null, 'legacy', 0, 5.0, false
         );
         await regtestMinerConnector.generateBlocks(2);
         const status = await utxoTrackerConnector.quiesce({
@@ -206,6 +228,26 @@ describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
         });
         assert.ok(status && status.ready, 'UTXO tracker is ready after funding the publisher');
         signerHooks = stageProductionSigner(addressInfo);
+    }
+
+    // ANCHOR_BUNDLE_ORDER_ACTIVATION follows XC_ANCHOR_STAKE_REGTEST_ACTIVATION on regtest and is
+    // keyed on the anchor's own DOGE height. A rehearsal arms it mid-chain, so the bundles this
+    // suite publishes must land at or past that height for the order verdicts to be in force.
+    async function mineToOrderArmHeight(){
+        const target = Number(armHeight('XC_ANCHOR_STAKE_REGTEST_ACTIVATION'));
+        if(!(target > 0)) return;
+        const latest = await indexerConnector.call('getlatestblock', {});
+        const tip = Number(latest && latest.block_index);
+        assert.ok(Number.isSafeInteger(tip) && tip >= 0, 'the DOGE indexer reports its tip');
+        if(tip < target){
+            await regtestMinerConnector.generateBlocks(target - tip);
+            const status = await utxoTrackerConnector.quiesce({
+                timeoutMs: 60000, pollMs: 250, regtestMiner: regtestMinerConnector
+            });
+            assert.ok(status && status.ready, 'UTXO tracker is ready after mining to the order arm height');
+        }
+        assert.ok(await indexerConnector.waitForIndexedBlock(target, 120000),
+            'the DOGE indexer reached the bundle order arm height ' + target);
     }
 
     async function rowsForTransaction(txid){
@@ -242,13 +284,24 @@ describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
         for(const row of rows) assert.match(String(row.status), expected, label + ' status');
     }
 
+function registerBundleOrderSuite() {
+    this.timeout(20 * 60 * 1000);
+
     before(async function () {
         await bootFederation();
         await prepareCanonicalBundle();
         await fundProductionSigner();
+        await mineToOrderArmHeight();
     });
 
     after(async function () {
+        // Removes the capability rows seeded at a real BTC block.
+        if(mvh && SNAPSHOT_BLOCK !== null){
+            for(const pubkey of mvh.getPubkeys().map(key => key.toLowerCase()))
+                await indexerQuery(
+                    "DELETE FROM capability_snapshots WHERE snapshot_block = ? AND signing_pubkey = ? " +
+                    "AND capability = 'oracle_publish'", [SNAPSHOT_BLOCK, pubkey]);
+        }
         if(weightSeed) weightSeed.restore();
         if(mvh){ await mvh.stop(); await mvh.dropDatabases(); }
         if(hubDb) await hubDb.stop();
@@ -275,4 +328,6 @@ describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
         const rows = await publishPrepared(reverseSectionPairs(preparedPayload, 1));
         assertVerdict(rows, /^invalid: SECTION \d+ SIGS \(order\)$/, 'reversed section pairs');
     });
-});
+}
+
+describe('ANCHOR v0 bundle ordering on DOGE regtest', registerBundleOrderSuite);

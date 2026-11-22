@@ -23,6 +23,11 @@ coverage/
 reports/mutation/*.html
 reports/mutation/*.json
 
+# Stryker sandbox and log. cleanTempDir removes the sandbox on a normal exit, but a
+# killed or interrupted run leaves a full instrumented copy of src/ and test/ behind.
+.stryker-tmp/
+stryker.log
+
 # seed-contract-state.js resume files. Public facts only (contract index, txids),
 # but they are per-run per-chain state, not source.
 .seed-*.json
@@ -46,3 +51,6 @@ data/*spend.jsonl
 # Oracle publisher queue, written to the same cwd-relative default as the batch
 # buffer above. Per-run state, not source.
 data/publisher-queue*.jsonl
+
+# Attestation queue state, written at run time and not source.
+data/attestation-queue.jsonl

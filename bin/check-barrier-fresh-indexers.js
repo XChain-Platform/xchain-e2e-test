@@ -1,0 +1,181 @@
+#!/usr/bin/env node
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
+'use strict'
+
+const fs = require('fs')
+const path = require('path')
+const acorn = require('acorn')
+const { optOutMarker } = require('./lib/opt_out_marker')
+
+const ROOT = path.join(__dirname, '..')
+const SCAN_DIR = path.join(ROOT, 'test', 'attestMirror', 'barrier_family')
+const CALL_BOOTS = new Set(['bootFamilyVenue', 'buildFamilyVenue'])
+const CONSTRUCTOR_BOOT = 'AttestMirrorVenue'
+const isOptOut = optOutMarker('fresh-indexers-ok')
+
+// Parse the file and keep each line comment by line, so text inside strings never reads as a comment.
+function parseWithComments (source) {
+    const comments = new Map()
+    const ast = acorn.parse(source, {
+        ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true, locations: true,
+        allowAwaitOutsideFunction: true, allowReturnOutsideFunction: true,
+        onComment: (block, text, start, end, startLoc) => { if (!block) comments.set(startLoc.line, text) },
+    })
+    return { ast, comments }
+}
+
+function forEachNode (node, visit) {
+    if (!node || typeof node.type !== 'string') return
+    visit(node)
+    for (const key of Object.keys(node)) {
+        const child = node[key]
+        if (Array.isArray(child)) child.forEach((item) => forEachNode(item, visit))
+        else if (child && typeof child.type === 'string') forEachNode(child, visit)
+    }
+}
+
+function calleeNameNode (callee) {
+    if (callee.type === 'Identifier') return callee
+    if (callee.type === 'MemberExpression' && !callee.computed && callee.property.type === 'Identifier') return callee.property
+    return null
+}
+
+// Identify helper calls and direct constructor calls, including non-computed member forms.
+function bootCallee (node) {
+    if (node.type !== 'CallExpression' && node.type !== 'NewExpression') return null
+    const callee = calleeNameNode(node.callee)
+    if (!callee) return null
+    if (node.type === 'CallExpression' && CALL_BOOTS.has(callee.name)) return { callee, venueNested: true }
+    if (node.type === 'NewExpression' && callee.name === CONSTRUCTOR_BOOT) return { callee, venueNested: false }
+    return null
+}
+
+function staticPropertyName (property) {
+    const key = property.key
+    if (!property.computed && key.type === 'Identifier') return key.name
+    if (key.type === 'Literal' &&
+        (key.value === null || ['string', 'number', 'boolean', 'bigint'].includes(typeof key.value))) {
+        return String(key.value)
+    }
+    if (property.computed && key.type === 'TemplateLiteral' && key.expressions.length === 0) {
+        return key.quasis[0].value.cooked
+    }
+    return null
+}
+
+function objectProperty (object, name) {
+    if (!object || object.type !== 'ObjectExpression') return undefined
+    let value
+    for (const property of object.properties) {
+        // A later spread or unknown computed key can replace any earlier value.
+        // A later statically named property makes it knowable again.
+        if (property.type === 'SpreadElement') value = undefined
+        else if (property.type === 'Property') {
+            const keyName = staticPropertyName(property)
+            if (keyName === name) value = property.value
+            else if (property.computed && keyName === null) value = undefined
+        }
+    }
+    return value
+}
+
+// Helper calls read venue.freshIndexers; the constructor reads freshIndexers at the top level.
+function bootsFresh (call, boot) {
+    const options = call.arguments[0]
+    const flagParent = boot.venueNested ? objectProperty(options, 'venue') : options
+    const flag = objectProperty(flagParent, 'freshIndexers')
+    return !!flag && flag.type === 'Literal' && flag.value === true
+}
+
+function bootLabel (call) {
+    const label = objectProperty(call.arguments[0], 'label')
+    return label && label.type === 'Literal' && typeof label.value === 'string' ? label.value : null
+}
+
+// Accept a reasoned opt-out comment on the call line or in the comment-only lines directly above it.
+function hasOptOut (lines, comments, line) {
+    if (isOptOut(comments.get(line))) return true
+    for (let k = line - 1; k >= 1 && comments.has(k) && /^\s*\/\//.test(lines[k - 1]); k--) {
+        if (isOptOut(comments.get(k))) return true
+    }
+    return false
+}
+
+// Find barrier boots that reuse indexer databases; a file that does not parse is itself a finding.
+function findReusedLabelBoots (source) {
+    let parsed
+    try {
+        parsed = parseWithComments(source)
+    } catch (error) {
+        return [{ line: error.loc ? error.loc.line : 1, label: null, error: 'unparseable: ' + error.message }]
+    }
+    const lines = source.split('\n')
+    const findings = []
+    forEachNode(parsed.ast, (node) => {
+        const boot = bootCallee(node)
+        if (!boot || bootsFresh(node, boot)) return
+        const line = boot.callee.loc.start.line
+        if (!hasOptOut(lines, parsed.comments, line)) findings.push({ line, label: bootLabel(node), at: boot.callee.start })
+    })
+    return findings.sort((a, b) => a.at - b.at).map(({ line, label }) => ({ line, label }))
+}
+
+function collectJavaScriptFiles (dir, prefix = '') {
+    const files = []
+    for (const entry of fs.readdirSync(path.join(dir, prefix), { withFileTypes: true })) {
+        const relative = path.join(prefix, entry.name)
+        if (entry.isDirectory()) files.push(...collectJavaScriptFiles(dir, relative))
+        else if (entry.isFile() && entry.name.endsWith('.js')) files.push(relative.split(path.sep).join('/'))
+    }
+    return files
+}
+
+function scan (dir = SCAN_DIR) {
+    const files = collectJavaScriptFiles(dir).sort()
+    const entryFiles = files.filter((file) => !file.includes('/') && file.endsWith('.test.js'))
+    const findings = []
+    for (const file of files) {
+        const absolute = path.join(dir, file)
+        const relative = path.relative(ROOT, absolute).split(path.sep).join('/')
+        for (const finding of findReusedLabelBoots(fs.readFileSync(absolute, 'utf8'))) {
+            findings.push({ file: relative, ...finding })
+        }
+    }
+    return { files, entryFiles, findings }
+}
+
+// A scan that reads no leg file is a broken scan, not a clean corpus, so it fails even under --report.
+function main (argv = process.argv.slice(2), dir = SCAN_DIR) {
+    const shown = path.relative(ROOT, dir).split(path.sep).join('/') || dir
+    let result
+    try {
+        result = scan(dir)
+    } catch (error) {
+        if (!error || error.code !== 'ENOENT') throw error
+        console.error(`check-barrier-fresh-indexers: scan directory does not exist: ${shown}`)
+        return 1
+    }
+    const { files, entryFiles, findings } = result
+    if (entryFiles.length === 0) {
+        console.error(`check-barrier-fresh-indexers: read zero runnable leg files from ${shown}`)
+        return 1
+    }
+    for (const finding of findings) {
+        console.log(`${finding.file}:${finding.line} label=${finding.label}` + (finding.error ? ` ${finding.error}` : ''))
+    }
+    console.log(`${findings.length} reused-label boot(s) in ${files.length} file(s)`)
+    return findings.length && !argv.includes('--report') ? 1 : 0
+}
+
+module.exports = { findReusedLabelBoots, scan, main }
+
+if (require.main === module) process.exit(main())

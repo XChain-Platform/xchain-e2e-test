@@ -24,13 +24,14 @@
 
 const assert       = require('assert')
 const crypto       = require('crypto')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const stakeHelper  = require('../helpers/stakeHelper')
 const vmHelper     = require('../helpers/vmHelper')
 const gasHelper    = require('../helpers/gasHelper')
+const { waitForIndexerAtTip } = require('../helpers/indexerWait')
 
 function newSigningPubkey(){
-    let { publicKey } = crypto.generateKeyPairSync('ed25519')
+    const { publicKey } = crypto.generateKeyPairSync('ed25519')
     return publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
 }
 const STAKE_GATED_CONTRACT = `
@@ -72,7 +73,7 @@ async function blockOfAction(actionIndex){
     return rows.length ? Number(rows[0].b) : null
 }
 async function tip(){ const r = await q(`SELECT MAX(block_index) h FROM blocks`, []); return Number(r[0].h) }
-async function mine(n){ try { await regtestMinerConnector.generateBlocks(n) } catch(e){} }
+async function mine(n) { await regtestMinerConnector.generateBlocks(n) }
 async function sleep(ms){ return new Promise(r => setTimeout(r, ms)) }
 const j = (x) => JSON.stringify(x, (k, v) => typeof v === 'bigint' ? Number(v) : v)
 
@@ -86,14 +87,6 @@ async function prepareStaker(){
     await gasHelper.ensureGasBalance(staker, '2000')
     return { staker, pubkey: newSigningPubkey() }
 }
-async function waitForIndexerTip(){
-    // Make sure the INDEXER has caught up to the node tip before we reorg, so the
-    // stake block is definitely processed and the rollback has something to undo.
-    let settle = 0
-    while ((await tip()) < (await nodeConnector.getBlockCount()) && settle++ < 60) { await sleep(1000) }
-    console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
-}
-
 describe('Contract Staking Reorg: a STAKE v3 row rolls back when its block is orphaned', function () {
     this.timeout(0)
     before(async function () {
@@ -108,7 +101,7 @@ describe('Contract Staking Reorg: a STAKE v3 row rolls back when its block is or
 
         const s = await stakeHelper.sendStakeV3(staker, '400.00000000', pubkey, ci, 'XCHAIN')
         assert.strictEqual(s.stake.status, 'valid', 'STAKE v3 valid pre-reorg')
-        let rows = await stakeRows(ci, 'XCHAIN', staker.address)
+        const rows = await stakeRows(ci, 'XCHAIN', staker.address)
         assert.strictEqual(rows.length, 1, 'one contract_stakes row pre-reorg')
         // Use the contract_stakes row's OWN block_index as the authoritative mined
         // block (blockOfAction via transactions can disagree). Invalidate the lower
@@ -121,7 +114,11 @@ describe('Contract Staking Reorg: a STAKE v3 row rolls back when its block is or
             `STAKE must be in a later block than DEPLOY (deploy=${deployBlock} stake=${stakeBlock} rowBlock=${rowBlock} txBlock=${txBlock})`)
         console.log('   staked 400; rowBlock', rowBlock, 'txBlock', txBlock, '-> invalidate', stakeBlock, '(deploy', deployBlock + ')')
 
-        await waitForIndexerTip()
+        // The INDEXER must reach the node tip before we reorg, so the stake block is
+        // definitely processed and the rollback has something to undo. The shared wait
+        // throws on timeout rather than letting the reorg run against a lagging indexer.
+        await waitForIndexerAtTip({ nodeTip: () => nodeConnector.getBlockCount() })
+        console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
 
         // Reorg out the STAKE block.
         await regtestMinerConnector.pauseMining()

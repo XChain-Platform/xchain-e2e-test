@@ -15,9 +15,9 @@
 'use strict';
 
 const assert            = require('assert');
-const transactionHelper = require('../../../transactionHelper');
-const { transactionState } = require('../../../transactionHelper/lib/01_create_and_send_transaction');
-const fixture           = require('../../../attestMirror/mirrorDrillFixture');
+const transactionHelper = require('../../../helpers/core/transactionHelper');
+const { transactionState } = require('../../../helpers/core/transactionHelper/lib/01_create_and_send_transaction');
+const fixture           = require('../../../attestMirror/helpers/mirrorDrillFixture');
 const {
     listCreateWire,
     policyListsWire,
@@ -67,7 +67,7 @@ function fallbackTicks(label) {
     const space = alphabet.length ** 4;
     let seed = 0;
     for (const c of String(label)) seed = (seed * 33 + c.charCodeAt(0)) % space;
-    return Array.from({ length: 128 }, (_, offset) => {
+    return Array.from({ length: 128 }, (internal, offset) => {
         let n = (seed + offset * 7919) % space;
         let tick = '';
         for (let i = 0; i < 4; i++) { tick = alphabet[n % alphabet.length] + tick; n = Math.floor(n / alphabet.length); }
@@ -294,9 +294,33 @@ async function sendCopy(state, T, from, tick, amount, destination, memo) {
     return T.dogeAction(from, sendWireV0('BTC.' + tick, amount, destination, memo || ''), 'sends');
 }
 
-function policyLines(state, snapshotId) {
+// The DOGE indexer's log lines (the header line dropped), oldest first.
+function dogeLogLines(state) {
+    const doge = state.venue.dogeVenue;
+    assert.ok(doge, 'the policy venue has no DOGE indexer to read');
+    return String(doge.logTail('indexer0') || '').split('\n').slice(1);
+}
+
+// A position in the DOGE indexer log, taken before a forgery is injected. The log is a rolling
+// buffer, so the position carries the last line seen beside the count: once the buffer has
+// rolled past the count, policyLines re-finds its place by that line.
+function logOffset(state) {
+    const lines = dogeLogLines(state);
+    return { count: lines.length, last: lines.length ? lines[lines.length - 1] : null };
+}
+
+// The DOGE indexer's own lines naming a snapshot, every one written since `offset` (all that the
+// buffer still holds when none is given). Only the DOGE log is read: AT4 rows reach every venue
+// follower, so each BTC indexer logs its own ingest refusal of a fenced row, and a count over
+// every tail reads five refusals where the destination logged one.
+function policyLines(state, snapshotId, offset) {
     const prefix = String(snapshotId).slice(0, 16);
-    return state.venue.indexerTails(600).split('\n')
+    const lines = dogeLogLines(state);
+    let start = 0;
+    if (offset && offset.last !== null) {
+        start = lines[offset.count - 1] === offset.last ? offset.count : lines.lastIndexOf(offset.last) + 1;
+    }
+    return lines.slice(start)
         .filter((line) => line.includes('XPOLICY') && line.includes(prefix)).map((line) => line.trim().slice(0, 240));
 }
 
@@ -314,6 +338,7 @@ function bind(state, T) {
         oneBtcBlock: (...args) => oneBtcBlock(state, T, ...args),
         listedToken: (...args) => listedToken(state, T, ...args),
         sendCopy: (...args) => sendCopy(state, T, ...args),
+        logOffset: () => logOffset(state),
         policyLines: (...args) => policyLines(state, ...args),
         fundDoge: async (...args) => { await ensureDogeFeeSchedule(state); return T.fundDoge(...args); },
         settleLeg: (...args) => settleLeg(state, ...args),

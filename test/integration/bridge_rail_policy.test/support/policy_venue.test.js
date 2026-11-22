@@ -41,9 +41,9 @@ describe('policy rail venue indexer recovery', function () {
         const venue = {
             indexers,
             statusOf: async (index) => ({ body: { indexerBlock: index === 0 || repaired ? 123 : null } }),
-            _kill: async (proc) => { killed.push(proc); },
-            _conn: { query: async (sql) => { dropped.push(sql); } },
-            _spawnIndexer: async (index) => { spawned.push(index); repaired = true; },
+            ['_kill']: async (proc) => { killed.push(proc); },
+            ['_conn']: { query: async (sql) => { dropped.push(sql); } },
+            ['_spawnIndexer']: async (index) => { spawned.push(index); repaired = true; },
             logTail: () => 'indexer tail',
         };
         const repairedIndexes = await repairUnreadableIndexers(venue, {
@@ -62,7 +62,7 @@ describe('policy rail venue indexer recovery', function () {
         const venue = {
             indexers: [{ index: 0 }],
             statusOf: async () => ({ body: { indexerBlock: reads++ ? 321 : null } }),
-            _kill: async () => { assert.fail('a transient startup must not be rebuilt'); },
+            ['_kill']: async () => { assert.fail('a transient startup must not be rebuilt'); },
         };
         const repaired = await repairUnreadableIndexers(venue, {
             rounds: 2,
@@ -76,9 +76,9 @@ describe('policy rail venue indexer recovery', function () {
         const venue = {
             indexers: [{ index: 3, indexerDbName: 'StillUnreadable', proc: {} }],
             statusOf: async () => ({ body: { indexerBlock: null } }),
-            _kill: async () => {},
-            _conn: { query: async () => {} },
-            _spawnIndexer: async () => {},
+            ['_kill']: async () => {},
+            ['_conn']: { query: async () => {} },
+            ['_spawnIndexer']: async () => {},
         };
         await assert.rejects(repairUnreadableIndexers(venue, {
             rounds: 1,

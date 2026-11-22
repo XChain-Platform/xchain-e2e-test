@@ -10,7 +10,7 @@
 
 
 const assert = require('assert')
-const cryptoHelper = require('../../cryptoHelper')
+const cryptoHelper = require('../../helpers/core/cryptoHelper')
 const issueHelper = require('../../helpers/issueHelper')
 const dispenserHelper = require('../../helpers/dispenserHelper')
 const gasHelper = require('../../helpers/gasHelper')
@@ -21,18 +21,18 @@ describe('DISPENSER', () => {
 
     describe('v2 - edit', () => {
         it('should create and edit a dispenser', async () => {
-            let addr = await cryptoHelper.getNewFundedAddress("DISPENSER.V2", COIN, NETWORK, null, "legacy", 0, 1)
-            let address = addr["address"]
-            let tick = "DISPv2"+address.substring(address.length-8)
+            const addr = await cryptoHelper.getNewFundedAddress("DISPENSER.V2", COIN, NETWORK, null, "legacy", 0, 1)
+            const address = addr["address"]
+            const tick = "DISPv2"+address.substring(address.length-8)
 
             await issueHelper.sendIssueV0(addr, tick, 200, 200, 0, "Dispenser edit test", 200)
             // EDIT v2 stretches expiration to +6 months, chargeable ~91 days at 550 gas/day = 0.5 XCHAIN.
             await gasHelper.ensureGasBalance(addr, '100')
 
-            let expirationDate = new Date()
+            const expirationDate = new Date()
             expirationDate.setMonth(expirationDate.getMonth() + 3)
 
-            let createResult = await dispenserHelper.sendDispenserV0(
+            const createResult = await dispenserHelper.sendDispenserV0(
                 addr,
                 COIN_CODE, tick, 1, 10,
                 COIN_CODE, null, 5, addr["address"],
@@ -40,12 +40,12 @@ describe('DISPENSER', () => {
                 null, null, 'Dispenser to edit'
             )
             assert(createResult.dispenser, "Dispenser should be created")
-            let dispenserActionIndex = Number(createResult.dispenser["action_index"])
+            const dispenserActionIndex = Number(createResult.dispenser["action_index"])
 
-            let newExpiration = new Date()
+            const newExpiration = new Date()
             newExpiration.setMonth(newExpiration.getMonth() + 6)
 
-            let editResult = await dispenserHelper.sendDispenserEditV2(
+            const editResult = await dispenserHelper.sendDispenserEditV2(
                 addr, dispenserActionIndex,
                 50, Math.floor(newExpiration.getTime() / 1000),
                 null, null, "Refilling dispenser"

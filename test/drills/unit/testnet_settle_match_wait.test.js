@@ -1,3 +1,13 @@
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 'use strict';
 
 const assert = require('assert');
@@ -35,7 +45,7 @@ function waitOptions(fetchImpl, extra) {
     }, extra);
 }
 
-describe('testnet cross-chain match wait', function () {
+function registerResolveCases() {
     it('resolves a finalized match that references the ORDER on the a side', async function () {
         const urls = [];
         const match = { status: 'finalized', a_chain: 'BTC', a_action_index: '41', b_chain: 'DOGE', b_action_index: 90 };
@@ -55,7 +65,9 @@ describe('testnet cross-chain match wait', function () {
 
         assert.strictEqual(await awaitCrossChainMatch(waitOptions(fetchImpl)), match);
     });
+}
 
+function registerPollingCases() {
     it('ignores a finalized match for another action index', async function () {
         const urls = [];
         let clock = 0;
@@ -97,4 +109,9 @@ describe('testnet cross-chain match wait', function () {
         const source = fs.readFileSync(path.join(__dirname, '../lib/testnetSettleMatchWait.js'), 'utf8');
         assert.doesNotMatch(source, /\bmine\s*\(/);
     });
+}
+
+describe('testnet cross-chain match wait', function () {
+    registerResolveCases();
+    registerPollingCases();
 });

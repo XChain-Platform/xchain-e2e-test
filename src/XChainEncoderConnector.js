@@ -20,7 +20,34 @@
 
 const axios = require('axios');
 const { getLogger } = require('./lib/logger');
+// Reads a non-2xx body so a refusal is not mistaken for a dead socket (see the helper)
+const { serviceRefusal } = require('./lib/service_refusal');
 const logger = getLogger();
+
+// Cap only the readiness probe: tx building legitimately runs long, so createTx
+// and the cancel builder keep the unbounded config.
+const PING_TIMEOUT_MS = 5000;
+
+// Name the encoder's own refusal (401 key gate, 429 limiter or shed) beside axios's
+// status text; a responseless failure keeps the bare transport message.
+function transportDetail(err) {
+    const refusal = serviceRefusal(err)
+    const message = err && err.message
+    return refusal ? 'encoder refused (' + refusal + '; ' + message + ')' : message
+}
+
+// The Error for a JSON-RPC error body. It keeps the encoder's code and reason
+// (rpcCode, rpcReason, rpcData) beside the message, so a caller branches on the
+// encoder's stable reason (NO_UTXOS: code -32010, data.reason) rather than on its
+// wording or on the generic -32603 every unrelated fault also returns.
+function rpcBodyError(prefix, rpcErr) {
+    const detail = rpcErr ? (rpcErr.message || JSON.stringify(rpcErr)) : 'no result and no error returned'
+    const error = new Error(prefix + detail)
+    error.rpcCode = rpcErr && typeof rpcErr.code === 'number' ? rpcErr.code : null
+    error.rpcData = rpcErr && rpcErr.data && typeof rpcErr.data === 'object' ? rpcErr.data : null
+    error.rpcReason = error.rpcData && typeof error.rpcData.reason === 'string' ? error.rpcData.reason : null
+    return error
+}
 
 class XChainEncoderConnector {
     constructor(url, port, apiKey = null) {
@@ -46,11 +73,15 @@ class XChainEncoderConnector {
             id: 1
         }
 
-        var response = null
+        let response = null
         try {
-            response = await axios.post(this.url, data, this.reqConfig)
+            response = await axios.post(this.url, data, { ...this.reqConfig, timeout: PING_TIMEOUT_MS })
         } catch (err) {
-            logger.info(err)
+            // A probe keeps its boolean sentinel: callers poll on false. Name the
+            // refusal in the log so a refused key is not read as a dead encoder.
+            const refusal = serviceRefusal(err)
+            if (refusal) logger.warn('Encoder ' + this.url + ' refused ping: ' + refusal)
+            else logger.info(err)
             return false
         }
 
@@ -67,25 +98,25 @@ class XChainEncoderConnector {
     // between calls, so this genuinely reconstructs the BIP341 tweak from the record
     // rather than from anything left over from the build; losing that record is what
     // strands the commit's value in an address the wallet cannot re-derive.
-    async createEnvelopeCancelTx({ commitTxid, commitVout, commitValue, internalPubkey, tapleafHash, destination, feePerKb = null }){
+    // Send replacebyfee only when given, untouched, so the encoder's strict validator judges it.
+    async createEnvelopeCancelTx({ commitTxid, commitVout, commitValue, internalPubkey, tapleafHash, destination, feePerKb = null, replacebyfee }){
         const dataToSend = {
             jsonrpc: '2.0',
             method: 'create_envelope_cancel_tx',
             params: { commitTxid, commitVout, commitValue, internalPubkey, tapleafHash, destination, feePerKb },
             id: 1
         }
+        if (replacebyfee !== undefined) dataToSend.params.replacebyfee = replacebyfee
 
         let response = null
         try {
             response = await axios.post(this.url, dataToSend, this.reqConfig)
         } catch (err){
-            throw new Error('Error trying to create an envelope cancel tx: ' + (err && err.message))
+            throw new Error('Error trying to create an envelope cancel tx: ' + transportDetail(err))
         }
 
         if (response.data.result) return response.data.result
-        const rpcErr = response.data && response.data.error
-        throw new Error('Error trying to create an envelope cancel tx: ' +
-            (rpcErr ? (rpcErr.message || JSON.stringify(rpcErr)) : 'no result and no error returned'))
+        throw rpcBodyError('Error trying to create an envelope cancel tx: ', response.data && response.data.error)
     }
 
     // `compress` is TRI-STATE and deliberately last: null/undefined leaves the
@@ -127,18 +158,15 @@ class XChainEncoderConnector {
             response = await axios.post(this.url, dataToSend, this.reqConfig)
         } catch (err){
             logger.info(err)
-            throw new Error('Error trying to create a tx with the encoder module: ' + (err && err.message));
+            throw new Error('Error trying to create a tx with the encoder module: ' + transportDetail(err));
         }
 
         if (response.data.result) {
             return response.data.result;
         } else {
-            // Surface the JSON-RPC error so callers (e.g. the stale-UTXO
-            // retry helper) can pattern-match on the underlying cause.
-            // Common transient: "no utxos were provided and no utxos found".
-            const rpcErr = response.data && response.data.error;
-            const detail = rpcErr ? (rpcErr.message || JSON.stringify(rpcErr)) : 'no result and no error returned';
-            throw new Error('Error trying to create a tx with the encoder module: ' + detail);
+            // The stale-UTXO retry helpers key on rpcReason NO_UTXOS: the tracker
+            // had not yet indexed the change output the previous tx left.
+            throw rpcBodyError('Error trying to create a tx with the encoder module: ', response.data && response.data.error);
         }
     }
 }

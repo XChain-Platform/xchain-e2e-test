@@ -62,15 +62,15 @@
  * Run (host with regtest stack + Node 22). It rides `npm run test:sdk` (whose glob
  * is test/sdk/(**)/*.sdk.test.js); on its own:
  *     COIN=bitcoin NETWORK=regtest npx mocha --timeout 0 --exit \
- *         --require ./test/initialCheck.test.js test/sdk/chunkedDeployDeferred.sdk.test.js
+ *         --require ./test/initial_check.test.js test/sdk/chunkedDeployDeferred.sdk.test.js
  *
  ********************************************************************/
 
 'use strict';
 
 const { expect } = require('chai');
-const cryptoHelper = require('../../cryptoHelper');
-const { makeSdk, deployContract, fundedGasAddress, mine, submitOpts, uniqueTick } = require('../sdkHelper');
+const cryptoHelper = require('../../helpers/core/cryptoHelper');
+const { makeSdk, deployContract, fundedGasAddress, mine, submitOpts, uniqueTick } = require('../helpers/sdkHelper');
 const { snapshotWindow, replayWindowInOrder, unconfirmedAncestors, placeBlockInOrder } = require('../helpers/rawHexBlocks');
 const { chunkHelper } = require('xchain-sdk');
 

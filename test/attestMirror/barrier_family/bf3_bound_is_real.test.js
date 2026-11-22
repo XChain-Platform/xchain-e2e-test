@@ -32,12 +32,12 @@
 const assert = require('assert')
 const path = require('path')
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const fixture = require('../helpers/barrierFamilyFixture')
 const rows = require('../helpers/barrierFamilyRows')
 const drive = require('../helpers/barrierFamilyDrive')
-const { diffStateHashes } = require('../mirrorDrillWaits')
+const { diffStateHashes } = require('../helpers/mirrorDrillWaits')
 
 const BUILD_ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const PINNED = 0
@@ -47,6 +47,10 @@ const REASON = 'match_sync_barrier'
 const ARMED_RUN = process.env.BF3_ARMED !== '0'
 // The hold must cross the ceiling: the ceiling, one more barrier cycle, and slack.
 const CEILING_WAIT_MS = (fixture.HOLD_CEILING_S + (2 * fixture.BARRIER_CYCLE_S) + 120) * 1000
+// The drill block's stamp must outlive the hold: once the stream watermark passes it, the
+// admission-era stream escape releases the pinned block by time. The hold starts a barrier
+// cycle after the block, so a runner's stamp shortened to the ceiling commits it early.
+const DRILL_STAMP_AHEAD_S = Math.max(drive.STAMP_AHEAD_S, CEILING_WAIT_MS / 1000 + (2 * fixture.BARRIER_CYCLE_S))
 // How long the pinned heights map must read frozen while ts flows. Read BEFORE the ceiling
 // (the resync resets the age) and waited for, so the height dimension has had two minutes to fire.
 const FROZEN_MIN_MS = 2 * 60 * 1000
@@ -59,6 +63,7 @@ describe('BF3: the bound is real, a pinned height holds one member and only that
     before(async function () {
         const up = await drive.bootFamilyVenue({
             label: 'bf3', repoRoot: BUILD_ROOT, armed: ARMED_RUN ? [PINNED, PEER] : [], armHubs: ARMED_RUN,
+            venue: { freshIndexers: true },
         })
         Object.assign(ctx, up, { coin: up.evidence.coinCode })
     })
@@ -67,7 +72,7 @@ describe('BF3: the bound is real, a pinned height holds one member and only that
         // A case that failed while the chain was held must not leave the miner paused.
         await drive.releaseChain(ctx.btc)
         if (!ctx.venue) return
-        try { ctx.venue.releaseMirrorHeights(PINNED) } catch (_) { /* never armed */ }
+        try { ctx.venue.releaseMirrorHeights(PINNED) } catch (internal) { /* never armed */ }
         await ctx.venue.stop()
     })
 
@@ -101,12 +106,11 @@ async function seedAndPin (ctx) {
     const tip = held.tip
     ctx.B = tip + 1
     const now = Math.floor(Date.now() / 1000)
-    // Snapshot at B, not the reached tip: a fresh node's stake re-derivation rejects a synthetic capability row at a reached height.
     const base = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: now, snapshotBlock: ctx.B }
-    await drive.seedMirrors(ctx.venue, [
-        rows.inertRow('capability_snapshots', Object.assign({ tag: 'bf3|snap|' + tip }, base)),
-        rows.inertRow(TABLE, Object.assign({ tag: 'bf3|match|' + tip, admitBlocks: { BTC: ctx.B } }, base)),
-    ])
+    const match = rows.inertRow(TABLE, Object.assign({ tag: 'bf3|match|' + tip, admitBlocks: { BTC: ctx.B } }, base))
+    const members = [match]
+    const snapshots = await drive.seedSnapshotsFromStake(ctx.venue, PINNED, members, tip)
+    await drive.seedMirrors(ctx.venue, members)
     await drive.waitForMirrorRows(ctx.venue, PINNED, TABLE, 1)
     await drive.waitForMirrorRows(ctx.venue, PEER, TABLE, 1)
     ctx.pin = { [TABLE]: { BTC: fixture.pinnedHeightFor(TABLE, ctx.B) } }
@@ -117,7 +121,7 @@ async function seedAndPin (ctx) {
     await drive.assertChainHeld(ctx.btc, tip, 'the BTC chain, before the drill block,')
     const wall = Math.floor(Date.now() / 1000)
     // Resumes the miner: the hold ends with the drill block.
-    ctx.block = await drive.mineStamped(ctx.btc, wall + drive.STAMP_AHEAD_S)
+    ctx.block = await drive.mineStamped(ctx.btc, wall + DRILL_STAMP_AHEAD_S)
     assert.strictEqual(ctx.block.height, ctx.B, 'the drill block landed at ' + ctx.block.height + ', not B=' + ctx.B)
     console.log('BF3 pinned ' + JSON.stringify(ctx.pin) + ' on indexer ' + PINNED + ' for B=' + ctx.B + ' stamped ' + ctx.block.blockTime)
 }
@@ -139,21 +143,32 @@ async function assertDeferred (ctx) {
 }
 
 async function assertHeightDimension (ctx) {
-    // The member's line is B - margin, one above the pinned height.
-    const target = fixture.pinnedHeightFor(TABLE, ctx.B) + 1
-    // Waited for rather than sampled once: this case now runs before the ceiling, so the heights
-    // map may not have been frozen FROZEN_MIN_MS yet when it starts (rail 2026-09-17: 121448 ms frozen, ts 1413 ms).
-    const got = await drive.waitForStatus(ctx.venue, PINNED, (s) =>
-        s.heightShortfalls && s.heightShortfalls[TABLE + '|' + ctx.coin] === target &&
-        Number(s.heightsFrozenMs) >= FROZEN_MIN_MS && Number(s.watermarkFrozenMs) < 60000, 5 * 60 * 1000)
-    assert.ok(got.ok, 'the height dimension did not stay frozen while ts flowed: ' + JSON.stringify(got.s))
-    const s = got.s
-    console.log('BF3 height dimension: ' + JSON.stringify({ shortfalls: s.heightShortfalls, heightsFrozenMs: s.heightsFrozenMs, watermarkFrozenMs: s.watermarkFrozenMs }))
-    assert.ok(s.heightShortfalls && s.heightShortfalls[TABLE + '|' + ctx.coin] === target,
-        'heightShortfalls does not name ' + TABLE + '|' + ctx.coin + ' at ' + target + ': ' + JSON.stringify(s.heightShortfalls))
-    assert.ok(Number(s.heightsFrozenMs) >= FROZEN_MIN_MS, 'the heights map is not reported frozen: ' + s.heightsFrozenMs)
-    assert.ok(Number(s.watermarkFrozenMs) < 60000, 'ts stopped flowing (' + s.watermarkFrozenMs + ' ms), so the stall is not the height dimension alone')
-    assert.strictEqual(s.height, ctx.B - 1, 'the block committed under the pin')
+    // Hold the chain for the frozen window. heightsFrozenMs is the age of the WHOLE heights map
+    // (xchain-indexer hub_db_sync/watermarks.js resets it when ANY entry grows), and the pin
+    // freezes only this table's entry: every block advances the others, so on a chain that
+    // keeps mining the age never outgrows the block interval (GitHub runner, 60 s blocks).
+    // Holding the miner freezes the whole map while ts keeps flowing, which is the C20
+    // condition under test. The after() hook releases too, so a failure cannot leave it paused.
+    await drive.holdChain(ctx.btc)
+    try {
+        // The member's line is B - margin, one above the pinned height.
+        const target = fixture.pinnedHeightFor(TABLE, ctx.B) + 1
+        // Waited for rather than sampled once: this case now runs before the ceiling, so the heights
+        // map may not have been frozen FROZEN_MIN_MS yet when it starts (rail 2026-09-17: 121448 ms frozen, ts 1413 ms).
+        const got = await drive.waitForStatus(ctx.venue, PINNED, (s) =>
+            s.heightShortfalls && s.heightShortfalls[TABLE + '|' + ctx.coin] === target &&
+            Number(s.heightsFrozenMs) >= FROZEN_MIN_MS && Number(s.watermarkFrozenMs) < 60000, 5 * 60 * 1000)
+        assert.ok(got.ok, 'the height dimension did not stay frozen while ts flowed: ' + JSON.stringify(got.s))
+        const s = got.s
+        console.log('BF3 height dimension: ' + JSON.stringify({ shortfalls: s.heightShortfalls, heightsFrozenMs: s.heightsFrozenMs, watermarkFrozenMs: s.watermarkFrozenMs }))
+        assert.ok(s.heightShortfalls && s.heightShortfalls[TABLE + '|' + ctx.coin] === target,
+            'heightShortfalls does not name ' + TABLE + '|' + ctx.coin + ' at ' + target + ': ' + JSON.stringify(s.heightShortfalls))
+        assert.ok(Number(s.heightsFrozenMs) >= FROZEN_MIN_MS, 'the heights map is not reported frozen: ' + s.heightsFrozenMs)
+        assert.ok(Number(s.watermarkFrozenMs) < 60000, 'ts stopped flowing (' + s.watermarkFrozenMs + ' ms), so the stall is not the height dimension alone')
+        assert.strictEqual(s.height, ctx.B - 1, 'the block committed under the pin')
+    } finally {
+        await drive.releaseChain(ctx.btc)
+    }
 }
 
 async function assertHoldAndCeiling (ctx) {

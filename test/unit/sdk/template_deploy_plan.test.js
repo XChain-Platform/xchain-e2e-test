@@ -30,8 +30,8 @@ const fs     = require('fs');
 const path   = require('path');
 const assert = require('assert');
 
-const { loadCompactTemplate, templateCandidates } = require('../../sdk/templateHelper');
-const { chunkHelper } = require('../../sdk/sdkHelper').loadSDK();
+const { loadCompactTemplate, templateCandidates } = require('../../sdk/helpers/templateHelper');
+const { chunkHelper } = require('../../sdk/helpers/sdkHelper').loadSDK();
 
 const SDK_DIR = path.join(__dirname, '..', '..', 'sdk');
 

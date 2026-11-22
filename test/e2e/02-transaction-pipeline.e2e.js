@@ -9,8 +9,8 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
-const transactionHelper = require('../transactionHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 const issueHelper = require('../helpers/issueHelper')
 
 // P2WSH embeds payload chunks in the witness scripts of segwit outputs:
@@ -151,7 +151,7 @@ describe('E2E: Transaction Pipeline Machinery', () => {
             assert(addr.address, 'Funded address should be truthy')
             // The funded address's own compressed pubkey serves as the 3rd multisig slot;
             // the first two carry the (obfuscated) payload halves.
-            const compressedPubKey = addr.publicKey.toString('hex')
+            const compressedPubKey = Buffer.from(addr.publicKey).toString('hex')
             assert.strictEqual(compressedPubKey.length, 66, 'compressed pubkey should be 33 bytes / 66 hex chars')
 
             const tick = 'E2EMSIG' + addr.address.substring(addr.address.length - 7)

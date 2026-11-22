@@ -39,7 +39,7 @@ const path = require('path');
 // --- Resolve sibling encoder/decoder (monorepo host-run). Skip cleanly if a
 //     standalone checkout doesn't have the siblings present. ---
 function tryRequire(rel) {
-    try { return require(rel); } catch (_) { return null; }
+    try { return require(rel); } catch (internal) { return null; }
 }
 const XChainEncoder =
     tryRequire(path.resolve(__dirname, '../../../xchain-encoder/src/XChainEncoder.js'));

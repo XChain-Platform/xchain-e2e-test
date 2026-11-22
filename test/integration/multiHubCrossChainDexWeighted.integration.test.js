@@ -42,12 +42,13 @@
 'use strict';
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 const assert = require('assert');
 const { MultiValidatorHub, ValidatorIdentity } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
+const { withGiveDecimals } = require('../attestMirror/helpers/crossChainOfferDecimals');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
 const PEER_WAIT_MS = 60_000;   // deadline: waitForMesh returns the moment every socket is open
@@ -61,7 +62,7 @@ const NETWORK      = 'regtest';
 
 // A crossing LTC/DOGE ORDER pair (1:1 price -> always crosses).
 function crossingPair({ ltcIdx, dogeIdx, ltcGive = '90', dogeGive = '40' }) {
-    return {
+    return withGiveDecimals({
         LTC: [ makeOrder({
             action_index: ltcIdx,
             give: { coin: 'LTC',  tick: 'TOKA', amount: ltcGive },
@@ -76,7 +77,7 @@ function crossingPair({ ltcIdx, dogeIdx, ltcGive = '90', dogeGive = '40' }) {
             get_address: 'addr_doge_order_' + dogeIdx + '_on_ltc',
             block_index: BLOCK_INDEX
         }) ]
-    };
+    });
 }
 
 async function driveRound(mvh, settleMs = SETTLE_MS) {
@@ -103,7 +104,7 @@ async function driveRound(mvh, settleMs = SETTLE_MS) {
                 const r = await hub.db.doQuery(
                     "SELECT match_id FROM cross_chain_matches WHERE match_id = ? AND status = 'finalized'", [matchId]);
                 if (r.length >= 1) held++;
-            } catch (_) { /* a hub that cannot be read has not persisted it */ }
+            } catch (internal) { /* a hub that cannot be read has not persisted it */ }
         }
         return { ok: held === mvh.hubs.length, held: held };
     }, { timeoutMs: settleMs, intervalMs: 100 });

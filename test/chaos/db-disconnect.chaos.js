@@ -12,13 +12,13 @@
 
 // Chaos Experiment 5: Database Mid-Query Disconnect (@P1)
 //
-// Verifies that when a MariaDB connection drops during a polling query,
-// the check* methods return null (not throw), release the connection,
-// and the waitFor* polling loop continues retrying.
+// Verifies that when a MariaDB connection drops during a polling query, a
+// direct check* call rejects and releases the connection, the
+// waitFor* polling loop keeps retrying, and a wait that never got an answer says so.
 
 const assert = require('assert')
 const sinon = require('sinon')
-const { createDb, makeMockConnection, makeMockPool, mockMariadb } = require('./chaos-helpers')
+const { createDb, makeMockConnection, makeMockPool, mockMariadb } = require('./helpers/chaos_helpers')
 
 function restoreDbStubs() {
     sinon.restore()
@@ -35,16 +35,14 @@ describe('Chaos Experiment 5: Database Mid-Query Disconnect @P1', function () {
             const { db, mockConn } = createDb()
             mockConn.query.rejects(new Error('ER_CONNECTION_LOST'))
 
-            const result = await db.checkIssue({ tick: 'CHAOS', status: 'valid' })
-
-            assert.strictEqual(result, null)
+            await assert.rejects(db.checkIssue({ tick: 'CHAOS', status: 'valid' }), /ER_CONNECTION_LOST/)
         })
 
         it('releases connection even when query throws', async function () {
             const { db, mockConn } = createDb()
             mockConn.query.rejects(new Error('ER_CONNECTION_LOST'))
 
-            await db.checkIssue({ tick: 'CHAOS' })
+            await assert.rejects(db.checkIssue({ tick: 'CHAOS' }), /ER_CONNECTION_LOST/)
 
             assert(mockConn.release.calledOnce, 'connection must be released in finally block')
         })
@@ -71,13 +69,14 @@ describe('Chaos Experiment 5: Database Mid-Query Disconnect @P1', function () {
             assert(db.sleep.callCount >= 2, 'should sleep between retries')
         })
 
-        it('returns null when disconnects persist until timeMax', async function () {
+        // A wait that never got an answer is not evidence the row is absent.
+        it('rejects with WAIT_NO_ANSWER when disconnects persist until timeMax', async function () {
             const { db, mockConn } = createDb()
             mockConn.query.rejects(new Error('ER_CONNECTION_LOST'))
 
-            const result = await db.waitForIssue({ tick: 'CHAOS' }, 100)
-
-            assert.strictEqual(result, null)
+            // give-up-ok: the wait must refuse, never return a row; assert.rejects pins the refusal.
+            await assert.rejects(db.waitForIssue({ tick: 'CHAOS' }, 100),
+                err => err.code === 'WAIT_NO_ANSWER' && /ER_CONNECTION_LOST/.test(err.message))
             assert(mockConn.release.callCount >= 1, 'connections must be released on each attempt')
         })
 
@@ -108,9 +107,7 @@ describe('Chaos Experiment 5: Database Mid-Query Disconnect @P1', function () {
             const { db, mockConn } = createDb()
             mockConn.query.rejects(new Error('ER_CONNECTION_LOST'))
 
-            const result = await db.checkSend({ tick: 'CHAOS', source: 'addr1' })
-
-            assert.strictEqual(result, null)
+            await assert.rejects(db.checkSend({ tick: 'CHAOS', source: 'addr1' }), /ER_CONNECTION_LOST/)
             assert(mockConn.release.calledOnce)
         })
     })

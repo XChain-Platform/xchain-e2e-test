@@ -5,12 +5,13 @@
 
 const assert = require('node:assert')
 const fs = require('node:fs')
+const os = require('node:os')
 const path = require('node:path')
 const { execFileSync, spawnSync } = require('node:child_process')
-const { resolveBase, selectFastTests } = require('../../bin/ci_fast_select')
+const { ALWAYS, CONSENSUS, WIDEN, resolveBase, selectFastTests } = require('../../bin/ci_fast_select')
 
 const ROOT = path.resolve(__dirname, '..', '..')
-const ALWAYS = [
+const EXPECTED_ALWAYS = [
     'test/unit/coins_conformance.test.js',
     'test/unit/sibling_coverage.test.js',
     'test/unit/suite_parses.test.js',
@@ -40,14 +41,33 @@ function select(changedFiles){
     })
 }
 
-describe('ci fast selector mappings', function(){
+function scratchGit(cwd, args){
+    return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
+}
+
+function writeScratchFile(cwd, file, source){
+    const target = path.join(cwd, file)
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.writeFileSync(target, source)
+}
+
+function scratchCommit(cwd, message, files){
+    scratchGit(cwd, ['add', '--', ...files])
+    scratchGit(cwd, [
+        '-c', 'user.name=Selector Test',
+        '-c', 'user.email=selector-test',
+        'commit', '-m', message,
+    ])
+}
+
+function registerMappingCases(){
     it('maps a changed helper to its unit test and the always-run guards', function(){
         const plan = select(['test/helpers/addressHelper.js'])
         const files = plan.tests.map(test => test.file)
         assert.strictEqual(plan.consensus, false)
         assert.ok(files.includes('test/unit/helpers/addressHelper.test.js'))
         assert.ok(plan.tests.every(test => test.group === 'unit'))
-        for(const guard of ALWAYS) assert.ok(files.includes(guard), guard)
+        for(const guard of EXPECTED_ALWAYS) assert.ok(files.includes(guard), guard)
     })
 
     it('widens a changed consensus coin module', function(){
@@ -56,10 +76,48 @@ describe('ci fast selector mappings', function(){
         assert.ok(plan.reasons.some(reason => reason.includes('src/coins/BTC.js')))
     })
 
+    it('widens a changed core transaction or crypto helper', function(){
+        for(const file of [
+            'test/helpers/core/transactionHelper.js',
+            'test/helpers/core/cryptoHelper.js',
+            'test/helpers/core/transactionHelper/lib/01_create_and_send_transaction.js',
+        ]){
+            const plan = select([file])
+            assert.strictEqual(plan.consensus, true, file)
+            assert.ok(plan.reasons.includes('consensus: ' + file), file)
+        }
+    })
+}
+
+function registerManifestCases(){
+    // Fail on a moved file, which would otherwise drop its widening silently.
+    it('resolves every selector manifest entry to a tracked file', function(){
+        const tracked = git(['ls-files']).split('\n').filter(Boolean)
+        for(const prefix of CONSENSUS.concat(WIDEN)){
+            const resolves = prefix.endsWith('/')
+                ? tracked.some(file => file.startsWith(prefix))
+                : tracked.includes(prefix)
+            assert.ok(resolves, 'selector entry matches no tracked file: ' + prefix)
+        }
+        for(const file of ALWAYS)
+            assert.ok(tracked.includes(file), 'always-run entry is not tracked: ' + file)
+    })
+
+    it('widens changes to the root hook and its companion modules', function(){
+        for(const file of [
+            'test/initial_check.test.js',
+            'test/initial_check.test/teardown.test.js',
+        ]){
+            const plan = select([file])
+            assert.strictEqual(plan.consensus, true, file)
+            assert.ok(plan.reasons.includes('consensus: ' + file), file)
+        }
+    })
+
     it('keeps a documentation-only change to the always-run guards', function(){
         const plan = select(['README.md'])
         assert.strictEqual(plan.consensus, false)
-        assert.deepStrictEqual(plan.tests.map(test => test.file), ALWAYS)
+        assert.deepStrictEqual(plan.tests.map(test => test.file), EXPECTED_ALWAYS)
     })
 
     it('widens a package manifest change', function(){
@@ -79,17 +137,79 @@ describe('ci fast selector mappings', function(){
 
     it('does not select a changed unit path that no longer exists', function(){
         const plan = selectFastTests(['test/unit/deleted.test.js'], {
-            listTests: () => ALWAYS,
+            listTests: () => EXPECTED_ALWAYS,
             findRequirers: () => [],
         })
-        assert.deepStrictEqual(plan.tests.map(test => test.file), ALWAYS)
+        assert.deepStrictEqual(plan.tests.map(test => test.file), EXPECTED_ALWAYS)
     })
+}
+
+function registerReplayCase(){
+    it('replays develop history, compares narrowing, and checks required selections', function(){
+        const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-fast-select-replay-'))
+        try {
+            scratchGit(cwd, ['init', '--initial-branch=develop'])
+            const initial = {
+                'src/coins/rule.js': "module.exports = 'rule'\n",
+                'src/feature/plain.js': "module.exports = 'plain'\n",
+                'test/unit/coins/rule.test.js': "require('../../../src/coins/rule')\n",
+                'test/unit/feature/plain.test.js': "require('../../../src/feature/plain')\n",
+                'test/unit/only.test.js': "module.exports = 'only'\n",
+                'test/unit/other/unrelated.test.js': "module.exports = 'unrelated'\n",
+            }
+            for(const [file, source] of Object.entries(initial)) writeScratchFile(cwd, file, source)
+            scratchCommit(cwd, 'initial files', Object.keys(initial))
+
+            const consensusFile = 'src/coins/rule.js'
+            fs.appendFileSync(path.join(cwd, consensusFile), "module.exports += ' changed'\n")
+            scratchCommit(cwd, 'consensus change', [consensusFile])
+
+            const plainFile = 'src/feature/plain.js'
+            fs.appendFileSync(path.join(cwd, plainFile), "module.exports += ' changed'\n")
+            scratchCommit(cwd, 'plain source change', [plainFile])
+
+            const testFile = 'test/unit/only.test.js'
+            fs.appendFileSync(path.join(cwd, testFile), "module.exports += ' changed'\n")
+            scratchCommit(cwd, 'test only change', [testFile])
+            scratchGit(cwd, ['update-ref', 'refs/remotes/origin/develop', 'HEAD'])
+
+            const selector = path.join(ROOT, 'bin/ci_fast_select.js')
+            const mustSelect = [
+                'src/coins/rule.js:test/unit/coins/rule.test.js',
+                'src/feature/plain.js:test/unit/other/unrelated.test.js',
+            ].join(',')
+            const result = spawnSync(process.execPath, [
+                selector,
+                '--replay', '3',
+                '--narrow', 'src/coins/',
+                '--must-select', mustSelect,
+            ], { cwd, encoding: 'utf8' })
+
+            assert.strictEqual(result.status, 1, result.stderr)
+            const lines = result.stdout.trim().split(/\r?\n/)
+            assert.ok(lines.includes('plan commits consensus-1 changed-tests test-only no-tests'))
+            assert.ok(lines.includes('current 3 1/3 1/3 1/3 0/3'))
+            assert.ok(lines.includes('narrowed 3 0/3 2/3 1/3 0/3'))
+            assert.ok(lines.includes(
+                'must-select PASS src/coins/rule.js:test/unit/coins/rule.test.js'))
+            assert.ok(lines.includes(
+                'must-select FAIL src/feature/plain.js:test/unit/other/unrelated.test.js'))
+        } finally {
+            fs.rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+}
+
+describe('ci fast selector mappings', function(){
+    registerMappingCases()
+    registerManifestCases()
+    registerReplayCase()
 })
 
 describe('ci fast selector dependency widening', function(){
     it('widens when a consensus importer requires a changed source module', function(){
         const plan = selectFastTests(['src/lib/core.js'], {
-            listTests: () => ALWAYS,
+            listTests: () => EXPECTED_ALWAYS,
             findRequirers: needle => needle === 'core' ? ['src/coins/reader.js'] : [],
             readFile: file => file === 'src/coins/reader.js' ? "require('../lib/core')" : '',
         })

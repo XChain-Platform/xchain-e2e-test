@@ -23,7 +23,7 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts } = require('./helpers/sdkHelper');
 
 // OP_RETURN + MULTISIGN + P2SH + P2WSH all pass end-to-end through the SDK.
 const ENCODINGS = ['OP_RETURN', 'MULTISIGN', 'P2SH', 'P2WSH'];

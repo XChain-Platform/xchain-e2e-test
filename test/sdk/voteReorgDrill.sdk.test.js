@@ -39,8 +39,8 @@
 'use strict';
 
 const { expect } = require('chai');
-const cryptoHelper = require('../cryptoHelper');
-const { makeSdk, submit, fundedGasAddress, mine, uniqueTick, submitOpts } = require('./sdkHelper');
+const cryptoHelper = require('../helpers/core/cryptoHelper');
+const { makeSdk, submit, fundedGasAddress, mine, uniqueTick, submitOpts } = require('./helpers/sdkHelper');
 
 function haveConnectors() {
     return global.nodeConnector && global.regtestMinerConnector && global.indexerDatabase;

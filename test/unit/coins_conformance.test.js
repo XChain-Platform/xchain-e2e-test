@@ -34,12 +34,11 @@ const path   = require('path');
 
 const coins = require('../../src/coins');
 const { CONSENSUS_CONFIG_PIN } = require('../../src/coins/consensus_pin.js');
+const { siblingCheckout, skipOrFail } = require('../helpers/sibling_checkout.js');
 
 const LOCAL_COINS_DIR = path.join(__dirname, '..', '..', 'src', 'coins');
 const HUB_DIR   = process.env.XCHAIN_HUB_DIR || path.join(__dirname, '..', '..', '..', 'xchain-hub');
 const CANON_DIR = path.join(HUB_DIR, 'src', 'coins');
-const CANON_PRESENT = fs.existsSync(CANON_DIR);
-const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
 
 // Keep in lockstep with FILES in xchain-hub/bin/sync-coins.sh.
 const VENDORED_FILES = ['BTC.js', 'LTC.js', 'DOGE.js', 'index.js', 'consensus_pin.js'];
@@ -51,8 +50,9 @@ describe('coin-registry conformance (vendored copy) @regression', function(){
             const pin = CONSENSUS_CONFIG_PIN[net];
             if(pin === null || pin === undefined) continue; // pre-arm (mainnet)
             for(const tick of coins.ALLOWED_COINS){
-                if(!pin[tick]) continue; // freshly added chain, not yet pinned
                 it(`${tick}/${net} vendored pin matches the vendored consensusHash`, function(){
+                    // Require every coin pinned on an armed network, as the canonical hub pin test does.
+                    assert.ok(pin[tick], `${tick}/${net} has no pin on an armed network; every ALLOWED_COINS coin must be pinned`);
                     assert.strictEqual(coins.consensusHash(tick, net), String(pin[tick]).toLowerCase());
                 });
             }
@@ -64,11 +64,8 @@ describe('coin-registry conformance (vendored copy) @regression', function(){
 
     describe('byte-identity to canonical xchain-hub/src/coins', function(){
         before(function(){
-            if(!CANON_PRESENT){
-                if(REQUIRE_SIBLINGS)
-                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but canonical xchain-hub coins dir not found at ' + CANON_DIR);
-                this.skip();
-            }
+            skipOrFail(this, siblingCheckout(__dirname, CANON_DIR),
+                'the canonical xchain-hub coins byte-identity guard');
         });
 
         VENDORED_FILES.forEach(function(f){

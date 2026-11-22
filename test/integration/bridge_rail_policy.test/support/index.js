@@ -14,6 +14,7 @@
 
 'use strict';
 
+const assert = require('assert');
 const crypto = require('crypto');
 const axios = require('axios');
 const fs = require('fs');
@@ -22,6 +23,7 @@ const path = require('path');
 
 const bridgeRailVenue = require('../../../helpers/bridgeRailVenue');
 const { policyBridgeRailVenue } = require('./policy_venue');
+const { resolveRailVenueBasePort } = require('../../../helpers/attestMirrorVenue');
 // Bind the shared drive factory to the policy venue subclass only while the factory loads.
 function loadPolicyDriveFactory() {
     const inherited = bridgeRailVenue.BridgeRailVenue;
@@ -31,7 +33,7 @@ function loadPolicyDriveFactory() {
 }
 const createRailDrive = loadPolicyDriveFactory();
 const chainRail = require('../../../helpers/chainRail');
-const cryptoHelper = require('../../../cryptoHelper');
+const cryptoHelper = require('../../../helpers/core/cryptoHelper');
 const gasHelper = require('../../../helpers/gasHelper');
 const nativeFeeHelper = require('../../../helpers/nativeFeeHelper');
 const sendHelper = require('../../../helpers/sendHelper');
@@ -39,8 +41,9 @@ const stakeHelper = require('../../../helpers/stakeHelper');
 const stakeTeardown = require('../../../helpers/stakeTeardown');
 const { resolveDogeFeeDestination } = require('../../../helpers/rail_preflight/policy_fee_destination');
 const { requireHealthyHub } = require('../../../helpers/rail_preflight/hub_health_gate');
-const fixture = require('../../../attestMirror/mirrorDrillFixture');
+const fixture = require('../../../attestMirror/helpers/mirrorDrillFixture');
 const { settleReleaseBatch, waitForCapabilityBaseline } = require('./release_batch');
+const { checkBootstrapGas } = require('./gas_budget');
 const { installStandingHubConnector } = require('./standing_hub');
 const {
     resolveVenueQuorum,
@@ -62,7 +65,7 @@ const BOOTSTRAP_RELEASE_BUDGET_MS = 45 * 60 * 1000;
 const DOGE_CADENCE_MS = 15000;
 const POLICY_DOGE_DB = 'XChain_AM_MVH_bridgerailpolicydoge_Rpl_Ixr0';
 const bootstrapSeeds = new Map();
-const inheritedKnownSignerSeeds = fixture._knownSignerSeeds;
+const inheritedKnownSignerSeeds = fixture['_knownSignerSeeds'];
 let dogeCadenceTimer = null;
 let dogeCadenceWork = null;
 let dogeCadenceStopped = false;
@@ -80,7 +83,7 @@ let lastMiningHoldLog = 0;
 const bootstrapStakerAddresses = new Set();
 
 // Include temporary fixture signers when the venue resolves its usable quorum.
-fixture._knownSignerSeeds = function policyKnownSignerSeeds() {
+fixture['_knownSignerSeeds'] = function policyKnownSignerSeeds() {
     const known = inheritedKnownSignerSeeds();
     for (const [pubkey, hit] of bootstrapSeeds) known.set(pubkey, hit);
     return known;
@@ -118,7 +121,7 @@ function pubkeyInGap(pubkey, lower, upper) {
 function createIdentityInGap(lower, upper, used, index) {
     for (let attempt = 0; attempt < 100000; attempt++) {
         const seedHex = crypto.randomBytes(32).toString('hex');
-        const pubkeyHex = fixture._pubkeyForSeed(seedHex);
+        const pubkeyHex = fixture['_pubkeyForSeed'](seedHex);
         if (used.has(pubkeyHex) || !pubkeyInGap(pubkeyHex, lower, upper)) continue;
         used.add(pubkeyHex);
         bootstrapSeeds.set(pubkeyHex, { seedHex, origin: 'policy rail fixture signer ' + index });
@@ -309,11 +312,21 @@ async function mintBootstrapGas(address, amount) {
     let left = await donor;
     const limit = BigInt(gasHelper.GAS_MAX_MINT);
     while (left > 0n) {
+        // Chunked so one faucet holder can cover each grant; fundGas sends from the faucet
+        // first and mints only while MAX_SUPPLY has room.
         const chunk = left < limit ? left : limit;
         await seedBootstrapPrices(false);
-        await mineBootstrapWork(() => gasHelper.mintGas(address, String(chunk)));
+        await mineBootstrapWork(() => gasHelper.fundGas(address, String(chunk)));
         left -= chunk;
     }
+}
+
+// Refuse before any stake is funded when donors, faucet and MINT headroom cannot cover them.
+async function requireBootstrapGas(need) {
+    const donors = (await loadBootstrapDonorLedger()).map((row) => row.available);
+    const budget = await checkBootstrapGas({ db: indexerDatabase, need, donors });
+    if (!budget.ok) throw new Error(budget.reason);
+    console.log('POLICY RAIL: gas budget ' + budget.summary);
 }
 
 async function prepareBootstrapStaker(identity, index, stake) {
@@ -396,7 +409,7 @@ function seedRecordedSigners() {
         if (!entry.signingSeed || !entry.signingPubkey) continue;
         const pubkey = String(entry.signingPubkey).toLowerCase();
         // Trust a recorded seed only when it still derives the pubkey it was filed under.
-        if (fixture._pubkeyForSeed(entry.signingSeed) !== pubkey) continue;
+        if (fixture['_pubkeyForSeed'](entry.signingSeed) !== pubkey) continue;
         bootstrapSeeds.set(pubkey, { seedHex: entry.signingSeed, origin: 'policy rail recorded signer' });
     }
 }
@@ -422,7 +435,7 @@ async function reuseRecordedSigners() {
     const opening = await readBridgeCapability();
     const recorded = seatedRecordedEntries(opening.set);
     if (!recorded.length) return false;
-    if (!resolveVenueQuorum(seatedRows(opening.set), fixture._knownSignerSeeds()).ok) return false;
+    if (!resolveVenueQuorum(seatedRows(opening.set), fixture['_knownSignerSeeds']()).ok) return false;
     // Teardown owns the release, so the roster it restores excludes the reused signers.
     installBootstrapTeardown({ set: baselineWithout(opening.set, recorded) });
     registerRecordedSigners(recorded);
@@ -482,7 +495,7 @@ async function ensurePolicyQuorum() {
     if (await reuseRecordedSigners()) return;
     const opening = await readBridgeCapability();
     const rows = seatedRows(opening.set);
-    const existing = resolveVenueQuorum(rows, fixture._knownSignerSeeds());
+    const existing = resolveVenueQuorum(rows, fixture['_knownSignerSeeds']());
     // Preserve an already-signable venue without adding redundant fixture stakes.
     if (existing.ok) return;
     // Make the root stake teardown restore and prove the capability this bootstrap changes.
@@ -493,6 +506,7 @@ async function ensurePolicyQuorum() {
     const identities = createBootstrapIdentities(rows);
     const stake = Math.max(BOOTSTRAP_MIN_STAKE,
         Math.floor((2 * totalStake) / identities.length) + BOOTSTRAP_MIN_STAKE);
+    await requireBootstrapGas(identities.length * (stake + 1000));
     const addresses = [];
     for (let i = 0; i < identities.length; i++) {
         addresses.push(await prepareBootstrapStaker(identities[i], i, stake));
@@ -502,7 +516,7 @@ async function ensurePolicyQuorum() {
         await stakeBootstrapBatch(batch, start, stake, addresses);
     }
     const closing = await waitForBootstrapVisibility(identities, stake);
-    const quorum = resolveVenueQuorum(seatedRows(closing.set), fixture._knownSignerSeeds());
+    const quorum = resolveVenueQuorum(seatedRows(closing.set), fixture['_knownSignerSeeds']());
     // Require the final buried set to satisfy the same gate used by the suites.
     if (!quorum.ok) throw new Error('policy rail bootstrap did not produce a quorum: ' + quorum.reason);
     console.log('POLICY RAIL: bootstrapped ' + identities.length +
@@ -665,6 +679,95 @@ async function withPolicyMiningPaused(work) {
     }
 }
 
+// The highest block one venue indexer has committed, read from its own ledger database.
+async function venueIndexerTip(conn, ix) {
+    assert.ok(/^[A-Za-z0-9_]+$/.test(String(ix.indexerDbName)), 'unsafe database name ' + ix.indexerDbName);
+    const rows = await conn.query('SELECT MAX(block_index) AS hi FROM `' + ix.indexerDbName + '`.blocks');
+    return rows.length && rows[0].hi !== null ? Number(rows[0].hi) : null;
+}
+
+async function mirrorHolds(conn, ix, snapshotId) {
+    assert.ok(/^[A-Za-z0-9_]+$/.test(String(ix.mirrorDbName)), 'unsafe database name ' + ix.mirrorDbName);
+    const rows = await conn.query('SELECT 1 FROM `' + ix.mirrorDbName + '`.policy_snapshots WHERE snapshot_id = ? LIMIT 1',
+        [snapshotId]);
+    return rows.length > 0;
+}
+
+/**
+ * Put one policy_snapshots row on every venue hub and into every venue follower's mirror,
+ * BTC included, with BTC held still from before the write until every mirror holds it.
+ *
+ * WHY EVERY FOLLOWER AND NOT ONLY DOGE. The BTC venue indexers follow the same hubs as the
+ * DOGE one (BTC indexer i follows hub i, the DOGE indexer follows hub 0), and a BTC indexer
+ * screens a mirrored policy row too: an origin-chain row is refused terminally and that
+ * refusal is anchored to a minted XPOLICY action. A row only hub 0 held reached BTC indexer
+ * 0 at its next reconnect and not its three peers, so it alone minted that action, its
+ * actions and ledger hashes split from theirs, and hub 0 stopped signing checkpoints and
+ * bridge rounds (measured on the xce3 stack 2026-10-11: AT4 seq gap setup and AT5 never
+ * finalized a lock). Writing to every hub is not enough on its own either: a BTC indexer
+ * parses its next block on its own clock, so one that parses before its reconnect delivers
+ * the row refuses it a block later than its peers. So BTC stops first, every BTC venue
+ * indexer reaches the same tip, the row goes to every hub and every follower re-pages, and
+ * BTC moves again only once every mirror holds it: all four then screen it in one block.
+ *
+ * A row the mirror fences at ingest (foreign network or btc_chain_id) never reaches a
+ * mirror and mints nothing anywhere; pass `{fenced: true}` and only the write and the
+ * re-page are done.
+ *
+ * @param {object} row  a signed policy_snapshots row (HUB.signRecord output)
+ * @param {{fenced?: boolean, timeoutMs?: number}} [opts]
+ * @returns {Promise<{tip: number, written: Array}>}
+ */
+async function injectPolicyRowEverywhere(row, opts) {
+    const o = opts || {};
+    const venue = drive.state.venue;
+    assert.ok(venue && venue.btcVenue && venue.dogeVenue && venue.hubDb, 'the policy venue is not started');
+    const btc = venue.btcVenue.indexers;
+    const followers = btc.concat(venue.dogeVenue.indexers);
+    const db = venue.hubDb;
+    const deadlineFor = () => Date.now() + Number(o.timeoutMs || 5 * 60 * 1000);
+    const conn = await mariadb.createConnection({ host: db.host, port: parseInt(db.port, 10),
+        user: db.user, password: db.pass, connectTimeout: 10000 });
+    try {
+        return await withPolicyMiningPaused(async () => {
+            let tip = null;
+            let deadline = deadlineFor();
+            for (;;) {
+                const tips = [];
+                for (const ix of btc) tips.push(await venueIndexerTip(conn, ix));
+                if (tips.every((t) => t !== null && t === tips[0])) {
+                    // Equal twice across a pause: nothing was in flight between the reads.
+                    await new Promise((r) => setTimeout(r, 3000));
+                    const again = [];
+                    for (const ix of btc) again.push(await venueIndexerTip(conn, ix));
+                    if (again.every((t) => t === tips[0])) { tip = tips[0]; break; }
+                }
+                assert.ok(Date.now() < deadline, 'the BTC venue indexers never met at one tip with BTC paused: ' +
+                    JSON.stringify(tips));
+                await new Promise((r) => setTimeout(r, 2000));
+            }
+            const written = await venue.dogeVenue.injectMirrorRow(row, { table: 'policy_snapshots',
+                key: ['snapshot_id'], hubs: venue.hubs.map((h) => h.index) });
+            for (const ix of btc) if (ix.mirrorProxy) ix.mirrorProxy.dropSockets();
+            if (o.fenced) return { tip, written };
+            deadline = deadlineFor();
+            for (;;) {
+                const missing = [];
+                for (const ix of followers) {
+                    if (!await mirrorHolds(conn, ix, row.snapshot_id)) missing.push(ix.mirrorDbName);
+                }
+                if (!missing.length) break;
+                assert.ok(Date.now() < deadline, 'policy row ' + String(row.snapshot_id).slice(0, 16) +
+                    ' never reached these venue mirrors: ' + missing.join(', '));
+                await new Promise((r) => setTimeout(r, 2000));
+            }
+            return { tip, written };
+        });
+    } finally {
+        await conn.end().catch(() => {});
+    }
+}
+
 async function waitForStandingHub() {
     const deadline = Date.now() + BOOTSTRAP_SYNC_TIMEOUT_MS;
     const connector = installStandingHubConnector();
@@ -705,7 +808,8 @@ before(async function () {
 // it unchanged; the policy readings are bound over them.
 const POLICY_DRIVE = {
     label: 'bridgerailpolicy',
-    basePort: 47000,
+    // AB_VENUE_BASE_PORT (the stack's own window) wins over the fixed 47000 base.
+    basePort: resolveRailVenueBasePort(47000, process.env),
     outerTitle: 'XPOLICY acceptance drive on the BTC/DOGE regtest rail (policy AT1 to AT10)',
     journalSuite: 'bridgeRailPolicy',
     logTag: 'POLICY RAIL',
@@ -733,4 +837,4 @@ after(async function () {
     finally { await stopDogeCadence(); }
 });
 
-module.exports = Object.assign({ POLICY_DRIVE }, drive, policy.bind(drive.state, drive));
+module.exports = Object.assign({ POLICY_DRIVE, injectPolicyRowEverywhere }, drive, policy.bind(drive.state, drive));

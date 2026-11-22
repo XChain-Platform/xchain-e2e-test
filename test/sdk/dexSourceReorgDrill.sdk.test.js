@@ -54,8 +54,8 @@
 
 const { expect } = require('chai');
 const mariadb = require('mariadb');
-const cryptoHelper = require('../cryptoHelper');
-const { makeSdk, submit, fundedGasAddress, mine, submitOpts, XChainSDK } = require('./sdkHelper');
+const cryptoHelper = require('../helpers/core/cryptoHelper');
+const { makeSdk, submit, fundedGasAddress, mine, submitOpts, XChainSDK } = require('./helpers/sdkHelper');
 
 const DB_HOST = process.env.XCALL_DB_HOST || '127.0.0.1';
 const DB_PORT = parseInt(process.env.XCALL_DB_PORT || '13306', 10);

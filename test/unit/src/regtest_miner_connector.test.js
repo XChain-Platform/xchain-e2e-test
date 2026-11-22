@@ -14,7 +14,7 @@ const assert = require('assert');
 const sinon  = require('sinon');
 const axios  = require('axios');
 
-const RegtestMinerConnector = require('../../../src/RegtestMinerConnector');
+const RegtestMinerConnector = require('../../../src/regtest_miner_connector');
 
 const URL  = 'localhost';
 const PORT = 18444;
@@ -285,7 +285,7 @@ describe('RegtestMinerConnector', function () {
         it('uses the miner when it implements set_mock_time', async function () {
             axiosPostStub.resolves({ data: { result: 'ok' } });
             let nodeCalls = 0;
-            global.nodeConnector = { _rpc: async () => { nodeCalls++; return null } };
+            global.nodeConnector = { ['_rpc']: async () => { nodeCalls++; return null } };
             const result = await connector.setMockTime(1785126915);
             assert.strictEqual(result, 'ok');
             assert.strictEqual(nodeCalls, 0, 'a capable miner must not be bypassed');
@@ -296,7 +296,7 @@ describe('RegtestMinerConnector', function () {
         it('falls back to the node RPC when the miner has no set_mock_time', async function () {
             axiosPostStub.resolves({ data: { error: 'Method not found - set_mock_time' } });
             const seen = [];
-            global.nodeConnector = { _rpc: async (m, a) => { seen.push([m, a]); return null } };
+            global.nodeConnector = { ['_rpc']: async (m, a) => { seen.push([m, a]); return null } };
             await connector.setMockTime('1785126915');
             assert.deepStrictEqual(seen, [['setmocktime', [1785126915]]],
                 'the timestamp must reach the node as a NUMBER, whatever the caller passed');
@@ -308,7 +308,7 @@ describe('RegtestMinerConnector', function () {
             // Falling back here would drive a node the miner deliberately protected.
             axiosPostStub.resolves({ data: { error: 'refused: mainnet' } });
             let nodeCalls = 0;
-            global.nodeConnector = { _rpc: async () => { nodeCalls++; return null } };
+            global.nodeConnector = { ['_rpc']: async () => { nodeCalls++; return null } };
             await assert.rejects(() => connector.setMockTime(1), /refused: mainnet/);
             assert.strictEqual(nodeCalls, 0);
             delete global.nodeConnector;
@@ -318,6 +318,65 @@ describe('RegtestMinerConnector', function () {
             axiosPostStub.resolves({ data: { error: 'Method not found - set_mock_time' } });
             delete global.nodeConnector;
             await assert.rejects(() => connector.setMockTime(1), /Method not found/);
+        });
+    });
+});
+
+// A miner started with MINER_API_KEY answers a missing or wrong key with HTTP 401
+// and an {error} body. Axios rejects on any non-2xx, so the connector must read
+// that body itself or the caller sees only a bare status-code message.
+function httpRefusal(status, data) {
+    return Object.assign(new Error('Request failed with status code ' + status), {
+        response: { status, data },
+    });
+}
+
+describe('RegtestMinerConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
+    describe('non-2xx refusals', function () {
+
+        it('names the miner refusal and MINER_API_KEY on a 401 from any control call', async function () {
+            axiosPostStub.rejects(httpRefusal(401, { error: 'Unauthorized: missing or invalid X-API-Key' }));
+            const auth = /refused generate_blocks: Unauthorized: missing or invalid X-API-Key.*MINER_API_KEY/;
+            await assert.rejects(() => connector.generateBlocks(1), auth);
+            await assert.rejects(() => connector.sendFunds('addr', 1), /refused send_funds: Unauthorized.*MINER_API_KEY/);
+            await assert.rejects(() => connector.pauseMining(), /refused pause_mining: Unauthorized.*MINER_API_KEY/);
+        });
+
+        it('names the status without the key hint on a non-401 refusal', async function () {
+            axiosPostStub.rejects(httpRefusal(502, {}));
+            await assert.rejects(() => connector.setIdleMineInterval(0), (err) => {
+                assert.match(err.message, /refused set_idle_mine_interval: HTTP 502/);
+                assert.doesNotMatch(err.message, /MINER_API_KEY/);
+                return true;
+            });
+        });
+
+        it('names the refusal on a non-2xx status read, through getIdleMineInterval too', async function () {
+            axiosPostStub.rejects(httpRefusal(503, { error: 'Service Unavailable' }));
+            await assert.rejects(() => connector.getStatus(), (err) => {
+                assert.match(err.message, /refused status: Service Unavailable/);
+                assert.doesNotMatch(err.message, /MINER_API_KEY/);
+                assert.strictEqual(err.response.status, 503);
+                return true;
+            });
+            await assert.rejects(() => connector.getIdleMineInterval(), /refused status: Service Unavailable/);
+        });
+
+        it('rethrows a responseless failure unchanged', async function () {
+            const dead = new Error('connect ECONNREFUSED 127.0.0.1:18444');
+            axiosPostStub.rejects(dead);
+            await assert.rejects(() => connector.resumeMining(), (err) => err === dead);
+        });
+
+        it('fails setMockTime loudly on a 401 instead of falling back to the node', async function () {
+            axiosPostStub.rejects(httpRefusal(401, { error: 'Unauthorized: missing or invalid X-API-Key' }));
+            let nodeCalls = 0;
+            global.nodeConnector = { ['_rpc']: async () => { nodeCalls++; return null } };
+            await assert.rejects(() => connector.setMockTime(1), /refused set_mock_time: Unauthorized.*MINER_API_KEY/);
+            assert.strictEqual(nodeCalls, 0, 'a key mismatch must not be routed around');
+            delete global.nodeConnector;
         });
     });
 });

@@ -16,7 +16,7 @@
 const assert = require('assert')
 const sinon = require('sinon')
 
-const CryptoNetworks = require('../../src/CryptoNetworks')
+const CryptoNetworks = require('../../src/crypto_networks')
 const XChainHubConnector = require('../../src/XChainHubConnector')
 
 let cryptoHelper
@@ -26,7 +26,7 @@ function setUpWalletCache() {
     global.regtestMinerConnector = { sendFunds: async () => 'txid-stub' }
     global.nodeConnector = { waitForTx: async () => true }
     global.utxoTrackerConnector = { waitForUtxos: async () => true }
-    cryptoHelper = require('../cryptoHelper')
+    cryptoHelper = require('../helpers/core/cryptoHelper')
 }
 
 describe('Boundary: Global State & Service Discovery', function () {

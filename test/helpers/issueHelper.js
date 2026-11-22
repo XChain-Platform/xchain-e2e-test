@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('./core/transactionHelper')
 const requireRow = require('./requireRow')
 
 function waitForIndexer(method, query, waitMs){
@@ -68,7 +68,7 @@ module.exports = {
         allowList='', blockList='', mintAddressMax='', mintStartBlock='', mintStopBlock='', lockMint='',
         lockMintSupply='', outputType=null, compressedPubKey=null
     ){
-        let issueMessage = "ISSUE|0|"+tick+"|"+maxSupply
+        const issueMessage = "ISSUE|0|"+tick+"|"+maxSupply
             +"|"+maxMint+"|"+decimals+"|"+description+"|"+mintSupply
             +"|"+transfer+"|"+transferSupply+"|"+lockMaxSupply+"|"+lockMaxMint
             +"|"+lockDescription+"|"+lockSleep+"|"+lockCallback
@@ -100,22 +100,22 @@ module.exports = {
     // status=valid, which is wrong for a test sending an edit the protocol is
     // supposed to refuse (an ownership-escrowed tick). Those tests own the wait.
     async sendIssueV1Raw(addressInfo, tick, description){
-        let issueMessage = "ISSUE|1|"+tick+"|"+description
+        const issueMessage = "ISSUE|1|"+tick+"|"+description
 
         console.log("Creating and sending ISSUE V1 tx (raw, no verdict awaited)...")
         return await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
     },
 
     async sendIssueV1(addressInfo, tick, description){
-        let address = addressInfo["address"]
+        const address = addressInfo["address"]
 
-        let issueMessage = "ISSUE|1|"+tick+"|"+description
+        const issueMessage = "ISSUE|1|"+tick+"|"+description
 
         console.log("Creating and sending ISSUE V1 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
 
         console.log("Waiting for ISSUE in the database...")
-        let issueRow = requireRow(await indexerDatabase.waitForIssue({
+        const issueRow = requireRow(await indexerDatabase.waitForIssue({
             source: address,
             tick: tick,
             txHash: txHash,
@@ -127,21 +127,21 @@ module.exports = {
     },
 
     async sendIssueV2(addressInfo, tick, maxMint, mintSupply, transferSupply, mintAddressMax, mintStartBlock, mintStopBlock, memo){
-        let address = addressInfo["address"]
+        const address = addressInfo["address"]
         if (transferSupply == null) transferSupply = ""
         if (mintAddressMax == null) mintAddressMax = ""
         if (mintStartBlock == null) mintStartBlock = ""
         if (mintStopBlock == null) mintStopBlock = ""
         if (memo == null) memo = ""
 
-        let issueMessage = "ISSUE|2|"+tick+"|"+maxMint+"|"+mintSupply
+        const issueMessage = "ISSUE|2|"+tick+"|"+maxMint+"|"+mintSupply
             +"|"+transferSupply+"|"+mintAddressMax+"|"+mintStartBlock+"|"+mintStopBlock+"|"+memo
 
         console.log("Creating and sending ISSUE V2 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
 
         console.log("Waiting for ISSUE in the database...")
-        let issueRow = requireRow(await indexerDatabase.waitForIssue({
+        const issueRow = requireRow(await indexerDatabase.waitForIssue({
             source: address,
             tick: tick,
             txHash: txHash,
@@ -152,7 +152,7 @@ module.exports = {
     },
 
     async sendIssueV3(addressInfo, tick, lockMaxSupply, lockMaxMint, lockDescription, lockSleep, lockCallback, lockMint, lockMintSupply, memo){
-        let address = addressInfo["address"]
+        const address = addressInfo["address"]
         if (lockMaxSupply == null) lockMaxSupply = ""
         if (lockMaxMint == null) lockMaxMint = ""
         if (lockDescription == null) lockDescription = ""
@@ -162,14 +162,14 @@ module.exports = {
         if (lockMintSupply == null) lockMintSupply = ""
         if (memo == null) memo = ""
 
-        let issueMessage = "ISSUE|3|"+tick+"|"+lockMaxSupply+"|"+lockMaxMint
+        const issueMessage = "ISSUE|3|"+tick+"|"+lockMaxSupply+"|"+lockMaxMint
             +"|"+lockDescription+"|"+lockSleep+"|"+lockCallback+"|"+lockMint+"|"+lockMintSupply+"|"+memo
 
         console.log("Creating and sending ISSUE V3 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
 
         console.log("Waiting for ISSUE in the database...")
-        let issueRow = requireRow(await indexerDatabase.waitForIssue({
+        const issueRow = requireRow(await indexerDatabase.waitForIssue({
             source: address,
             tick: tick,
             txHash: txHash,
@@ -180,19 +180,19 @@ module.exports = {
     },
 
     async sendIssueV4(addressInfo, tick, callbackBlock, callbackTick, callbackAmount, memo){
-        let address = addressInfo["address"]
+        const address = addressInfo["address"]
         if (callbackBlock == null) callbackBlock = ""
         if (callbackTick == null) callbackTick = ""
         if (callbackAmount == null) callbackAmount = ""
         if (memo == null) memo = ""
 
-        let issueMessage = "ISSUE|4|"+tick+"|"+callbackBlock+"|"+callbackTick+"|"+callbackAmount+"|"+memo
+        const issueMessage = "ISSUE|4|"+tick+"|"+callbackBlock+"|"+callbackTick+"|"+callbackAmount+"|"+memo
 
         console.log("Creating and sending ISSUE V4 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
 
         console.log("Waiting for ISSUE in the database...")
-        let issueRow = requireRow(await indexerDatabase.waitForIssue({
+        const issueRow = requireRow(await indexerDatabase.waitForIssue({
             source: address,
             tick: tick,
             txHash: txHash,
@@ -210,25 +210,25 @@ module.exports = {
         if (blockList == null) blockList = ""
         if (memo == null) memo = ""
 
-        let issueMessage = "ISSUE|5|"+tick+"|"+allowList+"|"+blockList+"|"+memo
+        const issueMessage = "ISSUE|5|"+tick+"|"+allowList+"|"+blockList+"|"+memo
 
         console.log("Creating and sending ISSUE V5 tx (raw, no verdict awaited)...")
         return await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
     },
 
     async sendIssueV5(addressInfo, tick, allowList, blockList, memo){
-        let address = addressInfo["address"]
+        const address = addressInfo["address"]
         if (allowList == null) allowList = ""
         if (blockList == null) blockList = ""
         if (memo == null) memo = ""
 
-        let issueMessage = "ISSUE|5|"+tick+"|"+allowList+"|"+blockList+"|"+memo
+        const issueMessage = "ISSUE|5|"+tick+"|"+allowList+"|"+blockList+"|"+memo
 
         console.log("Creating and sending ISSUE V5 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
 
         console.log("Waiting for ISSUE in the database...")
-        let issueRow = requireRow(await indexerDatabase.waitForIssue({
+        const issueRow = requireRow(await indexerDatabase.waitForIssue({
             source: address,
             tick: tick,
             txHash: txHash,

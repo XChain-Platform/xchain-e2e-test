@@ -180,6 +180,30 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
             const status = await tracker.quiesce({ timeoutMs: 20, pollMs: 1 });
             assert.strictEqual(status.ready, false);
         });
+    });
+});
+
+describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
+    beforeEach(setupTracker);
+    afterEach(teardownTracker);
+    describe('quiesce probe accounting', function () {
+        it('returns the last answered status when a later probe gives no answer', async function () {
+            const probe = sinon.stub(tracker, 'getQuiescentStatus');
+            probe.onCall(0).resolves({ ready: false, mempool_size: 2, tracker_height: 5 });
+            probe.resolves(null);
+            sinon.stub(tracker, 'sleep').resolves();
+
+            const status = await tracker.quiesce({ timeoutMs: 30, pollMs: 1 });
+            assert.strictEqual(status.ready, false);
+            assert.strictEqual(status.mempool_size, 2);
+            assert.ok(status.noResponses > 0, 'expected the unanswered probes to be tallied');
+        });
+
+        it('tallies zero no-responses when every probe answers', async function () {
+            sinon.stub(tracker, 'getQuiescentStatus').resolves({ ready: true });
+            const status = await tracker.quiesce({ timeoutMs: 1000, pollMs: 1 });
+            assert.strictEqual(status.noResponses, 0);
+        });
 
         it('leaves a null no-response status null', async function () {
             sinon.stub(tracker, 'getQuiescentStatus').resolves(null);
@@ -332,6 +356,38 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
             } finally {
                 dateStub.restore();
             }
+        });
+    });
+});
+
+// The deadline loops check their budget only between requests, so every call they
+// poll must carry its own request timeout or a silent tracker hangs the barrier.
+describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
+    beforeEach(setupTracker);
+    afterEach(teardownTracker);
+    describe('deadline-polled calls carry a request timeout', function () {
+        const timedOut = () => Object.assign(new Error('timeout of 5000ms exceeded'), { code: 'ECONNABORTED' });
+        const polled = [
+            ['ping', () => tracker.ping(), { result: 'pong' }],
+            ['getSyncStatus', () => tracker.getSyncStatus(), { result: { synced: true } }],
+            ['getQuiescentStatus', () => tracker.getQuiescentStatus(), { result: { ready: true } }],
+            ['getUtxosFromAddress', () => tracker.getUtxosFromAddress('bcrt1qtest'), { result: { utxos: [] } }],
+        ];
+        for (const [name, call, body] of polled) {
+            it(`${name} bounds its request and keeps the JSON header`, async function () {
+                axiosPostStub.resolves(makeResponse(body));
+                await call();
+                const opts = axiosPostStub.firstCall.args[2];
+                assert.ok(opts.timeout > 0, `${name} posted with no timeout`);
+                assert.strictEqual(opts.headers['Content-Type'], 'application/json');
+            });
+        }
+
+        it('maps a timed-out status probe to the null sentinel the loops poll on', async function () {
+            axiosPostStub.rejects(timedOut());
+            assert.strictEqual(await tracker.getQuiescentStatus(), null);
+            assert.strictEqual(await tracker.getSyncStatus(), null);
+            assert.strictEqual(await tracker.ping(), false);
         });
     });
 });

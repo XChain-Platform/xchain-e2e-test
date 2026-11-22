@@ -20,8 +20,8 @@ const fs     = require('fs')
 const os     = require('os')
 const path   = require('path')
 
-const checker = require('../../../scripts/check-request-row-wait')
-const script  = path.join(__dirname, '..', '..', '..', 'scripts', 'check-request-row-wait.js')
+const checker = require('../../../bin/check-request-row-wait')
+const script  = path.join(__dirname, '..', '..', '..', 'bin', 'check-request-row-wait.js')
 
 function scan (lines) {
     return checker.scanSource(lines.join('\n'), 'fixture.test.js')
@@ -31,7 +31,7 @@ function run (args) {
     return cp.spawnSync(process.execPath, [script].concat(args), { encoding: 'utf8' })
 }
 
-describe('check-request-row-wait classifications', function () {
+function registerWaitClassifications () {
     it('recognises a height wait on the emitted request block as guarded', function () {
         const hits = scan([
             'async function check(request) {',
@@ -67,7 +67,9 @@ describe('check-request-row-wait classifications', function () {
         ])
         assert.strictEqual(hits[0].status, 'unguarded')
     })
+}
 
+function registerControlFlowClassifications () {
     it('credits a dominating wait outside a loop and explains the loop path', function () {
         const hits = scan([
             'async function check(request) {',
@@ -92,7 +94,9 @@ describe('check-request-row-wait classifications', function () {
         ])
         assert.strictEqual(hits[0].status, 'unguarded')
     })
+}
 
+function registerMarkerClassifications () {
     it('reports an annotated deliberate exception instead of calling it clean', function () {
         const hits = scan([
             'async function check(requestId) {',
@@ -103,6 +107,42 @@ describe('check-request-row-wait classifications', function () {
         assert.strictEqual(hits[0].status, 'exception')
         assert.match(hits[0].reason, /absence is the assertion/)
     })
+
+    it('reports a one-word marker reason as unguarded, not as an exception', function () {
+        const hits = scan([
+            'async function check(requestId) {',
+            '    // request-row-wait-ok: absence',
+            '    return readRequestRow(venue, 0, requestId)',
+            '}',
+        ])
+        assert.strictEqual(hits[0].status, 'unguarded')
+    })
+
+    it('does not accept marker text inside a string', function () {
+        const hits = scan([
+            'async function check(requestId) {',
+            "    const note = '// request-row-wait-ok: absence is deliberately observed here.'",
+            '    return readRequestRow(venue, 0, requestId)',
+            '}',
+        ])
+        assert.strictEqual(hits[0].status, 'unguarded')
+    })
+
+    it('accepts a real marker after a string containing double slashes', function () {
+        const hits = scan([
+            'async function check(requestId) {',
+            "    const ref = 'proto://value'; return readRequestRow(venue, 0, requestId) // " +
+                'request-row-wait-ok: absence is deliberately observed here.',
+            '}',
+        ])
+        assert.strictEqual(hits[0].status, 'exception')
+    })
+}
+
+describe('check-request-row-wait classifications', function () {
+    registerWaitClassifications()
+    registerControlFlowClassifications()
+    registerMarkerClassifications()
 })
 
 describe('check-request-row-wait calibration fixtures', function () {
@@ -136,7 +176,7 @@ describe('check-request-row-wait calibration fixtures', function () {
     })
 })
 
-describe('check-request-row-wait input refusal', function () {
+function registerScanExitCodes () {
     it('exits one and names an unguarded request-row read', function () {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'request-row-wait-bad-'))
         const file = path.join(dir, 'bad.js')
@@ -177,7 +217,9 @@ describe('check-request-row-wait input refusal', function () {
             fs.rmSync(dir, { recursive: true, force: true })
         }
     })
+}
 
+function registerUnreadableInputRefusals () {
     it('distinguishes a missing path from an empty directory', function () {
         const missing = path.join(os.tmpdir(), 'request-row-wait-missing-' + process.pid)
         const result = run([missing])
@@ -198,4 +240,9 @@ describe('check-request-row-wait input refusal', function () {
             fs.rmSync(dir, { recursive: true, force: true })
         }
     })
+}
+
+describe('check-request-row-wait input refusal', function () {
+    registerScanExitCodes()
+    registerUnreadableInputRefusals()
 })

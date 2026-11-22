@@ -36,7 +36,8 @@
 const { expect } = require('chai');
 const axios = require('axios');
 const mariadb = require('mariadb');
-const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHelper');
+const { minerRpc } = require('../helpers/minerRpc');
+const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./helpers/sdkHelper');
 
 // Source-side contract (BTC), same shape as xcall.sdk.test.js: parameterized
 // fire-and-record, callback keyed by call_id so concurrent calls don't collide.
@@ -118,8 +119,9 @@ async function rpc(url, method, params) {
     return res.data ? res.data.result : null;
 }
 
+// A refused mine must fail the drill, never read as a block that was mined.
 async function mineTarget(count) {
-    try { await rpc(TARGET_MINER_URL, 'generate_blocks', { count: count || 1 }); } catch (e) { /* best effort */ }
+    await minerRpc(TARGET_MINER_URL, 'generate_blocks', { count: count || 1 }, { timeout: 15000 });
 }
 
 function contractIndexOf(indexed) {
@@ -191,63 +193,73 @@ function registerScenarioResultTests() {
     });
 }
 
-describe('[sdk] cross-chain call result scenarios (real DOGE target)', function () {
-    this.timeout(0);
-    before(async function () {
-        targetContract = parseInt(process.env.XCALL_TARGET_CONTRACT || '', 10);
-        expect(targetContract, 'XCALL_TARGET_CONTRACT env (DOGE target contract action_index from xcallDogeSetup.js)').to.be.a('number').and.to.be.greaterThan(0);
-        await resetHubRelayTables();
-        sdk = makeSdk();
-        deployer = await fundedGasAddress(sdk, 1);
-        console.log('    [xcall-scn] deployer=' + deployer.address + ' target=' + targetContract);
-    });
-
-    it('STAKE the relay validator for the cross_chain capability (idempotent top-up)', async function () {
-        const hubPubkey = process.env.XCALL_HUB_PUBKEY;
-        expect(hubPubkey, 'XCALL_HUB_PUBKEY env (the relay hub\'s Ed25519 pubkey)').to.match(/^[0-9a-f]{64}$/);
-        try {
-            const res = await submit(sdk,
-                { action: 'STAKE', params: { amount: '5000.00000000', signingPubkey: hubPubkey } },
-                { pubkey: deployer.address, change: deployer.address },
-                submitOpts({ wif: deployer.wif })
-            );
-            expect(res.indexed.status).to.equal('valid');
-        } catch (e) {
-            // A prior run already staked this pubkey (from a different funding
-            // address); the capability stake exists and stays active, which is
-            // all the relay needs.
-            if (!/SIGNING_PUBKEY \(already in use\)/.test(String(e.message))) throw e;
-            console.log('    [xcall-scn] hub pubkey already staked, reusing the active stake');
-        }
-        await mine(8); // past ACTIVATION_DELAY_BLOCKS (6)
-    });
-
-    it('DEPLOY the source-side contract (A) on BTC', async function () {
+async function stakeRelayValidator() {
+    const hubPubkey = process.env.XCALL_HUB_PUBKEY;
+    expect(hubPubkey, 'XCALL_HUB_PUBKEY env (the relay hub\'s Ed25519 pubkey)').to.match(/^[0-9a-f]{64}$/);
+    try {
         const res = await submit(sdk,
-            { action: 'DEPLOY', params: { code: CONTRACT_A, gasLimit: 200000 } },
+            // stake-teardown-ok: seats the fixed relay hub key this venue keeps seated; a release would block its re-stake for the cooldown while the already-in-use branch reads it as seated.
+            { action: 'STAKE', params: { amount: '5000.00000000', signingPubkey: hubPubkey } },
             { pubkey: deployer.address, change: deployer.address },
             submitOpts({ wif: deployer.wif })
         );
         expect(res.indexed.status).to.equal('valid');
-        indexA = contractIndexOf(res.indexed);
-        console.log('    [xcall-scn] A=' + indexA);
-    });
-    it('fires all four scenario calls (concurrent in-flight relay)', async function () {
-        for (const s of SCENARIOS) {
-            const res = await submit(sdk,
-                { action: 'EXECUTE', params: { contractActionIndex: indexA, method: 'callOut', params: [String(targetContract), s.method] } },
-                { pubkey: deployer.address, change: deployer.address },
-                submitOpts({ wif: deployer.wif })
-            );
-            expect(res.indexed.status, s.method + ' EXECUTE').to.equal('valid');
-            await mine(1);
-            const id = await readState(sdk, indexA, 'lastCall');
-            expect(String(id), s.method + ' call_id').to.match(/^[0-9a-f]{64}$/);
-            callIds[s.method] = String(id);
-            console.log('    [xcall-scn] ' + s.method + ' call_id=' + String(id).substring(0, 16) + '...');
-        }
-        expect(new Set(Object.values(callIds)).size, 'distinct call_ids').to.equal(SCENARIOS.length);
-    });
+    } catch (e) {
+        // A prior run already staked this pubkey (from a different funding
+        // address); the capability stake exists and stays active, which is
+        // all the relay needs.
+        if (!/SIGNING_PUBKEY \(already in use\)/.test(String(e.message))) throw e;
+        console.log('    [xcall-scn] hub pubkey already staked, reusing the active stake');
+    }
+    await mine(8); // past ACTIVATION_DELAY_BLOCKS (6)
+}
 
+async function deploySource() {
+    const res = await submit(sdk,
+        { action: 'DEPLOY', params: { code: CONTRACT_A, gasLimit: 200000 } },
+        { pubkey: deployer.address, change: deployer.address },
+        submitOpts({ wif: deployer.wif })
+    );
+    expect(res.indexed.status).to.equal('valid');
+    indexA = contractIndexOf(res.indexed);
+    console.log('    [xcall-scn] A=' + indexA);
+}
+
+async function fireScenarioCalls() {
+    for (const s of SCENARIOS) {
+        const res = await submit(sdk,
+            { action: 'EXECUTE', params: { contractActionIndex: indexA, method: 'callOut', params: [String(targetContract), s.method] } },
+            { pubkey: deployer.address, change: deployer.address },
+            submitOpts({ wif: deployer.wif })
+        );
+        expect(res.indexed.status, s.method + ' EXECUTE').to.equal('valid');
+        await mine(1);
+        const id = await readState(sdk, indexA, 'lastCall');
+        expect(String(id), s.method + ' call_id').to.match(/^[0-9a-f]{64}$/);
+        callIds[s.method] = String(id);
+        console.log('    [xcall-scn] ' + s.method + ' call_id=' + String(id).substring(0, 16) + '...');
+    }
+    expect(new Set(Object.values(callIds)).size, 'distinct call_ids').to.equal(SCENARIOS.length);
+}
+
+function registerSetupTests() {
+    it('STAKE the relay validator for the cross_chain capability (idempotent top-up)', stakeRelayValidator);
+    it('DEPLOY the source-side contract (A) on BTC', deploySource);
+    it('fires all four scenario calls (concurrent in-flight relay)', fireScenarioCalls);
+}
+
+async function prepareScenarioRun() {
+    targetContract = parseInt(process.env.XCALL_TARGET_CONTRACT || '', 10);
+    expect(targetContract, 'XCALL_TARGET_CONTRACT env (DOGE target contract action_index from xcallDogeSetup.js)').to.be.a('number').and.to.be.greaterThan(0);
+    await resetHubRelayTables();
+    sdk = makeSdk();
+    deployer = await fundedGasAddress(sdk, 1);
+    console.log('    [xcall-scn] deployer=' + deployer.address + ' target=' + targetContract);
+}
+
+describe('[sdk] cross-chain call result scenarios (real DOGE target)', function () {
+    this.timeout(0);
+    before(prepareScenarioRun);
+    registerSetupTests();
     registerScenarioResultTests();
 });

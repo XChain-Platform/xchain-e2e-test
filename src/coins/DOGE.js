@@ -93,10 +93,19 @@ module.exports = {
             // plus airdropSetHash - the sha256 over the canonical `name:hash:amount` lines,
             // which genesis.js verifies before it credits anything - followed by a
             // bin/sync-coins.sh re-vendoring wave.
+            // Both hashes re-pinned 2026-10-13: the name registrations BASE,
+            // DASH, HBAR, HOOD, HYPE and NEAR left the CSV manifest so the bridge owns
+            // those chain roots, six rows out of 42,704. They were supply-0, balance-free
+            // name rows with no subassets and no post-genesis action on either chain, so
+            // nothing else in the manifest or the dump moved: the dump loses only those six
+            // names' rows and its ledger and contracts block hashes are unchanged.
+            // The six stay reserved names (RESERVED_FUTURE_ROOTS in xchain-indexer, operator
+            // ruling 2026-10-17): with no row left, a new ISSUE of any of them is refused
+            // wherever TICK_NAMESPACE_ACTIVATION binds (unarmed on mainnet today).
             genesis: {
                 block:      6240000,
-                ledgerHash: '87abac0b03cbd24694f7c5e666425bdae6f9a9c51b826826bd4848bd4ade991b',
-                dumpHash:   '81d3d2cb4714bc40ec12c2d1c8573040858ddf66e4ba89a05d44d86d3bffa0f1',
+                ledgerHash: '888fc0be89d4ac58dff24ef5b02c8ccfb947cef9c3d4bc3b28db2202e68da5df',
+                dumpHash:   '9aae4cdf2bc14de119e089c267d442aec4671e01f6139aff486460798bb96a92',
                 airdropPaths:         [],
                 airdropHashes:        [],
                 airdropAmounts:       [],
@@ -218,10 +227,12 @@ module.exports = {
 
     GAS_PRICE:                        '0.00001',
     UNIFIED_EXPIRATION_FEE_FREE_DAYS: 90,
-    FEE_PAYMENT_MODE:                 'native', // DOGE: native-only; informational, not read at runtime
+    FEE_PAYMENT_MODE:                 'native', // DOGE: native-only; declared mode, classified by coin in the indexer and pinned by a registry test
     FEE_TOLERANCE_MIN:                '0.95',
     FEE_TOLERANCE_MAX:                '1.10',
     ORACLE_MAX_PRICE_AGE_SECONDS:     1800,
+    ORACLE_MAX_PRICE_AGE_HOURLY_SECONDS: 4500, // Fee-gate bound after ORACLE_PRICE_AGE_HOURLY_ACTIVATION:
+                                              // one six-round hourly PRICE wire (3600 s) plus a 900 s margin; below it, 1800 applies.
     VALIDATOR_QUERY_LIMIT:            1000,
 
     GAS_SCHEDULE: {
@@ -261,6 +272,13 @@ module.exports = {
         // 7 (bridgeability opt-in) adds no key: it is an owner edit of an existing row
         // and the issuance fee is first-issuance only.
         XBRIDGE_BASE:          5000,
+        // Sharing a list has one flat fee. Editing a shared list has a base fee
+        // plus a per-item fee for each item added or removed. The base matches
+        // SWEEP_BASE so even the smallest shared edit buys an above-dust native
+        // fee output on LTC and DOGE. Local lists remain free.
+        LIST_SHARE:            100000,
+        LIST_SHARED_EDIT_BASE: 5000,
+        LIST_SHARED_EDIT_PER_ITEM: 100,
         // BET (parimutuel betting, spec decision F): feed creation is duration-
         // metered like ORDER/SWAP/DISPENSER expiration (same free window via
         // UNIFIED_EXPIRATION_FEE_FREE_DAYS) but under its OWN per-day key so the

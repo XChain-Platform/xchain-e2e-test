@@ -27,7 +27,7 @@
  * earned. The drill now reads the live cross_chain stake snapshot off the
  * source indexer, plans the smallest set of members to stop so the survivors
  * satisfy NEITHER the count quorum NOR the stake-weighted threshold
- * (test/sdk/xcallFederationPlan.js), and refuses to run at all on a venue where
+ * (test/sdk/helpers/xcallFederationPlan.js), and refuses to run at all on a venue where
  * that is impossible. Stopping the fewest, heaviest members leaves live hubs
  * standing as under-quorum witnesses, so the expiry is proven against a
  * federation that cannot agree rather than one that is merely absent.
@@ -58,8 +58,9 @@
 const { expect } = require('chai');
 const axios = require('axios');
 const { execFileSync } = require('child_process');
-const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHelper');
-const federation = require('./xcallFederationPlan');
+const { minerRpc } = require('../helpers/minerRpc');
+const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./helpers/sdkHelper');
+const federation = require('./helpers/xcallFederationPlan');
 
 // Short-deadline caller: deadlineBlocks 10 is the protocol minimum.
 const CONTRACT_A = `
@@ -111,10 +112,10 @@ async function rpc(url, method, params) {
     return result;
 }
 
-// Best-effort target mining, so "no DOGE-side execution" is a claim about a
-// chain that was producing blocks and still executed nothing.
+// Strict target mining, so "no DOGE-side execution" is a claim about a chain
+// that was producing blocks and still executed nothing: a refused mine fails the drill.
 async function mineTarget(count) {
-    try { await rpc(TARGET_MINER_URL, 'generate_blocks', { count: count || 1 }); } catch (e) { /* best effort */ }
+    await minerRpc(TARGET_MINER_URL, 'generate_blocks', { count: count || 1 }, { timeout: 15000 });
 }
 
 // Live cross_chain stake snapshot, tolerant of the one-block lag between the
@@ -281,7 +282,7 @@ function registerQuorumPlanTest() {
         // operator either mis-declared the pair or never staked that hub.
         const unstaked = spec.members.filter(m => m.pubkey && !view.sourceByPubkey.has(m.pubkey));
         expect(unstaked.map(m => m.container + '=' + m.pubkey.substring(0, 16) + '...'),
-            'declared members with no active cross_chain stake (run test/sdk/xcallStakeValidators.js)').to.deep.equal([]);
+            'declared members with no active cross_chain stake (run test/sdk/helpers/xcallStakeValidators.js)').to.deep.equal([]);
 
         drop = federation.planQuorumDrop({ snapshot, stoppable: spec.members });
         console.log('    [xcall-exp] quorum=' + drop.countQuorum + '/' + drop.n
@@ -316,6 +317,7 @@ describe('[sdk] cross-chain call deadline expiry (federation below quorum)', fun
         expect(hubPubkey, 'XCALL_HUB_PUBKEY env (the relay hub\'s Ed25519 pubkey)').to.match(/^[0-9a-f]{64}$/);
         try {
             const res = await submit(sdk,
+                // stake-teardown-ok: seats the fixed relay hub key this venue keeps seated; a release would block its re-stake for the cooldown while the already-in-use branch reads it as seated.
                 { action: 'STAKE', params: { amount: '5000.00000000', signingPubkey: hubPubkey } },
                 { pubkey: deployer.address, change: deployer.address },
                 submitOpts({ wif: deployer.wif })

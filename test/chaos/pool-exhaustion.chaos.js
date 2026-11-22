@@ -18,7 +18,7 @@
 
 const assert = require('assert')
 const sinon = require('sinon')
-const { createDb, makeMockConnection, makeMockPool, mockMariadb } = require('./chaos-helpers')
+const { createDb, makeMockConnection, makeMockPool, mockMariadb } = require('./helpers/chaos_helpers')
 const Database = require('../../src/db')
 
 function restorePoolStubs() {

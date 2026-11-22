@@ -1,0 +1,288 @@
+#!/usr/bin/env bash
+#
+# Copyright (c) 2025-2026 Dankest, LLC
+# Based on XChain Platform by Dankest, LLC - https://dankest.llc
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# ---------------------------------------------------------------------------
+# Provision the SECOND indexer node the BET two-node parity drill needs
+# (xchain-e2e-test/test/sdk/betParity.sdk.test.js, spec sec.12 E8).
+#
+# Runs ON the venue host, not the development machine: it drives docker and the
+# stack's own MariaDB container.
+#
+#   bash bin/bet-parity-node.sh up      # clone-forward + launch node B
+#   bash bin/bet-parity-node.sh status  # both tips, side by side
+#   bash bin/bet-parity-node.sh logs
+#   bash bin/bet-parity-node.sh down    # stop node B, keep its database
+#
+# WHY CLONE-FORWARD RATHER THAN GENESIS REPLAY: regtest runs every gate
+# genesis-active, so this chain's history was CREATED gates-on and re-indexing
+# it from block 0 mis-decodes it (proven 2026-07-07; see the
+# drill-clone-forward-venue-recipe memory). Node B therefore inherits a
+# consistent snapshot of node A's database at whatever tip it has and indexes
+# only NEW blocks - which is all the parity drill needs, since it compares the
+# blocks the bet lifecycle lands in.
+#
+# WHY THE DATABASE NAME IS A "Drill" ONE: the per-coin indexer account has
+# USAGE on *.* plus ALL PRIVILEGES on a fixed set of schemas (the standing
+# indexer DB and the three drill DBs left behind by the flag-day drill).
+# Creating a brand-new schema name would need an admin grant, so this reuses
+# the already-granted XChain_BTC_DrillB_Indexer rather than asking for root.
+#
+# SAFETY, AND THE ONE THING THAT MUST NOT BE "HARDENED": node B only ever
+# writes its OWN indexer database, and publishes no host port. But it keeps the
+# FULL environment of node A, HUB_API_URL included, and that is load-bearing
+# rather than lax. The hub is the config oracle: the indexer resolves its hub DB
+# handle (and therefore the fee oracle prices) plus its consensus config through
+# `getallconfigs`. A node B launched without HUB_API_URL silently falls back to
+# its LOCAL database for price_snapshots, finds none, and rejects every
+# native-fee-priced action the source accepted - which is a genuine state
+# divergence caused purely by misconfiguring the follower. That happened on the
+# first build of this script and cost a re-clone: node B rejected an ISSUE with
+# "no current oracle price for BTC/USD" at the exact block the two nodes first
+# disagreed on. A second node is only a parity test if it is configured like the
+# first one.
+#
+# The cost of that is that node B behaves as a full peer: it pushes chain tips
+# and PRICE rounds to the hub the way any indexer does. On a regtest venue that
+# is tolerable (the hub dedupes rounds, and the tip push is skipped while a node
+# is catching up), but it is the reason node B is meant to be torn down with
+# `down` once the drill has run rather than left resident. A failed `up` (a
+# refused or mismatched code identity check, a failed clone or docker step,
+# Ctrl-C) removes node B itself, so a follower on divergent code never lingers.
+#
+# Secrets never reach the terminal: credentials are read straight out of the
+# source container's environment into a 0600 client file inside the database
+# container and a 0600 env-file on the venue host, and are never echoed. An
+# EXIT trap removes that client file on every exit path, failures included.
+# ---------------------------------------------------------------------------
+
+set -euo pipefail
+
+SRC_CONTAINER=${SRC_CONTAINER:-xchain-node-bitcoin-regtest-xchain-indexer}
+DB_CONTAINER=${DB_CONTAINER:-xchain-node-database}
+NETWORK=${NETWORK:-xchain-node-bitcoin-regtest}
+PARITY_CONTAINER=${PARITY_CONTAINER:-xchain-bet-parity-indexer}
+PARITY_DB=${PARITY_DB:-XChain_BTC_DrillB_Indexer}
+WORK=${WORK:-$HOME/bet-parity}
+CNF=/tmp/bet-parity-client.cnf
+
+# Resolved only by the subcommands that read node A (see resolve_src_db), so
+# `down`, `logs` and the usage path still work when node A is stopped or renamed.
+SRC_DB=
+
+# Set by cmd_up just before node B is created, so only a failed `up` tears it
+# down; a failed `status` must never remove a node that passed its checks.
+NODE_B_MANAGED=0
+
+# Runs on every exit once the client file may exist, including set -e aborts,
+# REFUSING/MISMATCH exits and Ctrl-C. It never calls exit, so the status stands.
+cleanup_on_exit() {
+    local rc=$?
+    local remaining
+    # Remove the plaintext credentials file whatever happened before.
+    docker exec "$DB_CONTAINER" rm -f "$CNF" >/dev/null 2>&1 || true
+    if [ "$rc" -ne 0 ] && [ "$NODE_B_MANAGED" = 1 ]; then
+        # Remove a node B that failed its checks: it is a full hub peer (see header).
+        echo "   up failed (exit $rc): removing $PARITY_CONTAINER so it does not stay resident" >&2
+        docker rm -f "$PARITY_CONTAINER" >/dev/null 2>&1 || true
+        # `rm -f ... || true` swallows its own failure, so prove the container is gone.
+        if ! remaining=$(docker ps -aq --filter "name=^${PARITY_CONTAINER}$"); then
+            echo "   WARNING: cannot confirm $PARITY_CONTAINER was removed; check by hand: docker ps -a --filter name=$PARITY_CONTAINER" >&2
+        elif [ -n "$remaining" ]; then
+            echo "   WARNING: $PARITY_CONTAINER still exists; remove it by hand: docker rm -f $PARITY_CONTAINER" >&2
+        fi
+    fi
+}
+
+# Read node A's database name, refusing when node A cannot answer. cmd_up calls
+# it before any destructive step, so a missing node A never drops $PARITY_DB.
+resolve_src_db() {
+    if ! SRC_DB=$(docker exec "$SRC_CONTAINER" printenv INDEXER_DB_NAME) || [ -z "$SRC_DB" ]; then
+        echo "   REFUSING: cannot read INDEXER_DB_NAME from $SRC_CONTAINER (node A stopped, renamed, or SRC_CONTAINER wrong)" >&2
+        exit 1
+    fi
+}
+
+# Node B's database is dropped and recreated by clone_database, so it must never
+# be node A's. Names are compared case-insensitively: a case variant is the same
+# schema on a case-insensitive filesystem. Runs before any destructive step.
+refuse_when_parity_db_is_source() {
+    local want have
+    want=$(printf '%s' "$PARITY_DB" | tr '[:upper:]' '[:lower:]')
+    have=$(printf '%s' "$SRC_DB" | tr '[:upper:]' '[:lower:]')
+    if [ "$want" = "$have" ]; then
+        echo "   REFUSING: PARITY_DB ($PARITY_DB) equals node A's INDEXER_DB_NAME ($SRC_DB); up would drop node A's live database" >&2
+        exit 1
+    fi
+}
+
+# Write a 0600 client options file inside the database container, sourced from
+# the live indexer's own environment. Nothing is printed.
+write_client_cnf() {
+    # Arm the cleanup before anything is written, so a half-written file is covered too.
+    trap cleanup_on_exit EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    local u p
+    u=$(docker exec "$SRC_CONTAINER" printenv INDEXER_DB_USER)
+    p=$(docker exec "$SRC_CONTAINER" printenv INDEXER_DB_PASS)
+    printf '[client]\nuser=%s\npassword=%s\n' "$u" "$p" \
+        | docker exec -i "$DB_CONTAINER" sh -c "umask 077; cat > $CNF"
+}
+
+sql() {
+    docker exec "$DB_CONTAINER" sh -c \
+        "mariadb --defaults-extra-file=$CNF -h 127.0.0.1 -N -e \"$1\""
+}
+
+tip_of() {
+    sql "SELECT COALESCE(MAX(block_index), -1) FROM \\\`$1\\\`.blocks" 2>/dev/null || echo "?"
+}
+
+clone_database() {
+    local attempt=1
+    local max_attempts=3
+
+    while [ "$attempt" -le "$max_attempts" ]; do
+        sql "DROP DATABASE IF EXISTS \\\`$PARITY_DB\\\`; CREATE DATABASE \\\`$PARITY_DB\\\`;"
+        if docker exec "$DB_CONTAINER" sh -c \
+            "mariadb-dump --defaults-extra-file=$CNF -h 127.0.0.1 --single-transaction --quick \
+              --skip-lock-tables --routines --events --triggers $SRC_DB" \
+            | docker exec -i "$DB_CONTAINER" sh -c \
+                "mariadb --defaults-extra-file=$CNF -h 127.0.0.1 $PARITY_DB"; then
+            return 0
+        fi
+
+        if [ "$attempt" -eq "$max_attempts" ]; then
+            echo "   FAILED: database clone failed after $max_attempts attempts" >&2
+            return 1
+        fi
+
+        echo "   database clone attempt $attempt failed; retrying" >&2
+        attempt=$((attempt + 1))
+    done
+}
+
+cmd_up() {
+    local remaining
+    resolve_src_db
+    refuse_when_parity_db_is_source
+    mkdir -p "$WORK"
+    write_client_cnf
+
+    # Node B must be GONE before its own database is touched. A resident follower
+    # keeps its indexer writing $PARITY_DB all through the DROP and the restore
+    # below, and the clone comes out silently inconsistent: --single-transaction
+    # buys a consistent read of the SOURCE, nothing at the destination.
+    echo "== removing any existing $PARITY_CONTAINER before touching $PARITY_DB"
+    docker rm -f "$PARITY_CONTAINER" >/dev/null 2>&1 || true
+    # Refuse unless the listing succeeds and proves the old container is gone.
+    if ! remaining=$(docker ps -aq --filter "name=^${PARITY_CONTAINER}$"); then
+        echo "   REFUSING: cannot confirm $PARITY_CONTAINER was removed (docker ps failed); will not drop $PARITY_DB" >&2
+        exit 1
+    fi
+    if [ -n "$remaining" ]; then
+        echo "   REFUSING: $PARITY_CONTAINER still exists after rm -f; will not drop $PARITY_DB under a live writer" >&2
+        exit 1
+    fi
+
+    echo "== cloning $SRC_DB -> $PARITY_DB (consistent snapshot, node A keeps running)"
+    clone_database
+    echo "   node A tip $(tip_of "$SRC_DB") / node B clone tip $(tip_of "$PARITY_DB")"
+
+    echo "== env-file for node B (0600, never printed)"
+    # Node A's environment verbatim, with ONLY the database redirected. Dropping
+    # anything else here diverges the two nodes by configuration (see the header).
+    ( umask 077
+      docker exec "$SRC_CONTAINER" printenv \
+        | grep -vE '^(HOME|HOSTNAME|PATH|INDEXER_DB_NAME)=' > "$WORK/env.parity"
+      echo "INDEXER_DB_NAME=$PARITY_DB" >> "$WORK/env.parity" )
+
+    echo "== creating $PARITY_CONTAINER from node A's image + node A's live src/"
+    local image
+    image=$(docker inspect -f '{{.Config.Image}}' "$SRC_CONTAINER")
+    # The removal that used to live here now runs at the top of cmd_up, ahead of
+    # the DROP/restore; nothing can have re-created the container since.
+    # From here until the identity check passes, a failed exit removes node B.
+    NODE_B_MANAGED=1
+    docker create --name "$PARITY_CONTAINER" --network "$NETWORK" \
+        --env-file "$WORK/env.parity" "$image" >/dev/null
+    # Copy node A's RUNNING source tree in, not the image's: the P4 BET indexer
+    # was hand-deployed into the live container and is not baked into the image.
+    # Parity between two nodes only means anything if both run the same bytes.
+    docker exec "$SRC_CONTAINER" tar -C /XChainIndexer -cf - src \
+        | docker cp - "$PARITY_CONTAINER:/XChainIndexer"
+    docker start "$PARITY_CONTAINER" >/dev/null
+
+    echo "== code identity check"
+    # Hash the WHOLE src tree, as a sorted per-file manifest of path + content. Two
+    # reasons this is not a *.js filter over concatenated bytes any more:
+    #   - the filter skipped the 185 files under src/sql/ (per-table DDL) and
+    #     src/sql/migrations/ that xchain-indexer's db.js loads at startup, so the
+    #     two nodes could be running different table schemas and still pass;
+    #   - `xargs cat | sha256sum` hashes contents only, so a rename, a move or a
+    #     file split between the trees produced an identical digest.
+    # Same shape as tree_manifest() in xchain-indexer/bin/vendor-vm.sh (unfiltered
+    # find, C-locale sort, per-file manifest); that one hashes with sha1 and adds
+    # package.json, while this check uses sha256 over src/ only.
+    # Paths are relative to /XChainIndexer so the manifest compares across containers.
+    local a b na nb
+    local hash_cmd='cd /XChainIndexer && find src -type f | LC_ALL=C sort | xargs sha256sum | sha256sum'
+    local count_cmd='cd /XChainIndexer && find src -type f | wc -l'
+    # An empty (or missing) tree hashes identically on BOTH sides, so a vacuous gate
+    # is indistinguishable from a passing one. Refuse rather than report parity.
+    na=$(docker exec "$SRC_CONTAINER" sh -c "$count_cmd" | tr -cd '0-9')
+    nb=$(docker exec "$PARITY_CONTAINER" sh -c "$count_cmd" | tr -cd '0-9')
+    if [ "${na:-0}" -lt 1 ] || [ "${nb:-0}" -lt 1 ]; then
+        echo "   REFUSING: src files node A=${na:-0} node B=${nb:-0}; an empty tree passes any digest comparison" >&2
+        exit 1
+    fi
+    a=$(docker exec "$SRC_CONTAINER" sh -c "$hash_cmd" | cut -d' ' -f1)
+    b=$(docker exec "$PARITY_CONTAINER" sh -c "$hash_cmd" | cut -d' ' -f1)
+    if [ "$a" != "$b" ]; then
+        echo "   MISMATCH: node A src $a ($na files) != node B src $b ($nb files)" >&2
+        exit 1
+    fi
+    echo "   both nodes run src sha256 ${a:0:16}... ($na files, .sql schema included)"
+    # Node B passed: keep it resident from here on, whatever happens next.
+    NODE_B_MANAGED=0
+
+    # The EXIT trap armed in write_client_cnf removes the client file.
+    echo "== node B is up; give it a minute to catch up, then:"
+    echo "   BET_PARITY_DB_NAME=$PARITY_DB npm run test:sdk:bet-parity   (from the Mac)"
+}
+
+cmd_status() {
+    resolve_src_db
+    write_client_cnf
+    echo "node A ($SRC_DB): tip $(tip_of "$SRC_DB")"
+    echo "node B ($PARITY_DB): tip $(tip_of "$PARITY_DB")"
+    # The EXIT trap armed in write_client_cnf removes the client file.
+    docker ps --filter "name=$PARITY_CONTAINER" --format '{{.Names}} {{.Status}}'
+}
+
+cmd_logs() { docker logs --tail "${2:-40}" "$PARITY_CONTAINER"; }
+
+cmd_down() {
+    local remaining
+    docker rm -f "$PARITY_CONTAINER" >/dev/null 2>&1 || true
+    if ! remaining=$(docker ps -aq --filter "name=^${PARITY_CONTAINER}$"); then
+        echo "FAILED: cannot confirm $PARITY_CONTAINER was removed; check it by hand" >&2
+        return 1
+    fi
+    if [ -n "$remaining" ]; then
+        echo "FAILED: $PARITY_CONTAINER still exists after rm -f; remove it by hand" >&2
+        return 1
+    fi
+    echo "node B removed; $PARITY_DB left in place (re-run 'up' to re-clone)"
+}
+
+case "${1:-}" in
+    up)     cmd_up ;;
+    status) cmd_status ;;
+    logs)   cmd_logs "$@" ;;
+    down)   cmd_down ;;
+    *) echo "usage: $0 up|status|logs|down" >&2; exit 2 ;;
+esac

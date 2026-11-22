@@ -87,63 +87,63 @@ class NodeHandle {
         this.events  = [];
         this.stderr  = '';
         this.exited  = false;
-        this._rid    = 0;
-        this._pending = new Map();
-        this._readyResolve = null;
-        this._readyPromise = new Promise((res, rej) => {
-            this._readyResolve = res;
-            this._readyReject  = rej;
+        this['_rid']    = 0;
+        this['_pending'] = new Map();
+        this['_readyResolve'] = null;
+        this['_readyPromise'] = new Promise((res, rej) => {
+            this['_readyResolve'] = res;
+            this['_readyReject']  = rej;
         });
-        this._logStream = opts && opts.logStream ? opts.logStream : null;
+        this['_logStream'] = opts && opts.logStream ? opts.logStream : null;
 
         const split = new LineSplitter();
         child.stdout.setEncoding('utf8');
         child.stdout.on('data', (chunk) => {
-            for (const line of split.push(chunk)) this._line(line);
+            for (const line of split.push(chunk)) this['_line'](line);
         });
         child.stderr.setEncoding('utf8');
         child.stderr.on('data', (d) => {
             this.stderr += d;
-            if (this._logStream) this._logStream.write('[' + this.id + '] ' + d);
+            if (this['_logStream']) this['_logStream'].write('[' + this.id + '] ' + d);
         });
         child.on('close', (code) => {
             this.exited = true;
             const err = new Error('validator ' + this.id + ' exited (' + code + ')');
-            for (const [, p] of this._pending) p.reject(err);
-            this._pending.clear();
-            this._readyReject(err);
+            for (const [, p] of this['_pending']) p.reject(err);
+            this['_pending'].clear();
+            this['_readyReject'](err);
         });
     }
 
-    _line(line) {
+    ['_line'](line) {
         const msg = decodeLine(line);
         if (!msg) {
             // Hub logs and ssh banners land here. Kept, not discarded: a drill
             // that fails is diagnosed from exactly this text.
-            if (this._logStream && line.trim()) this._logStream.write('[' + this.id + '] ' + line + '\n');
+            if (this['_logStream'] && line.trim()) this['_logStream'].write('[' + this.id + '] ' + line + '\n');
             return;
         }
         if (msg.ev) {
             this.events.push(msg);
-            if (msg.ev === 'ready') { this.ready = msg; this._readyResolve(msg); }
-            if (msg.ev === 'error' && !this.ready) this._readyReject(new Error(this.id + ' boot failed: ' + msg.error));
+            if (msg.ev === 'ready') { this.ready = msg; this['_readyResolve'](msg); }
+            if (msg.ev === 'error' && !this.ready) this['_readyReject'](new Error(this.id + ' boot failed: ' + msg.error));
             return;
         }
-        const p = this._pending.get(msg.rid);
+        const p = this['_pending'].get(msg.rid);
         if (!p) return;
-        this._pending.delete(msg.rid);
+        this['_pending'].delete(msg.rid);
         if (msg.ok) p.resolve(msg.result);
         else p.reject(new Error(this.id + ' ' + p.cmd + ': ' + msg.error));
     }
 
     whenReady(timeoutMs) {
-        return withTimeout(this._readyPromise, timeoutMs || 120000, this.id + ' never reported ready');
+        return withTimeout(this['_readyPromise'], timeoutMs || 120000, this.id + ' never reported ready');
     }
 
     send(cmd, args, timeoutMs) {
         if (this.exited) return Promise.reject(new Error(this.id + ' has exited'));
-        const rid = ++this._rid;
-        const p = new Promise((resolve, reject) => this._pending.set(rid, { resolve, reject, cmd }));
+        const rid = ++this['_rid'];
+        const p = new Promise((resolve, reject) => this['_pending'].set(rid, { resolve, reject, cmd }));
         this.child.stdin.write(JSON.stringify({ rid, cmd, args: args || {} }) + '\n');
         return withTimeout(p, timeoutMs || 60000, this.id + ' did not answer ' + cmd);
     }
@@ -159,7 +159,7 @@ function withTimeout(promise, ms, label) {
     let t;
     return Promise.race([
         promise.finally(() => clearTimeout(t)),
-        new Promise((_, rej) => { t = setTimeout(() => rej(new Error('timeout: ' + label + ' after ' + ms + 'ms')), ms); })
+        new Promise((internal, rej) => { t = setTimeout(() => rej(new Error('timeout: ' + label + ' after ' + ms + 'ms')), ms); })
     ]);
 }
 

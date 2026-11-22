@@ -24,8 +24,8 @@
 // bytes the user handed us.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
-const transactionHelper = require('../transactionHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 const envelopeHelper = require('../helpers/envelopeHelper')
 
 // Compressible, and big enough that the legacy lane would need a fan of chunk
@@ -280,7 +280,7 @@ function verifyRevealFunding(){
         // number is the estimator's quote graded against the chain: quote too low
         // and the reveal is unrelayable with its fee already committed to a one-time
         // output, which is the failure §3.5's prefunding rule exists to prevent.
-        const outputTotal = onChain.tx.outs.reduce((n, o) => n + o.value, 0)
+        const outputTotal = onChain.tx.outs.reduce((n, o) => n + Number(o.value), 0)
         const actualFee = sent.capture.envelope.commitValue - outputTotal
         const quoted = sent.capture.envelope.revealFee
 

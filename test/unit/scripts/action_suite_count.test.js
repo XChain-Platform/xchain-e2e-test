@@ -15,7 +15,7 @@
 // gained suites and the number never moved, and nobody could re-derive it
 // because "suite" had never been defined. The operator settled the definition
 // on 2026-08-11 (one suite per ACTION NAME, versions folded in), and
-// scripts/count-action-suites.js implements it. These guards keep the published
+// bin/count-action-suites.js implements it. These guards keep the published
 // numbers tied to the tree:
 //
 //  - VOCABULARY DRIFT: the script falls back to a vendored action list in a
@@ -37,7 +37,7 @@ const assert  = require('assert')
 const fs      = require('fs')
 const os      = require('os')
 const path    = require('path')
-const counter = require('../../../scripts/count-action-suites')
+const counter = require('../../../bin/count-action-suites')
 
 const REPO_ROOT   = path.join(__dirname, '../../..')
 const DECODER_SRC = path.join(REPO_ROOT, '../xchain-decoder/src/XChainDecoder.js')
@@ -75,7 +75,7 @@ function vocabularyChecks() {
         const valid = [...found.block[1].matchAll(/'([A-Z][A-Z0-9]*)'/g)].map((m) => m[1]).sort()
 
         assert.deepStrictEqual([...counter.FALLBACK_ACTION_NAMES].sort(), valid,
-            'FALLBACK_ACTION_NAMES in scripts/count-action-suites.js has drifted from the ' +
+            'FALLBACK_ACTION_NAMES in bin/count-action-suites.js has drifted from the ' +
             'decoder VALID_ACTION_NAMES set; re-vendor it')
     })
 }
@@ -108,7 +108,7 @@ function aliasChecks() {
         if (!fs.existsSync(ALIAS_SRC)) return this.skip()
 
         assert.deepStrictEqual({ ...counter.FALLBACK_ACTION_ALIASES }, { ...require(ALIAS_SRC) },
-            'FALLBACK_ACTION_ALIASES in scripts/count-action-suites.js has drifted from the ' +
+            'FALLBACK_ACTION_ALIASES in bin/count-action-suites.js has drifted from the ' +
             'decoder alias table; re-vendor it')
     })
 
@@ -135,6 +135,12 @@ function countingChecks() {
             fs.mkdirSync(actionsDir)
             fs.writeFileSync(path.join(actionsDir, 'alias.test.js'),
                 'const payload = "MSG|0|abc"\nconst plain = "ISSUE|0|abc"\n')
+            const partsDir = path.join(actionsDir, 'widget.test')
+            fs.mkdirSync(partsDir)
+            fs.writeFileSync(path.join(actionsDir, 'widget.test.js'),
+                'const label = "root suite with no action payload"\n')
+            fs.writeFileSync(path.join(partsDir, '01_part.test.js'),
+                'const payload = "DIVIDEND|0|abc"\n')
 
             const counted = counter.countActionSuites({ actionsDir, testRoot: root })
             assert.ok(counted.actions.includes('MESSAGE'),
@@ -144,18 +150,92 @@ function countingChecks() {
                 'the raw alias token leaked into the counted set')
             assert.ok(counted.actions.includes('ISSUE'),
                 'the fixture counter lost a canonical action name')
+            assert.ok(counted.actions.includes('DIVIDEND'),
+                'an ACTION built only by a nested suite was not counted')
+            assert.strictEqual(counted.suiteFiles, 3,
+                'the suite-file count did not include the nested part')
+            assert.deepStrictEqual(counted.bySuite['widget.test/01_part.test.js'], ['DIVIDEND'])
         } finally {
             fs.rmSync(root, { recursive: true, force: true })
         }
     })
 
     it('counts distinct ACTION names, not suite files', () => {
-        // The whole point of the rule: 69-odd files collapse onto far fewer
+        // The whole point of the rule: 141 files collapse onto far fewer
         // action names, because versions and reorg/negative variants of one
         // action are the same entry.
         assert.ok(recount.count < recount.suiteFiles,
             'the recount produced one entry per file, which is not the ACTION-name rule')
         assert.ok(recount.count > 0, 'the recount found no actions at all')
+    })
+}
+
+// Counts a fixture tree of { 'relative/path.js': source } under a fresh temp
+// root, with suites under actions/ and helpers beside it.
+function countFixture(files) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'action-count-array-'))
+    try {
+        for (const [rel, source] of Object.entries(files)) {
+            fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true })
+            fs.writeFileSync(path.join(root, rel), source)
+        }
+        return counter.countActionSuites({ actionsDir: path.join(root, 'actions'), testRoot: root })
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true })
+    }
+}
+
+function arrayPayloadChecks() {
+    it('counts a pipe-joined ACTION array reached through a helper', () => {
+        const counted = countFixture({
+            'helpers/attest_builder.js': [
+                'module.exports = (x) => [', "    'ATTEST',", "    '1',", '    x', "].join('|')",
+            ].join('\n'),
+            'actions/attest.test.js': "require('../helpers/attest_builder')\n",
+            'actions/names_only.test.js':
+                "const names = ['VOTE', 'BET']\nconst tuple = ['VOTE', '1', value]\n",
+        })
+        assert.deepStrictEqual(counted.bySuite['attest.test.js'], ['ATTEST'])
+        assert.deepStrictEqual(counted.bySuite['names_only.test.js'], [])
+        assert.ok(!counted.actions.includes('VOTE'))
+        assert.ok(!counted.actions.includes('BET'))
+    })
+
+    it('ignores pipe-joined array text inside comments and strings', () => {
+        const counted = countFixture({
+            'actions/inert.test.js': [
+                "// const old = ['VOTE', '1', x].join('|')",
+                "/* const older = ['BET', '0', y].join('|') */",
+                "const doc = \"example: ['VOTE', '1', x].join('|')\"",
+                "const tpl = `['BET', '0', y].join('|')`",
+                "const live = ['SEND', '0', z].join('|')",
+            ].join('\n'),
+        })
+        assert.deepStrictEqual(counted.bySuite['inert.test.js'], ['SEND'])
+        assert.ok(!counted.actions.includes('VOTE'))
+        assert.ok(!counted.actions.includes('BET'))
+    })
+
+    it('reads quotes inside a regex literal as regex, not as a string', () => {
+        // A quote in a regex body (even after a slash inside a character
+        // class) must not open a string that swallows the live array after it,
+        // a division slash must not open a regex, and a quote the mask cannot
+        // close stops at its own line.
+        const counted = countFixture({
+            'actions/regex.test.js': [
+                "const re = /[/'\"]/g; const live = ['SEND', '0', z].join('|')",
+                "const half = total / 2; const y = ['VOTE', '1', x].join('|'); const r = 1 / 4",
+                "if (ok) /'/.test(s)",
+                "const w = ['BET', '0', q].join('|')",
+            ].join('\n'),
+        })
+        assert.deepStrictEqual(counted.bySuite['regex.test.js'], ['BET', 'SEND', 'VOTE'])
+    })
+
+    it('counts the real attestation action suite as ATTEST coverage', () => {
+        const suite = 'attestation.test/02_accepts_a_signed_attest_v1_response.test.js'
+        assert.ok(recount.actions.includes('ATTEST'))
+        assert.ok(recount.bySuite[suite].includes('ATTEST'))
     })
 }
 
@@ -169,7 +249,7 @@ function docsChecks() {
 
         assert.strictEqual(Number(bullet[1]), recount.count,
             'README.md publishes ' + bullet[1] + ' ACTION test suites; the tree has ' +
-            recount.count + '. Re-run: node scripts/count-action-suites.js')
+            recount.count + '. Re-run: node bin/count-action-suites.js')
 
         const published = bullet[2].split(',').map((s) => s.trim()).filter(Boolean).sort()
         assert.deepStrictEqual(published, recount.actions,
@@ -220,6 +300,7 @@ describe('published ACTION test-suite count', () => {
     describe('the counting rule is reproducible from the tree', vocabularyChecks)
     describe('the counting rule is reproducible from the tree', aliasChecks)
     describe('the counting rule is reproducible from the tree', countingChecks)
+    describe('the counting rule is reproducible from the tree', arrayPayloadChecks)
 })
 
 describe('published ACTION test-suite count', () => {

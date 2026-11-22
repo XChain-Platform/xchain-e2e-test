@@ -10,7 +10,7 @@ const assert = require('assert');
 const {
     BROADCAST_FEE_CASES,
     MAX_BROADCAST_FEE_LENGTH
-} = require('../../rail/flag_days/broadcast_fee_cases');
+} = require('../../rail/flag_days/helpers/broadcast_fee_cases');
 
 describe('broadcast fee length rail cases', function(){
     it('pins the ordered cases', function(){

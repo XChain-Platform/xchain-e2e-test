@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Integration tests for initialCheck.test.js: environment variable bootstrap path.
+// Integration tests for initial_check.test.js: environment variable bootstrap path.
 //
 // initialCheck.js has deep side effects at require-time (reads process.env, sets globals,
 // requires connector classes). We cannot require it directly in integration tests.
@@ -23,15 +23,15 @@ const bitcoin = require('bitcoinjs-lib')
 
 require('../fixtures/mockMariadb')
 
-const BlockchainConnector = require('../../../src/BlockchainConnector')
+const BlockchainConnector = require('../../../src/blockchain_connector')
 const XChainUtxoTrackerConnector = require('../../../src/XChainUtxoTrackerConnector')
 const XChainEncoderConnector = require('../../../src/XChainEncoderConnector')
 const XChainDecoderConnector = require('../../../src/XChainDecoderConnector')
 const XChainIndexerConnector = require('../../../src/XChainIndexerConnector')
 const XChainExplorerConnector = require('../../../src/XChainExplorerConnector')
-const RegtestMinerConnector = require('../../../src/RegtestMinerConnector')
+const RegtestMinerConnector = require('../../../src/regtest_miner_connector')
 const Database = require('../../../src/db')
-const CryptoNetworks = require('../../../src/CryptoNetworks')
+const CryptoNetworks = require('../../../src/crypto_networks')
 
 describe('Bootstrap: environment variable path', function () {
 
@@ -60,7 +60,7 @@ describe('Bootstrap: environment variable path', function () {
         sinon.restore()
     })
 
-    // Replicate the bootstrap sequence from initialCheck.test.js lines 17-158
+    // Replicate the bootstrap sequence from initial_check.test.js lines 17-158
     function bootstrapFromEnv(envVars) {
         const COIN = envVars.COIN
         const NETWORK = envVars.NETWORK

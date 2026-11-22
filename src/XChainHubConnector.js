@@ -23,6 +23,8 @@
 const axios = require('axios');
 const coins = require('./coins');
 const config = require('./config');
+const { getLogger } = require('./lib/logger');
+const logger = getLogger();
 
 // Local { coin -> consensusHash } per network, computed on first use. The vendored
 // bundle cannot change under a running process, so re-hashing it on every config
@@ -74,7 +76,7 @@ class XChainHubConnector {
     }
 
     // Internal: call a JSON-RPC method, trying each endpoint in order
-    async _call(data, timeout = 5000){
+    async ['_call'](data, timeout = 5000){
         // A reachable-but-unhealthy hub responds with a non-2xx status (e.g. the
         // 503 "degraded" health body returned when its DB pool is down) that
         // still carries a valid JSON-RPC body. Axios throws on any non-2xx, so
@@ -96,13 +98,13 @@ class XChainHubConnector {
         // no separate one is set), and one request carries one x-api-key header,
         // so sending the bulk key on a secrets ask 401s the whole request wherever
         // the two keys differ.
-        let headers = {};
-        let wantsSecrets = !!(data && data.params && data.params.include_secrets);
-        let key = wantsSecrets ? config.HUB_SECRETS_API_KEY : config.HUB_API_KEY;
+        const headers = {};
+        const wantsSecrets = !!(data && data.params && data.params.include_secrets);
+        const key = wantsSecrets ? config.HUB_SECRETS_API_KEY : config.HUB_API_KEY;
         if(key) headers['x-api-key'] = key;
-        for(let url of this.urls){
+        for(const url of this.urls){
             try {
-                let response = await axios.post(url, data, { timeout, headers });
+                const response = await axios.post(url, data, { timeout, headers });
                 if(response.data && response.data.result !== undefined)
                     return response.data.result;
             } catch(err){
@@ -111,7 +113,7 @@ class XChainHubConnector {
                 } else {
                     if(err.response) this.lastHttpRefusal = true;
                     this.lastFailures.push(url + ' → ' + (err.code || err.message));
-                    console.warn('Hub endpoint ' + url + ' failed: ', err);
+                    logger.warn('Hub endpoint ' + url + ' failed: ', err);
                 }
             }
         }
@@ -122,12 +124,12 @@ class XChainHubConnector {
     }
 
     async ping(){
-        let result = await this._call({ jsonrpc: '2.0', method: 'ping', id: 1 });
+        const result = await this['_call']({ jsonrpc: '2.0', method: 'ping', id: 1 });
         // A reachable-but-degraded hub returns a non-null {status:"degraded"}
         // body. The hub is up, so report it as reachable rather than as a
         // connection failure; log the degraded state so it stays visible.
         if(result && typeof result === 'object' && result.status === 'degraded'){
-            console.warn('Hub reachable but reporting degraded state: ', result);
+            logger.warn('Hub reachable but reporting degraded state: ', result);
         }
         return result !== null;
     }
@@ -146,32 +148,33 @@ class XChainHubConnector {
     // to send `secrets_redacted` counts as redacting, since assuming otherwise is
     // exactly how a sentinel gets forwarded as a password.
     async getAllConfig(){
-        let result = await this._call({ jsonrpc: '2.0', method: 'getallconfigs',
+        let result = await this['_call']({ jsonrpc: '2.0', method: 'getallconfigs',
                                         params: { include_secrets: true }, id: 1 });
-        if(!this._usableConfigResult(result)){
+        if(!this['_usableConfigResult'](result)){
             // Retry the old shape only when an endpoint actually answered and
             // refused: an HTTP error (the auth middleware denying the credential
             // tier) or a JSON-RPC error body. A round where nothing answered, or
             // where the hub reported itself degraded, gets the same answer twice,
             // so a second round would only double the endpoint attempts callers
             // count on.
-            let refused = this.lastHttpRefusal ||
+            const refused = this.lastHttpRefusal ||
                 (result && typeof result === 'object' && result.error !== undefined);
             if(!refused) return null;
-            result = await this._call({ jsonrpc: '2.0', method: 'getallconfigs', params: [], id: 1 });
-            if(!this._usableConfigResult(result)) return null;
+            result = await this['_call']({ jsonrpc: '2.0', method: 'getallconfigs', params: [], id: 1 });
+            if(!this['_usableConfigResult'](result)) return null;
         }
-        return this._applyConfigResult(result);
+        return this['_applyConfigResult'](result);
     }
 
     // A degraded hub returns {status:"degraded"} and a failed config fetch
     // returns {error:...}; neither is a config tree. Don't let those
-    // masquerade as config, so the caller takes its "couldn't get configs" path
-    // instead of indexing into a non-config object.
-    _usableConfigResult(result){
+    // masquerade as config: return false so the config read returns null and the
+    // caller takes its "couldn't get configs" path instead of indexing into a
+    // non-config object.
+    ['_usableConfigResult'](result){
         if(result === null || result === undefined) return false;
         if(typeof result === 'object' && (result.status === 'degraded' || result.error !== undefined)){
-            console.warn('Hub did not return usable config: ', result);
+            logger.warn('Hub did not return usable config: ', result);
             return false;
         }
         return true;
@@ -181,9 +184,9 @@ class XChainHubConnector {
     // Newer hubs wrap the payload as { configs, seq, watermark }; older hubs
     // return the bare tree directly. Callers index hubConfigs[coin][network]
     // [service][param], so unwrap the envelope when present.
-    _applyConfigResult(result){
+    ['_applyConfigResult'](result){
         if(result === null) return null;
-        this._checkHubConsensusHash(result && typeof result === 'object' ? result.coin_consensus_hashes : null);
+        this['_checkHubConsensusHash'](result && typeof result === 'object' ? result.coin_consensus_hashes : null);
         if(result && typeof result === 'object' && result.configs && typeof result.configs === 'object' && ('seq' in result)){
             // Only the enveloped form can say whether a value was withheld.
             this.lastConfigSecretsRedacted = (result.secrets_redacted !== false);
@@ -201,13 +204,13 @@ class XChainHubConnector {
     // itself at the first config fetch instead of surfacing as an unexplained
     // action-level failure deep in a run. Widened to every coin and network because
     // the suite drives whatever chain set the venue's hub hands it.
-    _checkHubConsensusHash(hubHashes){
+    ['_checkHubConsensusHash'](hubHashes){
         if(!hubHashes || typeof hubHashes !== 'object') return;   // older hub: field absent
-        let mismatches = [];
+        const mismatches = [];
         for(const network of coins.NETWORKS){
-            let served = hubHashes[network];
+            const served = hubHashes[network];
             if(!served || typeof served !== 'object') continue;
-            let local = localConsensusHashes(network);
+            const local = localConsensusHashes(network);
             for(const tick of Object.keys(local)){
                 // A coin the hub does not serve is version skew, not drift; only a
                 // hash the hub DOES serve and that differs counts as a mismatch.
@@ -218,11 +221,11 @@ class XChainHubConnector {
         // Callers re-fetch config freely, so log only when the mismatch SET changes:
         // a standing divergence must not flood a test run's output, and a drift that
         // widens or clears must still report.
-        let key = mismatches.join('|');
-        if(key === (this._lastConsensusMismatchKey || '')) return;
-        this._lastConsensusMismatchKey = key;
+        const key = mismatches.join('|');
+        if(key === (this['_lastConsensusMismatchKey'] || '')) return;
+        this['_lastConsensusMismatchKey'] = key;
         if(mismatches.length)
-            console.error('CONSENSUS HASH MISMATCH: the hub serves consensus config differing from this suite\'s vendored coin files (' +
+            logger.error('CONSENSUS HASH MISMATCH: the hub serves consensus config differing from this suite\'s vendored coin files (' +
                 mismatches.join('; ') + '). Hub consensus values are never applied (they are pinned locally); upgrade the lagging side.');
     }
 }
@@ -236,8 +239,8 @@ XChainHubConnector.parseEndpoints = function(){
             .map(e => e.startsWith('http') ? e : 'http://' + e);
     }
     // A single hub otherwise; src/config accepts both host spellings.
-    let host = config.HUB_HOST;
-    let port = config.HUB_PORT;
+    const host = config.HUB_HOST;
+    const port = config.HUB_PORT;
     return ['http://' + host + ':' + port];
 };
 

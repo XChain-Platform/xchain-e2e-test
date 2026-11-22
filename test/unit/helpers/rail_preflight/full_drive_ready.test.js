@@ -1,12 +1,22 @@
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 'use strict'
 
 const assert = require('assert')
 const Module = require('module')
 const path = require('path')
 
-const railDriveScript = path.resolve(__dirname, '..', '..', '..', '..', 'scripts', 'rail_leg_drive.js')
-const originalLoad = Module._load
-Module._load = function (request, parent, isMain) {
+const railDriveScript = path.resolve(__dirname, '..', '..', '..', '..', 'bin', 'rail_leg_drive.js')
+const originalLoad = Module['_load']
+Module['_load'] = function (request, parent, isMain) {
     if (request === '../test/helpers/bridge_rail_legs' && parent && parent.filename === railDriveScript) {
         return { RAIL_DRIVES: {} }
     }
@@ -16,7 +26,7 @@ let checkFullDriveReady
 try {
     ({ checkFullDriveReady } = require('../../../helpers/rail_preflight/full_drive_ready'))
 } finally {
-    Module._load = originalLoad
+    Module['_load'] = originalLoad
 }
 
 const healthyPing = JSON.stringify({ result: { status: 'healthy' } })
@@ -53,5 +63,14 @@ describe('checkFullDriveReady', function () {
             ready: false,
             reason: 'hub+other-drive',
         })
+    })
+    it('ignores a drive on another isolated stack when this drive names its own', function () {
+        assert.deepStrictEqual(check({ psText: competingDrive, stackPrefix: 'xcb8', stackPrefixForPid: () => 'xce3' }),
+            { ready: true, reason: null })
+    })
+
+    it('still waits for a drive on the same isolated stack', function () {
+        assert.deepStrictEqual(check({ psText: competingDrive, stackPrefix: 'xcb8', stackPrefixForPid: () => 'xcb8' }),
+            { ready: false, reason: 'other-drive' })
     })
 })

@@ -12,7 +12,7 @@
 
 const sinon = require('sinon')
 const assert = require('assert')
-const transactionHelper = require('../../transactionHelper')
+const transactionHelper = require('../../helpers/core/transactionHelper')
 const helper = require('../../helpers/stakeHelper')
 const stakeTeardown = require('../../helpers/stakeTeardown')
 
@@ -131,6 +131,125 @@ describe('stakeHelper', () => {
 
             await helper.sendUnstakeV1(addressInfo, 'pubkeyTD4', 42, 'TOK')
             assert.strictEqual(stakeTeardown.outstanding().length, 0)
+        })
+
+        it('undoes an expected-invalid contract stake booking after its row appears', async () => {
+            global.indexerDatabase.checkContractStake = sinon.stub().resolves({ status: 'invalid: not stakeable' })
+            await helper.sendStakeV3Invalid(addressInfo, '10', 'pubkeyTD5', 42, 'TOK', 10)
+            assert.strictEqual(stakeTeardown.outstanding().length, 0)
+            assert.strictEqual(global.indexerDatabase.checkContractStake.firstCall.args[0].txHash, 'abc123')
+        })
+
+        it('keeps an unexpectedly valid contract stake booked for release', async () => {
+            global.indexerDatabase.checkContractStake = sinon.stub().resolves({ status: 'valid' })
+            await helper.sendStakeV3Invalid(addressInfo, '10', 'pubkeyTD6', 42, 'TOK', 10)
+            const out = stakeTeardown.outstanding()
+            assert.strictEqual(out.length, 1)
+            assert.strictEqual(out[0].contractIndex, 42)
+            assert.strictEqual(out[0].tick, 'TOK')
+        })
+
+        it('keeps an unseen contract stake booked because it may still confirm', async () => {
+            global.indexerDatabase.checkContractStake = sinon.stub().resolves(null)
+            await helper.sendStakeV3Invalid(addressInfo, '10', 'pubkeyTD7', 42, 'TOK', 0)
+            assert.strictEqual(stakeTeardown.outstanding().length, 1)
+        })
+    })
+
+    // The helper broadcasts and then waits for node confirmation and tracker
+    // indexing before it returns, so a failure in that tail must not lose the booking.
+    describe('fixture-stake booking when the broadcast helper fails after the broadcast', () => {
+        beforeEach(() => stakeTeardown.reset())
+        afterEach(() => stakeTeardown.reset())
+
+        it('keeps a v1 stake booked when the helper throws after announcing the broadcast', async () => {
+            createTxStub.callsFake(async (a, msg, raw, outs, type, key, skip, opts) => {
+                opts.onBroadcast('abc123')
+                throw new Error('post-broadcast wait failed')
+            })
+            await assert.rejects(helper.sendStakeV1(addressInfo, '1000', 'pubkeyPB1'), /post-broadcast wait failed/)
+            const out = stakeTeardown.outstanding()
+            assert.strictEqual(out.length, 1)
+            assert.strictEqual(out[0].signingPubkey, 'pubkeyPB1')
+        })
+
+        it('books a v2 top-up once when the callback fires and the helper then returns', async () => {
+            await helper.sendStakeV1(addressInfo, '1000', 'pubkeyPB2')
+            createTxStub.callsFake(async (a, msg, raw, outs, type, key, skip, opts) => {
+                opts.onBroadcast('abc123')
+                opts.onBroadcast('abc123')
+                return 'abc123'
+            })
+            await helper.sendStakeV2(addressInfo, '500', 'pubkeyPB2')
+            const out = stakeTeardown.outstanding()
+            assert.strictEqual(out.length, 1)
+            assert.deepStrictEqual(out[0].amounts, ['1000', '500'])
+        })
+
+        it('books a stake whose helper never announces the broadcast', async () => {
+            await helper.sendStakeV1(addressInfo, '1000', 'pubkeyPB3')
+            assert.strictEqual(stakeTeardown.outstanding().length, 1)
+        })
+    })
+
+    // A broadcast STAKE can confirm after its wait gives up, so the booking is
+    // kept unless the indexer has already recorded the stake as rejected.
+    describe('fixture-stake booking when the valid wait gives up', () => {
+        beforeEach(() => stakeTeardown.reset())
+        afterEach(() => stakeTeardown.reset())
+
+        it('keeps a v1 stake booked when the wait times out with no row yet', async () => {
+            global.indexerDatabase.waitForStake = sinon.stub().resolves(null)
+            global.indexerDatabase.checkStake = sinon.stub().resolves(null)
+            await assert.rejects(helper.sendStakeV1(addressInfo, '1000', 'pubkeyTO1'), /at status=valid/)
+            const out = stakeTeardown.outstanding()
+            assert.strictEqual(out.length, 1)
+            assert.strictEqual(out[0].signingPubkey, 'pubkeyTO1')
+        })
+
+        it('keeps the booking when the wait and the read-back both fail', async () => {
+            global.indexerDatabase.waitForStake = sinon.stub().rejects(new Error('database never answered'))
+            global.indexerDatabase.checkStake = sinon.stub().rejects(new Error('database never answered'))
+            await assert.rejects(helper.sendStakeV1(addressInfo, '1000', 'pubkeyTO2'), /never answered/)
+            assert.strictEqual(stakeTeardown.outstanding().length, 1)
+        })
+
+        it('gives the booking back when the indexer recorded the stake as rejected', async () => {
+            global.indexerDatabase.waitForStake = sinon.stub().resolves(null)
+            global.indexerDatabase.checkStake = sinon.stub().resolves({ status: 'invalid: insufficient funds (STAKE)' })
+            await assert.rejects(helper.sendStakeV1(addressInfo, '1000', 'pubkeyTO3'))
+            assert.strictEqual(stakeTeardown.outstanding().length, 0)
+            const arg = global.indexerDatabase.checkStake.firstCall.args[0]
+            assert.deepStrictEqual(arg, { source: 'addr1', signingPubkey: 'pubkeyTO3', txHash: 'abc123' })
+        })
+
+        it('a rejected top-up leaves an already-released stake released', async () => {
+            await helper.sendStakeV1(addressInfo, '1000', 'pubkeyTO4')
+            await helper.sendUnstakeV0(addressInfo, 'pubkeyTO4')
+            global.indexerDatabase.waitForStake = sinon.stub().resolves(null)
+            global.indexerDatabase.checkStake = sinon.stub().resolves({ status: 'invalid: no active stake' })
+            await assert.rejects(helper.sendStakeV2(addressInfo, '500', 'pubkeyTO4'))
+            assert.strictEqual(stakeTeardown.outstanding().length, 0)
+        })
+
+        it('a rejected top-up leaves an outstanding stake with only its own amounts', async () => {
+            await helper.sendStakeV1(addressInfo, '1000', 'pubkeyTO5')
+            global.indexerDatabase.waitForStake = sinon.stub().resolves(null)
+            global.indexerDatabase.checkStake = sinon.stub().resolves({ status: 'invalid: AMOUNT (format)' })
+            await assert.rejects(helper.sendStakeV2(addressInfo, '500', 'pubkeyTO5'))
+            const out = stakeTeardown.outstanding()
+            assert.strictEqual(out.length, 1)
+            assert.deepStrictEqual(out[0].amounts, ['1000'])
+        })
+
+        it('keeps a contract stake booked under its contract and tick when the wait times out', async () => {
+            global.indexerDatabase.waitForContractStake = sinon.stub().resolves(null)
+            global.indexerDatabase.checkContractStake = sinon.stub().resolves(null)
+            await assert.rejects(helper.sendStakeV3(addressInfo, '10', 'pubkeyTO6', 42, 'TOK'))
+            const out = stakeTeardown.outstanding()
+            assert.strictEqual(out.length, 1)
+            assert.strictEqual(out[0].contractIndex, 42)
+            assert.strictEqual(out[0].tick, 'TOK')
         })
     })
 

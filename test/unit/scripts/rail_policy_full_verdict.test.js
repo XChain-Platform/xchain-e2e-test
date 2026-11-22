@@ -1,3 +1,13 @@
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 'use strict'
 
 // GENERATED TEST CONTRACT
@@ -9,14 +19,14 @@ const path = require('path')
 const { spawnSync } = require('child_process')
 
 const REPO_ROOT = path.join(__dirname, '../../..')
-const SCRIPT = path.join(REPO_ROOT, 'scripts', 'rail_policy_full_verdict.js')
+const SCRIPT = path.join(REPO_ROOT, 'bin', 'rail_policy_full_verdict.js')
 const POLICY_SUITES = path.join(REPO_ROOT, 'test', 'integration', 'bridge_rail_policy.test')
-const { staticSkipTitles, judgePolicyDrive } = require('../../../scripts/rail_policy_full_verdict')
+const { staticSkipTitles, judgePolicyDrive } = require('../../../bin/rail_policy_full_verdict')
 
 function report ({ passes = 28, failures = [], pending = [] } = {}) {
     return {
         stats: { passes, failures: failures.length, pending: pending.length },
-        passes: Array.from({ length: passes }, (_, index) => ({ title: 'pass ' + index })),
+        passes: Array.from({ length: passes }, (internal, index) => ({ title: 'pass ' + index })),
         failures,
         pending,
     }

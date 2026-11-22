@@ -25,11 +25,14 @@
  * FEE_DESTINATION) are applied by coins/index.js, so the env surface lives in
  * exactly one place and mainnet/testnet carry none of it.
  *
- * Fields are split by coins/index.js into three consensus classes: the
- * pinned-verify-only subset (gas schedule, staking, fee math, addresses,
- * genesis, network byte-prefixes) is content-hashed and must stay byte-identical
- * fleet-wide; display/connection fields may be served live. See the platform
- * plan and genesis.js for the hash-pin rationale.
+ * Fields are split into three configuration classes. First, consensusSubset()
+ * in coins/index.js is the authoritative list of fields content-hashed into
+ * CONSENSUS_CONFIG_PIN; those fields must stay byte-identical fleet-wide.
+ * Second, genesis pins are excluded from that hash because genesis.js checks
+ * GENESIS_LEDGER_HASH and GENESIS_DUMP_HASH separately. Third, identity,
+ * display and connection fields, including display-only address roles and
+ * chainGenesisHash, are unhashed and may be served live. See the platform plan
+ * and genesis.js for the hash-pin rationale.
  *
  ********************************************************************/
 module.exports = {
@@ -162,10 +165,19 @@ module.exports = {
             // plus airdropSetHash - the sha256 over the canonical `name:hash:amount` lines,
             // which genesis.js verifies before it credits anything - followed by a
             // bin/sync-coins.sh re-vendoring wave.
+            // Both hashes re-pinned 2026-10-13: the name registrations BASE,
+            // DASH, HBAR, HOOD, HYPE and NEAR left the CSV manifest so the bridge owns
+            // those chain roots, six rows out of 121,716. They were supply-0, balance-free
+            // name rows with no subassets and no post-genesis action on either chain, so
+            // nothing else in the manifest or the dump moved: the dump loses only those six
+            // names' rows and its ledger and contracts block hashes are unchanged.
+            // The six stay reserved names (RESERVED_FUTURE_ROOTS in xchain-indexer, operator
+            // ruling 2026-10-17): with no row left, a new ISSUE of any of them is refused
+            // wherever TICK_NAMESPACE_ACTIVATION binds (unarmed on mainnet today).
             genesis: {
                 block:      950000,
-                ledgerHash: 'f347a0499654b128dd0461441ed6341ac27a24b909d6ff6e3995db4e69dc23e5',
-                dumpHash:   'e416c382dd6951ce5c4da7e053f6dbb407ca3d966a513209eb59886dbe95e738',
+                ledgerHash: '13aeeebb9f2e27d507ca96fb7c54a1bfa98b9cc80c3feebd5d1ad022ce7e2b73',
+                dumpHash:   '85431c2c41d6442e38aa78af804148dd6ead207aca036f6e44fbf2bee8c2846e',
                 airdropPaths:         [],
                 airdropHashes:        [],
                 airdropAmounts:       [],
@@ -301,10 +313,12 @@ module.exports = {
 
     GAS_PRICE:                        '0.00001', // XCHAIN per gas unit
     UNIFIED_EXPIRATION_FEE_FREE_DAYS: 90,
-    FEE_PAYMENT_MODE:                 'xchain',   // informational only; not read at runtime (see detectFeePaymentMode)
+    FEE_PAYMENT_MODE:                 'xchain',   // declared mode; the indexer classifies by coin (BTC xchain) and a registry test pins the two together
     FEE_TOLERANCE_MIN:                '0.95',
     FEE_TOLERANCE_MAX:                '1.10',
     ORACLE_MAX_PRICE_AGE_SECONDS:     1800,
+    ORACLE_MAX_PRICE_AGE_HOURLY_SECONDS: 4500, // Fee-gate bound after ORACLE_PRICE_AGE_HOURLY_ACTIVATION:
+                                              // one six-round hourly PRICE wire (3600 s) plus a 900 s margin; below it, 1800 applies.
     VALIDATOR_QUERY_LIMIT:            1000,        // CONSENSUS-CRITICAL cap on validator-set queries
 
     GAS_SCHEDULE: {
@@ -344,6 +358,13 @@ module.exports = {
         // 7 (bridgeability opt-in) adds no key: it is an owner edit of an existing row
         // and the issuance fee is first-issuance only.
         XBRIDGE_BASE:          5000,
+        // Sharing a list has one flat fee. Editing a shared list has a base fee
+        // plus a per-item fee for each item added or removed. The base matches
+        // SWEEP_BASE so even the smallest shared edit buys an above-dust native
+        // fee output on LTC and DOGE. Local lists remain free.
+        LIST_SHARE:            100000,
+        LIST_SHARED_EDIT_BASE: 5000,
+        LIST_SHARED_EDIT_PER_ITEM: 100,
         // BET (parimutuel betting, spec decision F): feed creation is duration-
         // metered like ORDER/SWAP/DISPENSER expiration (same free window via
         // UNIFIED_EXPIRATION_FEE_FREE_DAYS) but under its OWN per-day key so the

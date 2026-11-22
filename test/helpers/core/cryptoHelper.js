@@ -1,0 +1,176 @@
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
+const axios = require('axios');
+const crypto = require('crypto');
+const bip39 = require('bip39');
+const ecc = require('tiny-secp256k1')
+const { BIP32Factory } = require('bip32')
+const bip32 = BIP32Factory(ecc)
+const bitcoin = require('bitcoinjs-lib')
+const CryptoNetworks = require('../../../src/crypto_networks')
+
+global.wallets = {}
+
+module.exports = {
+    async getWallet(label){
+        if (label in wallets){
+                return wallets[label]
+        } else {
+            const newWallet = {
+                mnemonic: null,
+                seed: null,
+                coin: null,
+                network: null,
+                addresses: []
+            }
+            wallets[label] = newWallet
+            return newWallet
+        }
+    },
+    
+    async getNewAddress(label, coin, network, mnemonic = null, addressType="legacy", addressIndex=0){
+        network = CryptoNetworks.getBitcoinJsNetwork(coin+"-"+network)
+        
+        const wallet = await this.getWallet(label)
+        wallet.coin = coin
+        wallet.network = network
+        
+        if (wallet.mnemonic == null){
+            if (!mnemonic){
+                mnemonic = bip39.generateMnemonic()
+            }
+            wallet.mnemonic = mnemonic
+            
+            const seed = bip39.mnemonicToSeedSync(mnemonic)
+            wallet.seed = seed
+        }
+        
+        const root = bip32.fromSeed(wallet.seed, network)
+        const account = root.derivePath("m/44'/0'/0'") //master -> legacy -> bitcoin coin -> first account
+        const address = account.derive(0).derive(addressIndex) // no change -> address index
+        
+        let testAddress = null
+        switch (addressType){
+            case "legacy":
+                testAddress = bitcoin.payments.p2pkh({ pubkey: address.publicKey, network }).address
+                break
+            case "segwit":
+                // Native segwit (P2WPKH). Required by the Taproot envelope: its commit
+                // inputs must all be segwit (envelope spec §3.5) because a legacy input's
+                // txid still moves when it is signed, and the reveal is pre-built
+                // against the UNSIGNED commit's txid.
+                testAddress = bitcoin.payments.p2wpkh({ pubkey: address.publicKey, network }).address
+                break
+        }
+        if (testAddress == null){
+            throw new Error("unsupported addressType \""+addressType+"\" (supported: legacy, segwit)")
+        }
+        wallet["addresses"].push({privateKey: address.privateKey, publicKey: address.publicKey, address:testAddress})
+        return {mnemonic: wallet.mnemonic, privateKey: address.privateKey, publicKey: address.publicKey, address:testAddress}
+    },
+    
+    // Base backoff between funding attempts; doubles each retry (500ms, 1000ms).
+    fundingRetryBaseDelayMs: 500,
+    fundingMaxAttempts: 3,
+
+    // How long a funding tx may take to reach the node. Each getrawtransaction poll can wait out
+    // its own 15s read timeout on a loaded regtest host, so the window must outlast several polls;
+    // 60s matches every other waitForTx caller.
+    fundingTxWaitMs: 60000,
+
+    // The regtest miner wraps every send_funds failure in a "problem sending
+    // funds" error. Retry those, up to three attempts with exponential backoff,
+    // except the refusals the miner makes by rule (per-call maximum, invalid
+    // address or amount): they cannot succeed on a later attempt. Any other
+    // error propagates immediately. A send that timed out on the node but still
+    // landed is retried too, so a retried address may be funded twice.
+    deterministicFundingRefusal: /exceeds the configured per-call maximum|Invalid (address|amount)/i,
+    async sendFundsWithRetry(address, amount){
+        for (let attempt = 1; ; attempt++){
+            try {
+                return await regtestMinerConnector.sendFunds(address, amount)
+            } catch (err) {
+                const message = (err && err.message) || String(err)
+                const transient = /problem sending funds/i.test(message) && !this.deterministicFundingRefusal.test(message)
+                if (!transient || attempt >= this.fundingMaxAttempts){
+                    throw err
+                }
+                const delay = this.fundingRetryBaseDelayMs * Math.pow(2, attempt - 1)
+                console.log(`Miner reported a problem sending funds to ${address} (attempt ${attempt}/${this.fundingMaxAttempts}); retrying in ${delay}ms`)
+                await new Promise(resolve => setTimeout(resolve, delay))
+            }
+        }
+    },
+
+    async getNewFundedAddress(label, coin, network, mnemonic = null, addressType="legacy", addressIndex=0, amountToFund, seedGas = true){
+        const newAddressInfo = await this.getNewAddress(label, coin, network, mnemonic, addressType, addressIndex)
+        const newAddress = newAddressInfo["address"]
+
+        console.log("Sending funds ("+amountToFund+") to "+newAddress)
+        const txId = await this.sendFundsWithRetry(newAddress, amountToFund)
+        try {
+            const txExists = await nodeConnector.waitForTx(txId, this.fundingTxWaitMs)
+
+            if (!txExists){
+                throw new Error("The sent tx didn't appear in the blockchain")
+            }
+        } catch (err){
+            throw new Error("The sent tx didn't appear in the blockchain")
+        }
+        console.log("Waiting for the utxos for "+newAddress)
+        // First pass: short wait, then if it stalls force-mine a block in case
+        // the funding tx is stuck in the regtest miner's mempool (happens under
+        // full-suite load when many funding txes pile up). Late-suite tests
+        // (OWNERSHIP onwards) flake here under accumulated load; bumped from
+        // 3×20s to 6×30s (60s → 180s patience) to absorb that.
+        let addressHasUtxos = false
+        for (let attempt = 1; attempt <= 6 && !addressHasUtxos; attempt++){
+            try {
+                addressHasUtxos = await utxoTrackerConnector.waitForUtxos(newAddress, 30000)
+            } catch (err) {
+                addressHasUtxos = false
+            }
+            if (!addressHasUtxos) {
+                // Log tracker/node sync state so the next stall has diagnosable
+                // evidence (block-height lag vs total stuck vs node not advancing).
+                const sync = await utxoTrackerConnector.getSyncStatus()
+                const syncStr = sync ? `tracker=${sync.tracker_height} node=${sync.node_height} lag=${sync.lag}` : "sync-status=unavailable"
+                console.log(`UTXOs still not visible (${syncStr}); nudging miner to mine a block (attempt ${attempt}/6)`)
+                try { await regtestMinerConnector.generateBlocks(1) } catch (e) {}
+            }
+        }
+        if (!addressHasUtxos){
+            const sync = await utxoTrackerConnector.getSyncStatus()
+            const syncStr = sync ? `tracker=${sync.tracker_height} node=${sync.node_height} lag=${sync.lag}` : "sync-status=unavailable"
+            throw new Error(`The utxo tracker couldn't parse the utxo (${syncStr})`)
+        }
+
+        // Off BTC every XCHAIN unit is bridged in, so a run that turned the off-BTC gas
+        // bootstrap off (a native-fee suite on a venue with no bridge relay, see
+        // initial_check) skips this per-address seed too: it would wait on the same
+        // federation credit that never comes.
+        if (seedGas && process.env.E2E_GAS_BOOTSTRAP === "off" && global.COIN_CODE !== "BTC") {
+            console.log("Skipping the XCHAIN gas seed for " + newAddress + ": E2E_GAS_BOOTSTRAP=off on " + global.COIN_CODE)
+        } else if (seedGas) {
+            // UNIFIED_FEES + ISSUANCE_FEE activate at block 0 on regtest/testnet, so a
+            // freshly funded address can't pay gas-schedule fees (ISSUE = 1 XCHAIN).
+            // XCHAIN is an open-mint faucet on test networks; grab gas here so every
+            // "funded" address is actually usable. Tests that need a zero-gas address
+            // (e.g. the native-fee negative case) pass seedGas=false.
+            const gasHelper = require('../gasHelper')
+            console.log("Minting 100 XCHAIN gas to " + newAddress)
+            await gasHelper.ensureGasBalance(newAddressInfo, 100)
+        }
+
+        return newAddressInfo
+    }
+}
+

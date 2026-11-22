@@ -13,7 +13,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Coverage for the untracked-stake gate (scripts/check-stake-teardown.js).
+ * Coverage for the untracked-stake gate (bin/check-stake-teardown.js).
  *
  * A hygiene gate that quietly stops matching is worse than no gate: the suite
  * reads as clean while the shared venue fills up again. So the matcher is
@@ -23,7 +23,7 @@
  ********************************************************************/
 
 const assert = require('assert')
-const gate = require('../../../scripts/check-stake-teardown')
+const gate = require('../../../bin/check-stake-teardown')
 
 const scan = (src, rel) => gate.scanLines(src.split('\n'), rel || 'test/actions/example.test.js')
 
@@ -68,9 +68,18 @@ describe('check-stake-teardown gate', () => {
     it('accepts a file that books its own debt with the release ledger', () => {
         const hits = scan([
             "await transactionHelper.createAndSendTransaction(addr, 'STAKE|1|' + amount + '|' + pubkey)",
-            "stakeTeardown.registerStake({ addressInfo: addr, signingPubkey: pubkey, amount: amount })"
+            "stakeTeardown.bookBroadcastStake({ addressInfo: addr, signingPubkey: pubkey, amount: amount })"
         ].join('\n'))
         assert.strictEqual(hits.length, 0)
+    })
+
+    it('rejects a registration that can run only after a throwing wait', () => {
+        const hits = scan([
+            "await transactionHelper.createAndSendTransaction(addr, 'STAKE|1|' + amount + '|' + pubkey)",
+            'await waitForStake(pubkey)',
+            "stakeTeardown.registerStake({ addressInfo: addr, signingPubkey: pubkey, amount: amount })"
+        ].join('\n'))
+        assert.strictEqual(hits.length, 1)
     })
 })
 
@@ -84,7 +93,11 @@ describe('check-stake-teardown gate', () => {
     })
 
     it('exempts the registrar itself', () => {
-        assert.strictEqual(scan("let msg = 'STAKE|1|' + amount", 'test/helpers/stakeHelper.js').length, 0)
+        const source = [
+            "let msg = 'STAKE|1|' + amount",
+            'stakeTeardown.bookBroadcastStake({ addressInfo, signingPubkey, amount })',
+        ].join('\n')
+        assert.strictEqual(scan(source, 'test/helpers/stakeHelper.js').length, 0)
     })
 
     it('the repo is clean: every STAKE broadcast under test/ is tracked or explained', () => {
@@ -92,5 +105,293 @@ describe('check-stake-teardown gate', () => {
         assert.deepStrictEqual(hits, [],
             'these STAKE broadcasts bypass the release ledger:\n' +
             hits.map(h => '  ' + h.file + ':' + h.line + '  ' + h.text).join('\n'))
+    })
+})
+
+describe('check-stake-teardown gate: one registration per broadcast', () => {
+    const REGISTER = "stakeTeardown.bookBroadcastStake({ addressInfo: addr, signingPubkey: pk, amount: 1 })"
+
+    it('flags both broadcasts when a file registers once and broadcasts twice', () => {
+        const hits = scan(["let a = 'STAKE|1|1000|' + pkA", "let b = 'STAKE|1|1000|' + pkB", REGISTER].join('\n'))
+        assert.deepStrictEqual(hits.map(h => h.line), [1, 2])
+    })
+
+    it('accepts two broadcasts booked by two registrations', () => {
+        assert.strictEqual(scan(["let a = 'STAKE|1|1000|' + pkA", "let b = 'STAKE|1|1000|' + pkB", REGISTER, REGISTER].join('\n')).length, 0)
+    })
+
+    it('does not count a commented-out registration', () => {
+        assert.strictEqual(scan(["let a = 'STAKE|1|1000|' + pkA", '// ' + REGISTER].join('\n')).length, 1)
+    })
+
+    it('does not spend a registration on an opted-out payload', () => {
+        const hits = scan([
+            '// stake-teardown-ok: rejected on the zero amount guard',
+            "let a = 'STAKE|1|0|' + pkA",
+            "let b = 'STAKE|1|1000|' + pkB",
+            REGISTER,
+        ].join('\n'))
+        assert.strictEqual(hits.length, 0)
+    })
+})
+
+describe('check-stake-teardown gate: payload delimiters', () => {
+    it('catches a template-literal payload', () => {
+        assert.strictEqual(scan('let msg = `STAKE|1|${amount}|${pk}`').length, 1)
+    })
+
+    it('catches a template-literal payload whose version is interpolated', () => {
+        assert.strictEqual(scan('let msg = `STAKE|${version}|${amount}|${pk}`').length, 1)
+        assert.strictEqual(scan('let msg = `UNSTAKE|${version}|${pk}`').length, 0)
+    })
+
+    it('catches a quoted STAKE joined to its version field', () => {
+        assert.strictEqual(scan("let msg = 'STAKE' + '|1|' + amount").length, 1)
+        assert.strictEqual(scan("let msg = 'STAKE|' + version + '|' + amount").length, 1)
+    })
+
+    it('does not flag an UNSTAKE payload in any delimiter', () => {
+        assert.strictEqual(scan("let a = 'UNSTAKE|1|' + pk\nlet b = `UNSTAKE|1|${pk}`").length, 0)
+    })
+})
+
+describe('check-stake-teardown gate: unresolved transaction payloads', () => {
+    const scanPayload = (payload) => gate.scanLines([
+        `await transactionHelper.createAndSendTransaction(tx, ${payload})`,
+    ], 'test/actions/opaque_payload.test.js')
+
+    it('catches a bare payload identifier passed directly to the transaction helper', () => {
+        const hits = scan('await transactionHelper.createAndSendTransaction(tx, payload)')
+        assert.deepStrictEqual(hits.map(h => h.line), [1])
+    })
+
+    it('keeps established non-stake opaque wrappers clean', () => {
+        const hits = scan('await transactionHelper.createAndSendTransaction(tx, payload)',
+            'test/helpers/rollcall_helper/chain_driving.js')
+        assert.strictEqual(hits.length, 0)
+    })
+
+    for (const payload of ['payload', 'context.payload', 'payloads[index]',
+        'usePrimary ? primaryPayload : fallbackPayload', 'primaryPayload || fallbackPayload']){
+        it(`flags unresolved payload expression: ${payload}`, () => {
+            const hits = scanPayload(payload)
+            assert.strictEqual(hits.length, 1)
+            assert.strictEqual(hits[0].line, 1)
+        })
+    }
+
+    it('accepts a payload demonstrably built by stakeHelper', () => {
+        assert.strictEqual(scanPayload('stakeHelper.sendStakeV1(tx, amount, pubkey)').length, 0)
+    })
+
+    it('accepts a bound payload demonstrably built by stakeHelper', () => {
+        const hits = gate.scanLines([
+            'const payload = stakeHelper.sendStakeV2(tx, amount, pubkey)',
+            'await transactionHelper.createAndSendTransaction(tx, payload)',
+        ], 'test/actions/helper_payload.test.js')
+        assert.strictEqual(hits.length, 0)
+    })
+})
+
+describe('check-stake-teardown gate: unresolved transaction payload heads', () => {
+    const scanPayload = (payload) => gate.scanLines([
+        `await transactionHelper.createAndSendTransaction(tx, ${payload})`,
+    ], 'test/actions/unresolved_head.test.js')
+
+    for (const payload of [
+        "verb + '|1|' + amount",
+        '`${verb}|1|${amount}`',
+        '`${verb}|${version}|${amount}|${pk}`',
+        "(isStake ? 'STAKE' : 'UNSTAKE') + '|1|' + amount + '|' + pk",
+        "[verb, '1', amount, pk].join('|')",
+    ]) {
+        it(`flags an unresolved payload head: ${payload}`, () => {
+            const hits = scanPayload(payload)
+            assert.deepStrictEqual(hits.map(hit => hit.line), [1])
+        })
+    }
+
+    it('flags a bound payload whose head is unresolved', () => {
+        const hits = gate.scanLines([
+            "const msg = verb + '|1|' + amount",
+            'await transactionHelper.createAndSendTransaction(tx, msg)',
+        ], 'test/actions/unresolved_head.test.js')
+        assert.deepStrictEqual(hits.map(hit => hit.line), [1])
+    })
+
+    it('keeps literal non-stake heads clean', () => {
+        for (const payload of [
+            "'SEND|1|' + amount",
+            '`ISSUE|${x}`',
+            "'UNSTAKE|1|' + pk",
+            "['SEND', '1', amount].join('|')",
+        ]) assert.strictEqual(scanPayload(payload).length, 0, payload)
+    })
+
+    it('accepts a documented unresolved head that cannot be a stake', () => {
+        const hits = gate.scanLines([
+            '// stake-teardown-ok: this runtime action is restricted to non-stake fixtures.',
+            "await transactionHelper.createAndSendTransaction(tx, verb + '|1|' + amount)",
+        ], 'test/actions/unresolved_head.test.js')
+        assert.strictEqual(hits.length, 0)
+    })
+})
+
+const markedPayload = (reason) => scan([
+    '// stake-teardown-ok:' + reason,
+    "let msg = 'STAKE|1|1000|' + pubkey"
+].join('\n'))
+
+describe('check-stake-teardown gate: the opt-out reason', () => {
+    it('rejects a one-character reason', () => {
+        assert.strictEqual(markedPayload(' x').length, 1, 'a throwaway marker is a pragma, not a judgement')
+    })
+
+    it('rejects a one-word or two-word reason', () => {
+        assert.strictEqual(markedPayload(' rejected').length, 1)
+        assert.strictEqual(markedPayload(' ok fine').length, 1)
+    })
+
+    it('does not count punctuation-only tokens as words', () => {
+        assert.strictEqual(markedPayload(' rejected - .').length, 1)
+    })
+
+    it('accepts a three-word reason on the marker line', () => {
+        assert.strictEqual(markedPayload(' rejected, zero amount').length, 0)
+    })
+})
+
+const os = require('os')
+const fs = require('fs')
+const path = require('path')
+
+function buildTree(files){
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'stake-gate-'))
+    for (const rel of files){
+        fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true })
+        fs.writeFileSync(path.join(root, rel), '')
+    }
+    return root
+}
+
+describe('check-stake-teardown gate: which directories are scanned', () => {
+    it('skips only the top-level unit/ and codec/, and node_modules anywhere', () => {
+        const root = buildTree(['unit/a.js', 'codec/b.js', 'drills/unit/c.js',
+            'foo/codec/d.js', 'x/node_modules/e.js', 'actions/f.js'])
+        try {
+            const found = gate.walk(root, []).map(f => path.relative(root, f).split(path.sep).join('/')).sort()
+            assert.deepStrictEqual(found, ['actions/f.js', 'drills/unit/c.js', 'foo/codec/d.js'])
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true })
+        }
+    })
+
+    it('scans the nested test/drills/unit/ suites of the real tree', () => {
+        const testDir = path.join(__dirname, '..', '..')
+        const found = gate.walk(testDir, []).map(f => path.relative(testDir, f).split(path.sep).join('/'))
+        assert.ok(found.some(f => f.startsWith('drills/unit/')), 'a nested unit/ directory must not hide live suites')
+        assert.ok(!found.some(f => f.startsWith('unit/')), 'the top-level unit/ stays out of the scan')
+    })
+})
+
+describe('check-stake-teardown gate: payloads assembled from a bare STAKE', () => {
+    it('catches an array-join payload on one line', () => {
+        assert.strictEqual(scan("let msg = ['STAKE', 1, amount, pk].join('|')").length, 1)
+        assert.strictEqual(scan('let msg = [`STAKE`, version, amount].join("|")').length, 1)
+    })
+
+    it('catches an array-join payload that spans several lines, on its STAKE line', () => {
+        const hits = scan(['let msg = [', "    'STAKE', '1', amount,", '    pk', "].join('|')"].join('\n'))
+        assert.deepStrictEqual(hits.map(h => h.line), [2])
+    })
+
+    it('catches a STAKE held in a const the payload is built from', () => {
+        const hits = scan(["const ACTION = 'STAKE'", "let msg = ACTION + '|1|' + amount"].join('\n'))
+        assert.deepStrictEqual(hits.map(h => h.line), [1])
+    })
+
+    it('leaves an action key, a comparison and an UNSTAKE array alone', () => {
+        assert.strictEqual(scan("submit(sdk, { action: 'UNSTAKE', params: p })").length, 0)
+        assert.strictEqual(scan("const label = ready ? action : 'STAKE'").length, 0)
+        assert.strictEqual(scan("if (tx.action === 'STAKE') count++").length, 0)
+        assert.strictEqual(scan("const ok = tx.action == 'STAKE';").length, 0)
+        assert.strictEqual(scan("let msg = ['UNSTAKE', 1, pk].join('|')").length, 0)
+    })
+
+    it('accepts an array-join payload under a reasoned marker or booked by a registration', () => {
+        assert.strictEqual(scan(['// stake-teardown-ok: zero amount, always rejected',
+            "let msg = ['STAKE', 1, 0, pk].join('|')"].join('\n')).length, 0)
+        assert.strictEqual(scan(["let msg = ['STAKE', 1, amount, pk].join('|')",
+            'stakeTeardown.bookBroadcastStake({ addressInfo: addr, signingPubkey: pk, amount: amount })'].join('\n')).length, 0)
+    })
+})
+
+describe('check-stake-teardown gate: SDK-form STAKE submissions', () => {
+    it('catches an SDK action STAKE object on its STAKE line, quoted key and const value included', () => {
+        assert.deepStrictEqual(scan("submit(sdk, { action: 'STAKE', params: p })").map(h => h.line), [1])
+        assert.deepStrictEqual(scan(['submit(sdk, {', "    action: 'STAKE',", '    params: p,', '})'].join('\n')).map(h => h.line), [2])
+        assert.strictEqual(scan("submit(sdk, { 'action': \"STAKE\", params: p })").length, 1)
+        assert.deepStrictEqual(scan(["const KIND = 'STAKE'", 'submit(sdk, { action: KIND, params: p })'].join('\n')).map(h => h.line), [1])
+    })
+
+    it('accepts an SDK action STAKE under a reasoned marker or booked by a registration', () => {
+        assert.strictEqual(scan(['// stake-teardown-ok: a contract stake never joins a capability set',
+            "submit(sdk, { action: 'STAKE', params: p })"].join('\n')).length, 0)
+        assert.strictEqual(scan(["const res = await submit(sdk, { action: 'STAKE', params: p })",
+            'stakeTeardown.bookBroadcastStake({ addressInfo: from, signingPubkey: p.signingPubkey, amount: p.amount })'].join('\n')).length, 0)
+    })
+})
+
+describe('check-stake-teardown gate: regex literals', () => {
+    it('still catches a STAKE payload after a regex literal holding a single quote', () => {
+        const hits = scan(["const clean = s.replace(/'/g, '')", "let msg = 'STAKE|1|' + amount"].join('\n'))
+        assert.deepStrictEqual(hits.map(h => h.line), [2])
+    })
+
+    it('still catches a STAKE payload after a regex literal holding a backtick or a double quote', () => {
+        assert.deepStrictEqual(scan(['const clean = name.replace(/`/g, \'\')', "let msg = 'STAKE|1|' + amount"].join('\n'))
+            .map(h => h.line), [2])
+        assert.deepStrictEqual(scan(['const parts = s.split(/"/)', "let msg = 'STAKE|1|' + amount"].join('\n'))
+            .map(h => h.line), [2])
+    })
+
+    it('reads a double slash inside a regex literal as regex, not as a line comment', () => {
+        assert.deepStrictEqual(scan("if (/^\\/\\//.test(u)) msg = 'STAKE|1|' + amount").map(h => h.line), [1])
+    })
+
+    it('keeps a slash and quotes inside a character class within the regex', () => {
+        assert.deepStrictEqual(scan(["const t = s.replace(/[/'\"]/g, '')", "let msg = 'STAKE|1|' + amount"].join('\n'))
+            .map(h => h.line), [2])
+    })
+
+    it('reads a slash after an identifier, a number or a closing paren as division', () => {
+        assert.deepStrictEqual(scan("let x = total / 2, msg = 'STAKE|1|' + amount, y = a / b").map(h => h.line), [1])
+        assert.deepStrictEqual(scan("let x = 10 / 2, msg = 'STAKE|1|' + amount, y = 4 / 2").map(h => h.line), [1])
+        assert.deepStrictEqual(scan("let x = (a + b) / 2, msg = 'STAKE|1|' + amount, y = c / d").map(h => h.line), [1])
+    })
+
+    it('reports nothing for a shell-quote helper whose regex holds a quote', () => {
+        assert.strictEqual(scan('function shq(s) { return "\'" + String(s).replace(/\'/g, "\'\\\\\'\'") + "\'"; }').length, 0)
+    })
+
+    it('reads the transaction helper\'s own method definition as a definition, not a broadcast', () => {
+        const hits = gate.scanLines([
+            'const isTransient = (msg) => /bad-txns|[\'"]?txid[\'"]?/i.test(msg)',
+            'class Helper {',
+            '    async createAndSendTransaction(addressInfo, data, rawData = null){',
+            '        return this.send(addressInfo, data)',
+            '    }',
+            '}',
+        ], 'test/helpers/core/transactionHelper/lib/send.js')
+        assert.strictEqual(hits.length, 0)
+        assert.deepStrictEqual(scan('await helper.createAndSendTransaction(addressInfo, data)').map(h => h.line), [1])
+    })
+
+    it('treats a request wire built by the attestation codec as a non-stake payload', () => {
+        const hits = gate.scanLines([
+            'const wire = codec.requestWire(row, sigs)',
+            "await transactionHelper.createAndSendTransaction(op, wire, null, [], 'P2SH')",
+        ], 'test/sdk/relay_drill.test.js')
+        assert.strictEqual(hits.length, 0)
     })
 })

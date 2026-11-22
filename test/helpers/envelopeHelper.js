@@ -18,7 +18,8 @@
 
 const crypto = require('crypto')
 const zlib = require('zlib')
-const transactionHelper = require('../transactionHelper')
+const assert = require('assert')
+const transactionHelper = require('./core/transactionHelper')
 const requireRow = require('./requireRow')
 
 const OP_0 = 0x00
@@ -28,7 +29,9 @@ const OP_ENDIF = 0x68
 // Minimal script reader. bitcoinjs-lib's decompile would do, but it collapses
 // small integer pushes to opcodes, and the envelope's format byte is exactly the
 // push a strict grammar check has to see as DATA.
-function decompile(script){
+function decompile(raw){
+    // bitcoinjs-lib 7 hands witness items over as Uint8Array; the reader needs Buffer methods.
+    const script = Buffer.from(raw)
     const out = []
     let i = 0
     while (i < script.length){
@@ -45,6 +48,20 @@ function decompile(script){
 
 module.exports = {
     sha256(buf){ return crypto.createHash('sha256').update(buf).digest('hex') },
+
+    async confirmingHeight(node, txid){
+        const tx = await node.getTransaction(String(txid))
+        assert(tx, 'the node has no transaction ' + txid)
+        assert(tx.blockhash, 'transaction ' + txid + ' is not confirmed')
+
+        const block = await node.getBlock(tx.blockhash)
+        assert(block, 'the node has no confirming block ' + tx.blockhash + ' for transaction ' + txid)
+
+        const height = Number(block.height)
+        assert(Number.isSafeInteger(height) && height >= 0,
+            'transaction ' + txid + ' has an invalid confirming block height: ' + String(block.height))
+        return height
+    },
 
     // The explorer's coin path segment: R/T prefix by network, mirroring the SDK's
     // endpoint mapping (RBTC on bitcoin regtest, TLTC on litecoin testnet, ...).
@@ -154,11 +171,11 @@ module.exports = {
         }
         if (!built) throw lastErr
 
-        const transactionHelper = require('../transactionHelper')
+        const transactionHelper = require('./core/transactionHelper')
         const commitPsbt = bitcoin.Psbt.fromHex(built["psbt"])
         const ecc = require('tiny-secp256k1')
         const { ECPairFactory } = require('ecpair')
-        const keyToSign = ECPairFactory(ecc).fromPrivateKey(addressInfo["privateKey"], { NETWORK_OBJECT })
+        const keyToSign = ECPairFactory(ecc).fromPrivateKey(addressInfo["privateKey"])
         for (let i = 0; i < commitPsbt.data.inputs.length; i++) commitPsbt.signInput(i, keyToSign)
         commitPsbt.finalizeAllInputs()
         commitPsbt.setMaximumFeeRate(100000)

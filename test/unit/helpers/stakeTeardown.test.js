@@ -373,6 +373,30 @@ describe('stakeTeardown, the fixture-stake teardown policy', () => {
             assert.strictEqual(state.release.failed.length, 1)
             assert.strictEqual(state.diff.grew, false)
         })
+
+        it('says the check did not run when the final read comes back empty, and does not fail a strict run', async () => {
+            const lines = []
+            const state = await teardown.runTeardown({
+                policy:   teardown.policy({ E2E_STAKE_TEARDOWN_STRICT: '1' }),
+                baseline: baseline,
+                indexer:  fakeIndexer([], { nullOn: 'getstakeweightsbycapability' }),
+                log:      (l) => lines.push(l)
+            })
+            assert.strictEqual(state.current, null)
+            assert.strictEqual(state.diff, null)
+            assert.match(lines.join('\n'), /final read returned nothing .*the leak check did not run/)
+        })
+
+        it('stays quiet about the final read when the check was declined on purpose', async () => {
+            const lines = []
+            await teardown.runTeardown({
+                policy:   teardown.policy({ E2E_STAKE_TEARDOWN: 'off' }),
+                baseline: baseline,
+                indexer:  fakeIndexer([], { nullOn: 'getstakeweightsbycapability' }),
+                log:      (l) => lines.push(l)
+            })
+            assert.ok(!lines.join('\n').includes('final read'))
+        })
     })
 
     describe('formatReport', () => {

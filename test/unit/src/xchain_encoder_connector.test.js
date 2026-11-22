@@ -102,29 +102,31 @@ describe('XChainEncoderConnector', function () {
     beforeEach(setupConnector);
     afterEach(teardownConnector);
     describe('api key header', function () {
+        // Only the readiness probe carries a request timeout; tx builds stay unbounded.
         const methods = [
-            ['ping', (c) => c.ping()],
-            ['createTx', (c) => c.createTx([], 'pk', [], {}, '', 1, false, 'OP_RETURN', 'chg', null, null, null)],
+            ['ping', (c) => c.ping(), { timeout: 5000 }],
+            ['createTx', (c) => c.createTx([], 'pk', [], {}, '', 1, false, 'OP_RETURN', 'chg', null, null, null), {}],
             ['createEnvelopeCancelTx', (c) => c.createEnvelopeCancelTx({
                 commitTxid: 'tx', commitVout: 0, commitValue: 1000,
                 internalPubkey: 'ipk', tapleafHash: 'tlh', destination: 'dest'
-            })]
+            }), {}]
         ];
 
-        methods.forEach(function ([name, invoke]) {
+        methods.forEach(function ([name, invoke, bound]) {
             it(`${name} sends x-api-key when a key is configured`, async function () {
                 axiosPostStub.resolves({ data: { result: 'ok' } });
                 const keyed = new XChainEncoderConnector(URL, PORT, API_KEY);
                 await invoke(keyed);
                 const [, , config] = axiosPostStub.firstCall.args;
-                assert.deepStrictEqual(config, { headers: { 'x-api-key': API_KEY } });
+                assert.deepStrictEqual(config, { headers: { 'x-api-key': API_KEY }, ...bound });
+                assert.deepStrictEqual(keyed.reqConfig, { headers: { 'x-api-key': API_KEY } });
             });
 
             it(`${name} sends an empty config when no key is configured`, async function () {
                 axiosPostStub.resolves({ data: { result: 'ok' } });
                 await invoke(connector);
                 const [, , config] = axiosPostStub.firstCall.args;
-                assert.deepStrictEqual(config, {});
+                assert.deepStrictEqual(config, { ...bound });
             });
         });
     });
@@ -290,6 +292,95 @@ describe('XChainEncoderConnector', function () {
             const [, payload, config] = axiosPostStub.firstCall.args;
             assert.strictEqual(payload.params.feePerKb, 1000);
             assert.deepStrictEqual(config, { headers: { 'x-api-key': API_KEY } });
+        });
+    });
+});
+
+const CANCEL_RECORD = {
+    commitTxid: 'tx', commitVout: 0, commitValue: 1000,
+    internalPubkey: 'ipk', tapleafHash: 'tlh', destination: 'dest'
+};
+
+async function cancelParams(extra) {
+    axiosPostStub.resolves({ data: { result: fakeResult } });
+    await connector.createEnvelopeCancelTx({ ...CANCEL_RECORD, ...extra });
+    return axiosPostStub.firstCall.args[1].params;
+}
+
+describe('XChainEncoderConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
+    describe('createEnvelopeCancelTx replacebyfee', function () {
+        it('maps the recovery record to create_envelope_cancel_tx params', async function () {
+            const params = await cancelParams({});
+            assert.strictEqual(axiosPostStub.firstCall.args[1].method, 'create_envelope_cancel_tx');
+            assert.deepStrictEqual(params, { ...CANCEL_RECORD, feePerKb: null });
+        });
+
+        for (const value of [true, false, 'true']) {
+            it(`forwards replacebyfee ${JSON.stringify(value)} as given, uncoerced`, async function () {
+                const params = await cancelParams({ replacebyfee: value });
+                assert.strictEqual(params.replacebyfee, value);
+            });
+        }
+
+        it('leaves replacebyfee absent when the caller omits it', async function () {
+            const params = await cancelParams({});
+            assert.strictEqual('replacebyfee' in params, false);
+        });
+    });
+});
+
+// A non-2xx refusal as axios delivers it: the status text in err.message, the
+// encoder's JSON-RPC envelope only under err.response.
+function encoderRefusal(status, statusText, code, message) {
+    return Object.assign(new Error('Request failed with status code ' + status), {
+        response: { status, statusText, data: { jsonrpc: '2.0', id: null, error: { code, message } } }
+    });
+}
+
+describe('XChainEncoderConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
+    describe('non-2xx refusals', function () {
+        it('createTx names an Unauthorized key refusal and keeps the axios status text', async function () {
+            axiosPostStub.rejects(encoderRefusal(401, 'Unauthorized', -32001, 'Unauthorized'));
+            await assert.rejects(callCreateTx, (err) => {
+                assert.match(err.message, /^Error trying to create a tx with the encoder module: encoder refused \(Unauthorized; /);
+                assert.match(err.message, /status code 401/);
+                return true;
+            });
+        });
+
+        it('createEnvelopeCancelTx names a rate-limit refusal', async function () {
+            axiosPostStub.rejects(encoderRefusal(429, 'Too Many Requests', -32029, 'Too many requests'));
+            await assert.rejects(() => connector.createEnvelopeCancelTx(CANCEL_RECORD),
+                /Error trying to create an envelope cancel tx: encoder refused \(Too many requests; .*status code 429/);
+        });
+
+        it('createTx falls back to the HTTP status when the refusal has no RPC body', async function () {
+            axiosPostStub.rejects(Object.assign(new Error('Request failed with status code 502'), {
+                response: { status: 502, statusText: 'Bad Gateway', data: '<html>' }
+            }));
+            await assert.rejects(callCreateTx, /encoder refused \(HTTP 502 Bad Gateway; /);
+        });
+
+        it('createTx keeps the bare transport message when nothing answered', async function () {
+            axiosPostStub.rejects(new Error('connect ECONNREFUSED'));
+            await assert.rejects(callCreateTx, (err) => {
+                assert.strictEqual(err.message, 'Error trying to create a tx with the encoder module: connect ECONNREFUSED');
+                return true;
+            });
+        });
+
+        it('ping keeps returning false and names the refusal', async function () {
+            const warn = sinon.stub(console, 'warn');
+            try {
+                axiosPostStub.rejects(encoderRefusal(401, 'Unauthorized', -32001, 'Unauthorized'));
+                assert.strictEqual(await connector.ping(), false);
+                assert.strictEqual(warn.callCount, 1);
+                assert.match(warn.firstCall.args[0], /refused ping: Unauthorized/);
+            } finally { warn.restore(); }
         });
     });
 });

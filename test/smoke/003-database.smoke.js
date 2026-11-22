@@ -17,7 +17,7 @@ describe('SMOKE: Database Schema', () => {
     })
 
     it('should have core indexer tables', async () => {
-        let connection = await indexerDatabase.getConnection()
+        const connection = await indexerDatabase.getConnection()
         try {
             const rows = await connection.query('SHOW TABLES')
             assert(rows.length > 0, 'Database should have at least one table')

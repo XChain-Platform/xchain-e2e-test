@@ -31,9 +31,10 @@
  ********************************************************************/
 
 const assert            = require('assert')
-const cryptoHelper      = require('../cryptoHelper')
+const cryptoHelper      = require('../helpers/core/cryptoHelper')
 const issueHelper       = require('../helpers/issueHelper')
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
+const { waitForIndexerAtTip } = require('../helpers/indexerWait')
 
 async function q(sql, params) {
     const conn = await indexerDatabase.getConnection()
@@ -57,7 +58,7 @@ async function blockOfAction(actionIndex) {
     return rows.length ? Number(rows[0].b) : null
 }
 async function tip() { const r = await q(`SELECT MAX(block_index) h FROM blocks`, []); return Number(r[0].h) }
-async function mine(n) { try { await regtestMinerConnector.generateBlocks(n) } catch (e) {} }
+async function mine(n) { await regtestMinerConnector.generateBlocks(n) }
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 function randTick(p) { let s = p; for (let i = 0; i < 6; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 const j = (x) => JSON.stringify(x, (k, v) => typeof v === 'bigint' ? Number(v) : v)
@@ -74,11 +75,6 @@ async function findChildBlock(child) {
         JOIN index_tickers it ON it.id=i.tick_id WHERE it.tick=? ORDER BY i.action_index DESC LIMIT 1`, [child])
     const childActionIndex = childRows.length ? childRows[0].action_index : null
     return blockOfAction(childActionIndex)
-}
-
-async function waitForIndexedTip() {
-    let settle = 0
-    while ((await tip()) < (await nodeConnector.getBlockCount()) && settle++ < 60) { await sleep(1000) }
 }
 
 async function prepareChildReorg(childBlock) {
@@ -115,7 +111,7 @@ describe('NFT Reorg: a collection child issuance rolls back across an on-chain r
         console.log('   child', child, 'issued at block', childBlock, '(parent', parentBlock + ')')
 
         // Gate on the indexer catching up to the node tip before reorging.
-        await waitForIndexedTip()
+        await waitForIndexerAtTip({ nodeTip: () => nodeConnector.getBlockCount() })
         console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
 
         // Reorg out the CHILD block.

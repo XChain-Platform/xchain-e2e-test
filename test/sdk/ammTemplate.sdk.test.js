@@ -41,8 +41,8 @@
 'use strict';
 
 const { expect } = require('chai');
-const { makeSdk, submit, deployContract, waitForBalance, fundedGasAddress, uniqueTick, mine, submitOpts } = require('./sdkHelper');
-const { loadCompactTemplate } = require('./templateHelper');
+const { makeSdk, submit, deployContract, waitForBalance, fundedGasAddress, uniqueTick, mine, submitOpts } = require('./helpers/sdkHelper');
+const { loadCompactTemplate } = require('./helpers/templateHelper');
 
 async function readState(sdk, contractIndex, key) {
     const state = await sdk.getContractState(contractIndex, key);

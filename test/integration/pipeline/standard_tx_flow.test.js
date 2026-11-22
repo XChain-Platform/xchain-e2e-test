@@ -22,7 +22,7 @@ const { ECPairFactory } = require('ecpair')
 const ecc = require('tiny-secp256k1')
 const ECPair = ECPairFactory(ecc)
 
-const transactionHelper = require('../../../test/transactionHelper')
+const transactionHelper = require('../../helpers/core/transactionHelper')
 const fixtures = require('../fixtures/services')
 
 let savedGlobals
@@ -125,7 +125,7 @@ function buildIsolationContext() {
     const psbt1Hex = buildPsbtFor(testKeyPair, testAddress)
     const psbt2Hex = buildPsbtFor(keyPair2, address2)
 
-    let encoderCalls = []
+    const encoderCalls = []
     global.encoderConnector = {
         createTx: async function (utxos, pubkey) {
             encoderCalls.push({ utxos, address: pubkey })
@@ -271,7 +271,7 @@ describe('Transaction Pipeline: standard OP_RETURN flow', function () {
                 { txid: txid1, vout: 1, value: 90000, confirmations: 1, scriptPubKey: '76a914' + 'aa'.repeat(20) + '88ac' }
             ]
 
-            let encoderCalls = []
+            const encoderCalls = []
             global.encoderConnector = {
                 createTx: async function (utxos, ...rest) {
                     encoderCalls.push(utxos)

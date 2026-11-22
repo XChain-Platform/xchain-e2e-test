@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Integration tests for the hub discovery fallback path in initialCheck.test.js.
+// Integration tests for the hub discovery fallback path in initial_check.test.js.
 //
 // When env vars are incomplete, the bootstrap falls back to XChainHubConnector
 // to discover all service endpoints. These tests verify that hub config responses
@@ -23,13 +23,13 @@ const axios = require('axios')
 require('../fixtures/mockMariadb')
 
 const XChainHubConnector = require('../../../src/XChainHubConnector')
-const BlockchainConnector = require('../../../src/BlockchainConnector')
+const BlockchainConnector = require('../../../src/blockchain_connector')
 const XChainUtxoTrackerConnector = require('../../../src/XChainUtxoTrackerConnector')
 const XChainEncoderConnector = require('../../../src/XChainEncoderConnector')
 const XChainIndexerConnector = require('../../../src/XChainIndexerConnector')
-const RegtestMinerConnector = require('../../../src/RegtestMinerConnector')
+const RegtestMinerConnector = require('../../../src/regtest_miner_connector')
 const Database = require('../../../src/db')
-const CryptoNetworks = require('../../../src/CryptoNetworks')
+const CryptoNetworks = require('../../../src/crypto_networks')
 
 const hubFixtures = require('../fixtures/hub')
 
@@ -60,7 +60,7 @@ describe('Bootstrap: hub discovery fallback', function () {
         sinon.restore()
     })
 
-    // Replicate the hub fallback bootstrap from initialCheck.test.js lines 100-158
+    // Replicate the hub fallback bootstrap from initial_check.test.js lines 100-158
     async function bootstrapFromHub(coin, network) {
         global.COIN = coin
         global.NETWORK = network
@@ -68,15 +68,15 @@ describe('Bootstrap: hub discovery fallback', function () {
         const COIN_CODE_MAP = { bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' }
         global.COIN_CODE = COIN_CODE_MAP[coin] || coin.toUpperCase().slice(0, 3)
 
-        let hubEndpoints = XChainHubConnector.parseEndpoints()
+        const hubEndpoints = XChainHubConnector.parseEndpoints()
         global.hubConnector = new XChainHubConnector(hubEndpoints)
-        let pingHub = await global.hubConnector.ping()
+        const pingHub = await global.hubConnector.ping()
 
         if (!pingHub) {
             throw new Error("Can't connect to the XChain Hub")
         }
 
-        let hubConfigs = await global.hubConnector.getAllConfig()
+        const hubConfigs = await global.hubConnector.getAllConfig()
         if (!hubConfigs) {
             throw new Error('There was an error trying to get all the configs from the hub')
         }

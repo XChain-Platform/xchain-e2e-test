@@ -9,7 +9,7 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const issueHelper = require('../helpers/issueHelper')
 const mintHelper = require('../helpers/mintHelper')
 const orderHelper = require('../helpers/orderHelper')
@@ -31,22 +31,22 @@ async function balanceOf(address, tick) {
 }
 
 async function createSettlementFixture() {
-    let sellerAddr = await cryptoHelper.getNewFundedAddress(
+    const sellerAddr = await cryptoHelper.getNewFundedAddress(
         "COINPAY.SELLER", COIN, NETWORK, null, "legacy", 0, 1
     )
 
     // buyer needs enough for order fee + coinpay payment
-    let buyerAddr = await cryptoHelper.getNewFundedAddress(
+    const buyerAddr = await cryptoHelper.getNewFundedAddress(
         "COINPAY.BUYER", COIN, NETWORK, null, "legacy", 0, 2
     )
 
     // mintSupply arg already credits 1000 to the seller; a separate MINT would exceed maxSupply
-    let tick = "CP" + sellerAddr["address"].substring(5, 12).toUpperCase()
+    const tick = "CP" + sellerAddr["address"].substring(5, 12).toUpperCase()
     await issueHelper.sendIssueV0(sellerAddr, tick, "1000", "1000", "8", "COINPay test token", "1000")
 
     // seller: sell 100 tokens for 0.001 native coin
-    let expiration = Math.floor(Date.now() / 1000) + 86400 // 24 hours from now
-    let sellerOrder = await orderHelper.sendOrderV0(
+    const expiration = Math.floor(Date.now() / 1000) + 86400 // 24 hours from now
+    const sellerOrder = await orderHelper.sendOrderV0(
         sellerAddr, COIN_CODE, tick, "100.00000000",
         COIN_CODE, "", "0.00100000",
         sellerAddr["address"], expiration, "", "", "Selling tokens for coin"
@@ -56,20 +56,20 @@ async function createSettlementFixture() {
 }
 
 async function createExpiryFixture() {
-    let sellerAddr = await cryptoHelper.getNewFundedAddress(
+    const sellerAddr = await cryptoHelper.getNewFundedAddress(
         "COINPAY.EXP.SELLER", COIN, NETWORK, null, "legacy", 0, 1
     )
-    let buyerAddr = await cryptoHelper.getNewFundedAddress(
+    const buyerAddr = await cryptoHelper.getNewFundedAddress(
         "COINPAY.EXP.BUYER", COIN, NETWORK, null, "legacy", 0, 1
     )
 
     // mintSupply arg credits 1000 to the seller (a separate MINT would exceed maxSupply)
-    let tick = "CE" + sellerAddr["address"].substring(5, 12).toUpperCase()
+    const tick = "CE" + sellerAddr["address"].substring(5, 12).toUpperCase()
     await issueHelper.sendIssueV0(sellerAddr, tick, "1000", "1000", "8", "COINPay expiry token", "1000")
 
     // seller lists 100 tokens for 0.001 native coin (escrows the 100 tokens)
-    let orderExpiration = Math.floor(Date.now() / 1000) + 86400 // 24h; the ORDER itself must not expire first
-    let sellerOrder = await orderHelper.sendOrderV0(
+    const orderExpiration = Math.floor(Date.now() / 1000) + 86400 // 24h; the ORDER itself must not expire first
+    const sellerOrder = await orderHelper.sendOrderV0(
         sellerAddr, COIN_CODE, tick, "100.00000000",
         COIN_CODE, "", "0.00100000",
         sellerAddr["address"], orderExpiration, "", "", "Selling tokens for coin"
@@ -120,29 +120,29 @@ describe('COINPAY', function () {
 
     describe('v0: Happy path: Token-for-Coin settlement', function () {
         it('should create matching native coin orders, send COINPAY, and settle', async function () {
-            let { sellerAddr, buyerAddr, tick, sellerOrder, expiration } = await createSettlementFixture()
+            const { sellerAddr, buyerAddr, tick, sellerOrder, expiration } = await createSettlementFixture()
             assert(sellerOrder.order, "Seller ORDER should exist in DB")
             // buyer: buy tokens with 0.001 native coin
-            let buyerOrder = await createBuyerOrder(buyerAddr, tick, expiration)
+            const buyerOrder = await createBuyerOrder(buyerAddr, tick, expiration)
             assert(buyerOrder.order, "Buyer ORDER should exist in DB")
 
             // Filter by the specific orders this test created so we don't pick up a leftover
             // pending obligation from a previous run. The matcher records the newer order (buyer)
             // on the get side and the existing order (seller) on the give side (see indexer/db.js createOrderMatch).
-            let orderMatch = await indexerDatabase.waitForOrderMatch({
+            const orderMatch = await indexerDatabase.waitForOrderMatch({
                 giveActionIndex: Number(sellerOrder.order["action_index"]),
                 getActionIndex:  Number(buyerOrder.order["action_index"]),
                 status: 'pending_coinpay'
             }, 30000)
             assert(orderMatch, "ORDER_MATCH with pending_coinpay should exist")
 
-            let obligation = await indexerDatabase.waitForCoinpayObligation({
+            const obligation = await indexerDatabase.waitForCoinpayObligation({
                 actionIndex: Number(orderMatch.action_index),
                 coinpayStatus: 'pending_coinpay'
             }, 30000)
             assert(obligation, "COINPay obligation should exist")
 
-            let coinpayResult = await coinpayHelper.sendCoinpayV0(
+            const coinpayResult = await coinpayHelper.sendCoinpayV0(
                 buyerAddr,
                 Number(orderMatch.action_index),
                 sellerAddr["address"],
@@ -150,13 +150,13 @@ describe('COINPAY', function () {
             )
             assert(coinpayResult.coinpay, "COINPAY should be valid in DB")
 
-            let fulfilledObligation = await indexerDatabase.waitForCoinpayObligation({
+            const fulfilledObligation = await indexerDatabase.waitForCoinpayObligation({
                 actionIndex: Number(orderMatch.action_index),
                 coinpayStatus: 'fulfilled'
             }, 30000)
             assert(fulfilledObligation, "COINPay obligation should be fulfilled")
 
-            let credit = await indexerDatabase.waitForCredit({
+            const credit = await indexerDatabase.waitForCredit({
                 address: buyerAddr["address"],
                 tick: tick
             }, 30000)
@@ -169,21 +169,21 @@ describe('COINPAY', function () {
     describe('v0: COINPay obligation expires', function () {
         this.timeout(0)
         it('should expire an unfulfilled obligation and release escrowed tokens to the seller', async function () {
-            let { sellerAddr, buyerAddr, tick, sellerOrder, orderExpiration } = await createExpiryFixture()
+            const { sellerAddr, buyerAddr, tick, sellerOrder, orderExpiration } = await createExpiryFixture()
             assert(sellerOrder.order, "Seller ORDER should exist in DB")
             // buyer posts the matching coin order but will never send the COINPAY payment
-            let buyerOrder = await createBuyerOrder(buyerAddr, tick, orderExpiration)
+            const buyerOrder = await createBuyerOrder(buyerAddr, tick, orderExpiration)
             assert(buyerOrder.order, "Buyer ORDER should exist in DB")
             // The match opens a pending_coinpay obligation escrowing the seller's 100 tokens.
-            let orderMatch = await indexerDatabase.waitForOrderMatch({
+            const orderMatch = await indexerDatabase.waitForOrderMatch({
                 giveActionIndex: Number(sellerOrder.order["action_index"]),
                 getActionIndex:  Number(buyerOrder.order["action_index"]),
                 status: 'pending_coinpay'
             }, 30000)
             assert(orderMatch, "ORDER_MATCH with pending_coinpay should exist")
-            let obligationIndex = Number(orderMatch.action_index)
+            const obligationIndex = Number(orderMatch.action_index)
 
-            let obligation = await indexerDatabase.waitForCoinpayObligation({
+            const obligation = await indexerDatabase.waitForCoinpayObligation({
                 actionIndex: obligationIndex,
                 coinpayStatus: 'pending_coinpay'
             }, 30000)
@@ -210,13 +210,13 @@ describe('COINPAY', function () {
             // 34015867460 spent 2h08m50s of a 289-minute leg deferring one block on it.
             // The venue now sets a 300s window (XCHAIN_COINPAY_EXPIRATION_S, regtest
             // only); 60s past the deadline is ample to carry a block over it.
-            let expireAt = Number(obligation.expiration) + 60
+            const expireAt = Number(obligation.expiration) + 60
 
-            let expiredObligation = await expireCoinpayObligation(obligationIndex, expireAt)
+            const expiredObligation = await expireCoinpayObligation(obligationIndex, expireAt)
             assert(expiredObligation, "COINPay obligation should flip to 'expired' once block_time passes its deadline")
 
             // Escrow released: the seller's full 1000 tokens are spendable again.
-            let restored = await waitForBalance(sellerAddr["address"], tick, "1000")
+            const restored = await waitForBalance(sellerAddr["address"], tick, "1000")
             assert.strictEqual(restored, "1000", "Escrowed tokens are released back to the seller on expiry")
 
             // The buyer, who never sent COINPAY, is credited nothing.

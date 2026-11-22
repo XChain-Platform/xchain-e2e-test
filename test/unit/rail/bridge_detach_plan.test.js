@@ -80,7 +80,7 @@ function loadDriver(detachedBlock) {
     return { calls, driver, state: fixture.state };
 }
 
-describe('bridged list detach plan', function () {
+function registerStepShapeCases() {
     it('pins the ordered steps and expected copy states', function () {
         assert.deepStrictEqual(DETACH_STEPS, [
             {
@@ -135,7 +135,9 @@ describe('bridged list detach plan', function () {
         assert(DETACH_STEPS.filter(step => step.expect !== null)
             .every(step => Object.isFrozen(step.expect)));
     });
+}
 
+function registerDriverCases() {
     it('executes every planned rail action and checks the detach result', async function () {
         const fixture = loadDriver();
         for (const step of DETACH_STEPS) await fixture.driver.runDetachStep(step);
@@ -167,7 +169,9 @@ describe('bridged list detach plan', function () {
             /the copy BLOCK_LIST did not detach/
         );
     });
+}
 
+function registerSuiteRegistrationCases() {
     it('registers the detach cases with the rail suite during module load', function () {
         const suites = loadDriver().calls.filter(call => call[0] === 'suite');
 
@@ -175,4 +179,10 @@ describe('bridged list detach plan', function () {
         assert.strictEqual(suites[0][1], 'policy AT11: a null list detaches the copy');
         assert.strictEqual(typeof suites[0][2], 'function');
     });
+}
+
+describe('bridged list detach plan', function () {
+    registerStepShapeCases();
+    registerDriverCases();
+    registerSuiteRegistrationCases();
 });

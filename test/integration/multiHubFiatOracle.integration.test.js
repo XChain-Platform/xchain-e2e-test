@@ -37,14 +37,14 @@
 'use strict';
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const path   = require('path');
 const assert = require('assert');
 const { MultiValidatorHub }    = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
-const { waitForMesh, waitFor } = require('../helpers/consensusWait');
+const { waitForMesh, waitFor, nominalOracleRoundTime } = require('../helpers/consensusWait');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
 const OracleConsensus = hubRequire('src/oracle/consensus.js');
@@ -63,7 +63,6 @@ const FIAT_DISPENSER_PRICE_WINDOW = 86400;   // indexer default (24h)
 const PEER_WAIT_MS = 60_000;
 const SETTLE_MS    = 60_000;
 const BLOCK_INDEX  = 100;
-const BLOCK_TIME   = 1700000000;
 const ROUND        = 100;
 const PAIR         = 'BTC/USD';
 const PRICE        = '60000';
@@ -83,11 +82,11 @@ async function attachOracle(mvh) {
         round.setConsensus(oc);
         oc.setValidatorSet(await hub.loadValidatorSet());
         await oc.start();
-        hub._wtOracle = oc;
-        hub._wtRound  = round;
+        hub['_wtOracle'] = oc;
+        hub['_wtRound']  = round;
         stops.push(() => oc.stop && oc.stop());
     }
-    return { stop() { stops.forEach((s) => { try { s(); } catch (_) {} }); } };
+    return { stop() { stops.forEach((s) => { try { s(); } catch (internal) {} }); } };
 }
 
 function injectSubmissions(mvh) {
@@ -95,19 +94,19 @@ function injectSubmissions(mvh) {
     for (const hub of mvh.hubs) {
         const subs = new Map();
         for (const addr of addrs) subs.set(addr, { prices: [{ coinPair: PAIR, price: PRICE }] });
-        hub._wtRound.submissions.set(ROUND, subs);
+        hub['_wtRound'].submissions.set(ROUND, subs);
     }
 }
 
 // Drive the round on every hub, then wait until every hub has written its own
 // finalized snapshot row (the post-condition every case here asserts on).
 async function finalizeAll(mvh) {
-    await Promise.all(mvh.hubs.map((h) => h._wtOracle.finalizeRound(ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
+    await Promise.all(mvh.hubs.map((h) => h['_wtOracle'].finalizeRound(ROUND, BLOCK_INDEX, nominalOracleRoundTime(h['_wtOracle'], ROUND)).catch(() => {})));
     const res = await waitFor(async () => {
         const counts = [];
         for (const hub of mvh.hubs) {
             try { counts.push((await snapshotRows(hub)).length); }
-            catch (_) { counts.push(0); }
+            catch (internal) { counts.push(0); }
         }
         return { ok: counts.length > 0 && counts.every((c) => c >= 1), counts: counts };
     }, { timeoutMs: SETTLE_MS });

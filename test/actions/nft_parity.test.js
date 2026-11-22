@@ -24,14 +24,14 @@
  *   - collection provenance: a child sub-TICK is valid only from the parent owner
  *
  * Native fee is injected automatically by transactionHelper/nativeFeeHelper on
- * fee chains. Run AFTER _ctlseed.test.js so the {COIN}/USD snapshot is fresh:
- *   ctl-run-doge.sh test/actions/_ctlseed.test.js test/actions/nft_parity.test.js
+ * fee chains. Run AFTER ctlseed.test.js so the {COIN}/USD snapshot is fresh:
+ *   ctl-run-doge.sh test/actions/ctlseed.test.js test/actions/nft_parity.test.js
  ********************************************************************/
 
 const assert            = require('assert')
-const cryptoHelper      = require('../cryptoHelper')
+const cryptoHelper      = require('../helpers/core/cryptoHelper')
 const issueHelper       = require('../helpers/issueHelper')
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 const { waitForTxIndexed } = require('../helpers/indexerWait')
 
 async function q(sql, params) {
@@ -52,7 +52,7 @@ async function balanceOf(address, tick) {
     return rows.length ? String(rows[0].amount) : '0'
 }
 async function tip() { const r = await q(`SELECT MAX(block_index) h FROM blocks`, []); return Number(r[0].h) }
-async function mine(n) { try { await regtestMinerConnector.generateBlocks(n) } catch (e) {} }
+async function mine(n) { await regtestMinerConnector.generateBlocks(n) }
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 function randTick(p) { let s = p; for (let i = 0; i < 6; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 // Send a tx expected to be REJECTED, then block until the indexer has processed

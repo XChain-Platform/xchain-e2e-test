@@ -149,7 +149,7 @@ describe('Boundary: Connection Pool', function () {
             const { db, mockConn } = createDb()
             mockConn.query.rejects(new Error('syntax error'))
 
-            await db.checkIssue({ tick: 'TOK' })
+            await assert.rejects(db.checkIssue({ tick: 'TOK' }), /syntax error/)
 
             assert(mockConn.release.calledOnce)
         })
@@ -173,7 +173,7 @@ describe('Boundary: Connection Pool', function () {
             const { db, mockConn } = createDb()
             mockConn.query.rejects(new Error('table missing'))
 
-            await db.checkSend({ source: 'addr1' })
+            await assert.rejects(db.checkSend({ source: 'addr1' }), /table missing/)
 
             assert(mockConn.release.calledOnce)
         })
@@ -182,7 +182,7 @@ describe('Boundary: Connection Pool', function () {
             const { db, mockConn } = createDb()
             mockConn.query.rejects(new Error('timeout'))
 
-            await db.checkCredit({ tick: 'TOK' })
+            await assert.rejects(db.checkCredit({ tick: 'TOK' }), /timeout/)
 
             assert(mockConn.release.calledOnce)
         })
@@ -191,7 +191,7 @@ describe('Boundary: Connection Pool', function () {
             const { db, mockConn } = createDb()
             mockConn.query.rejects(new Error('timeout'))
 
-            await db.checkDebit({ tick: 'TOK' })
+            await assert.rejects(db.checkDebit({ tick: 'TOK' }), /timeout/)
 
             assert(mockConn.release.calledOnce)
         })

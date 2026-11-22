@@ -12,11 +12,11 @@
  * LIVE cross-repo drift-lock for the consensus hash CONFORMANCE PAIR.
  *
  * xchain-sync validators independently recompute each block's ledger/actions/
- * contract hashes via src/BlockHasher.js, and HALT if they disagree with the
+ * contract hashes via src/client/block_hasher.js, and HALT if they disagree with the
  * source. That only stays correct while BlockHasher is byte-identical to the
- * indexer's xchain-indexer/src/db.js getBlockHashes(). The unit golden in each
+ * indexer's xchain-indexer/src/db/actions.js getBlockHashes(). The unit golden in each
  * repo locks the serialization, but only THIS test exercises the full pipeline
- * (the 8 gathering queries + chaining + getDataHash) against REAL indexer-
+ * (the 11 gathering queries + chaining + getDataHash) against REAL indexer-
  * produced data on the running stack.
  *
  * For every block the e2e stack has indexed, recompute the three hashes with
@@ -33,7 +33,7 @@ const fs     = require('fs');
 // Sibling xchain-sync (monorepo layout). ABSENCE may skip, because a single-repo
 // checkout cannot run this. A checkout that is PRESENT but will not load must be RED:
 // swallowing that turns the drift-lock into a suite that reports green having never run.
-let BlockHasher, SyncUtility, SyncStateCommitment, SyncDatabase;
+let BlockHasher, SyncUtility, SyncStateCommitment, SyncDatabase, isStateCommitmentActive;
 const SYNC_SRC = path.join(__dirname, '../../../xchain-sync/src');
 let syncPresent = true;
 try {
@@ -50,6 +50,7 @@ if (syncPresent) {
     SyncStateCommitment = require(fs.existsSync(path.join(SYNC_SRC, 'state_commitment', 'index.js'))
         ? path.join(SYNC_SRC, 'state_commitment', 'index.js') : path.join(SYNC_SRC, 'stateCommitment.js'));
     SyncDatabase        = require(path.join(SYNC_SRC, 'db/index.js'));
+    ({ isStateCommitmentActive } = require(path.join(SYNC_SRC, 'consensus/gates/state_commitment_gate.js')));
 }
 
 const COMMITTED_HASH_SQL =
@@ -85,7 +86,7 @@ async function ensureSpecialAddressLedgerRecord(dbAdapter) {
     }
     if (donate1) {
         console.log('no special-address ledger record on this venue yet; sending 1 XCHAIN to DONATE1 ' + donate1);
-        const cryptoHelper = require('../cryptoHelper');
+        const cryptoHelper = require('../helpers/core/cryptoHelper');
         const sendHelper   = require('../helpers/sendHelper');
         const gasTick      = (typeof GAS_TICK !== 'undefined' && GAS_TICK) ? GAS_TICK : 'XCHAIN';
         const addr = await cryptoHelper.getNewFundedAddress('CONF.DONATE', COIN, NETWORK, null, 'legacy', 0, 1);
@@ -173,9 +174,11 @@ describe('consensus hash conformance: sync BlockHasher == indexer committed hash
             }
         }
         assert.strictEqual(mismatches.length, 0,
-            'sync BlockHasher diverged from indexer committed hashes (conformance pair drifted). ' +
-            'Update BOTH xchain-sync/src/client/block_hasher.js and xchain-indexer/src/db/actions.js getBlockHashes + ' +
-            'regenerate the golden, and bump CONSENSUS_VERSION:\n' +
+            'sync BlockHasher diverged from indexer committed hashes (conformance pair drifted): a live sync/indexer fork. ' +
+            'Restore byte-identity between xchain-sync/src/client/block_hasher.js and xchain-indexer/src/db/actions.js ' +
+            'getBlockHashes by fixing whichever side drifted (xchain-sync test/unit/blockhash_conformance_twin.test.js must pass first). ' +
+            'This test reads no fixture: do not regenerate xchain-sync test/fixtures/block-hash-vectors.json (a sync self-lock) ' +
+            'or bump BLOCK_HASH_VERSION (a coordinated consensus break) to clear this failure:\n' +
             JSON.stringify(mismatches.slice(0, 10), null, 2));
     });
 });
@@ -223,47 +226,65 @@ async function stateFixture(context) {
             dbAdapter.getBlockLeafRows = SyncDatabase.prototype.getBlockLeafRows.bind(dbAdapter);
             const rootRows = await dbAdapter.doQuery(
                 'SELECT block_index, block_merkle_root FROM state_tree_roots ORDER BY block_index ASC', []);
-            return { dbAdapter, rootRows };
+            // Roots are owed whenever the commitment gate is active at the indexed tip
+            // ('regtest'/null, as every recompute here); on regtest that is from genesis.
+            const tipRows = await dbAdapter.doQuery('SELECT MAX(block_index) AS tip FROM blocks', []);
+            const tip = tipRows[0] ? tipRows[0].tip : null;
+            const rootsRequired = tip != null && isStateCommitmentActive(Number(tip), 'regtest', null);
+            return { dbAdapter, rootRows, rootsRequired, tip };
         })();
     }
     return stateFixtureResult;
 }
 
+// Fail on an empty state_tree_roots while the gate is active; skip only below it.
+function requireRootsOrSkip(context, { rootRows, rootsRequired, tip }) {
+    if (rootRows && rootRows.length) return;
+    assert.ok(!rootsRequired,
+        'no state_tree_roots rows although the state commitment is active at the indexed tip (' + tip + ') ' +
+        'on this regtest venue: the indexer has stopped committing light-client roots. This is a regression, ' +
+        'not an old build or a pre-flag-day height.');
+    console.log('no state_tree_roots rows and the state commitment is not active at the indexed tip; skipping');
+    context.skip();
+}
+
 // Light-client state-commitment conformance (SPV spec sec.4-5). The follower
-// recomputes block_merkle_root from src/stateCommitment.js + db.getBlockLeafRows
-// (a copy of BlockHasher's 10 content queries) and HALTs if it disagrees with the
-// indexer's committed root. The unit golden locks the leaf serialization, but only
-// THIS test exercises getBlockLeafRows + computeBlockMerkleRoot against REAL
-// indexer-produced rows. Read-only: it never writes the indexer DB. (balances_root
-// is covered by the persistent-vs-reference unit fuzz + the live regtest follower
-// halt drill; stakes_root/state_root verification are deferred in Phase 1.)
+// recomputes block_merkle_root with src/state_commitment/index.js over
+// db.getBlockLeafRows, a copy of BlockHasher's 10 content queries, and HALTs if
+// it disagrees with the indexer's committed root. The unit golden locks the leaf
+// serialization, but only THIS test exercises getBlockLeafRows plus
+// computeBlockMerkleRoot against REAL indexer-produced rows. Read-only: it never
+// writes the indexer DB.
+//
+// Scope: this file compares the three block hashes and block_merkle_root only.
+// It does not compare balances_root, stakes_root, or state_root. Those roots are
+// checked live by the follower's apply-time VERIFY_STATE_COMMITMENT halt, where
+// state_root folds stakes_root.
 describe('state commitment conformance: sync block_merkle_root == indexer committed roots @regression', function () {
     this.timeout(0);
-    let rootRows;
+    let fixture;
 
     before(async function () {
-        ({ rootRows } = await stateFixture(this));
+        fixture = await stateFixture(this);
     });
 
     it('has committed state_tree_roots to verify', function () {
-        if (!rootRows || !rootRows.length) {
-            console.log('no state_tree_roots rows (indexer build predates the light-client commitment or runs below the flag-day); skipping');
-            this.skip();
-        }
-        assert.ok(rootRows.length > 0);
+        requireRootsOrSkip(this, fixture);
+        assert.ok(fixture.rootRows.length > 0);
     });
 });
 
 describe('state commitment conformance: sync block_merkle_root == indexer committed roots @regression', function () {
     this.timeout(0);
-    let dbAdapter, rootRows;
+    let fixture, dbAdapter, rootRows;
 
     before(async function () {
-        ({ dbAdapter, rootRows } = await stateFixture(this));
+        fixture = await stateFixture(this);
+        ({ dbAdapter, rootRows } = fixture);
     });
 
     it('every block block_merkle_root recomputes to the indexer committed value', async function () {
-        if (!rootRows || !rootRows.length) this.skip();
+        requireRootsOrSkip(this, fixture);
         const mismatches = [];
         for (const r of rootRows) {
             // 'regtest'/null: same state_key collation gating note as the
@@ -274,30 +295,31 @@ describe('state commitment conformance: sync block_merkle_root == indexer commit
             }
         }
         assert.strictEqual(mismatches.length, 0,
-            'sync block_merkle_root diverged from indexer committed roots (block-content conformance pair drifted). ' +
-            'Update BOTH xchain-sync/src/db.js getBlockLeafRows / stateCommitment.js and the indexer side, then ' +
-            'regenerate the golden:\n' + JSON.stringify(mismatches.slice(0, 10), null, 2));
+            'sync block_merkle_root diverged from indexer committed roots (block-content conformance pair drifted): a live sync/indexer fork. ' +
+            'Restore byte-identity between xchain-sync/src/db/actions.js getBlockLeafRows / src/state_commitment/index.js and the ' +
+            'indexer side (xchain-indexer/src/db/actions.js, src/state_commitment/) by fixing whichever side drifted ' +
+            '(xchain-sync test/unit/blockhash_conformance_twin.test.js must pass first). This test reads no fixture: do not ' +
+            'regenerate the xchain-sync test/fixtures/*-vectors.json goldens or bump BLOCK_HASH_VERSION to clear this failure:\n' +
+            JSON.stringify(mismatches.slice(0, 10), null, 2));
     });
 });
 
 describe('state commitment conformance: sync block_merkle_root == indexer committed roots @regression', function () {
     this.timeout(0);
-    let dbAdapter, rootRows;
+    let dbAdapter;
 
     before(async function () {
-        ({ dbAdapter, rootRows } = await stateFixture(this));
+        ({ dbAdapter } = await stateFixture(this));
     });
 
     // Guard that the canonicalization path was actually exercised. Without at least
     // one special-address ledger row (BURN/GAS/DONATE/REWARD) in the indexed blocks,
-    // the recompute loop above can pass while never touching the canonicalization code
+    // the recompute loops above can pass while never touching the canonicalization code
     // that the consensus fix introduced. This assertion makes the guard fail-meaningful
     // rather than vacuously green on a run that never credited a protocol address.
-    // The e2e suite's ISSUE/SEND/etc. actions generate protocol fees credited to
-    // DONATE1/DONATE2; the MINT gas bootstrap credits GAS. Both paths are exercised
-    // before this test file runs, so skipping here is a signal worth surfacing.
+    // It reads only credits/debits, so it guards the BlockHasher loop as well and
+    // runs whether or not state_tree_roots holds any rows.
     it('at least one indexed block credits a protocol special address (canonicalization was exercised)', async function () {
-        if (!rootRows || !rootRows.length) this.skip();
         if (!ROLE_BY_ADDRESS) {
             console.log('protocolAddressRoles not available; skipping special-address coverage check');
             this.skip();

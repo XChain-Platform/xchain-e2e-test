@@ -22,14 +22,14 @@
 //    standalone invocation die with "Cannot read properties of null" twice.
 
 const assert = require('assert')
-const script = require('../../../scripts/clear-seed-sentinels')
+const script = require('../../../bin/clear-seed-sentinels')
 
 describe('clear-seed-sentinels script guards', () => {
 
     it('prints no credential', () => {
         // The script logs the target and the round list; the only env names it may
         // emit are the KEYS it filled, never a value.
-        const src = require('fs').readFileSync(require.resolve('../../../scripts/clear-seed-sentinels'), 'utf8')
+        const src = require('fs').readFileSync(require.resolve('../../../bin/clear-seed-sentinels'), 'utf8')
         const logged = [...src.matchAll(/console\.(?:log|error)\(([^\n]*)\)/g)].map(m => m[1])
         for (const line of logged)
             assert.ok(!/PASS|password/i.test(line), 'log line may not reference a password: ' + line)

@@ -48,7 +48,7 @@ class X402Storefront {
     start() {
         return new Promise((resolve, reject) => {
             this.server = http.createServer((req, res) => {
-                this._handle(req, res).catch((e) => {
+                this['_handle'](req, res).catch((e) => {
                     res.statusCode = 500;
                     res.end(JSON.stringify({ error: e.message }));
                 });
@@ -61,7 +61,7 @@ class X402Storefront {
         });
     }
 
-    async _handle(req, res) {
+    async ['_handle'](req, res) {
         const paid = await this.gateway.guard(req, res);
         this.hits.push({ url: req.url, paid, status: res.statusCode });
         if (!paid) return;                      // guard already sent the 402 challenge

@@ -40,12 +40,12 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { makeSdk, fundedGasAddress } = require('./sdkHelper');
+const { makeSdk, fundedGasAddress } = require('./helpers/sdkHelper');
 const {
     MIN_REFUND_WINDOW, dbQuery, getFeed, amtEq, actionIndexOf, blockTime,
     jumpTo, resumeMiningAtFrozenClock, releaseClock, waitFeedStatus,
     issueWagerToken, submitBet
-} = require('./betHelper');
+} = require('./helpers/betHelper');
 
 const DAY = 86400;
 const MAX_DEADLINE_HORIZON = 31536000;   // 1 year

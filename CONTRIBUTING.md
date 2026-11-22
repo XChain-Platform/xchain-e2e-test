@@ -21,7 +21,7 @@ If you're reporting a security issue, **stop here** and read [`SECURITY.md`](./S
 xchain-e2e-test/
 ├── src/                  connectors, helpers, reporters, and shared test utilities
 ├── test/                 all test suites (unit, integration, e2e, smoke, fuzz, chaos, regression, mutation, perf)
-├── scripts/              perf-gate, perf-report, mutation-report utilities
+├── bin/              perf-gate, perf-report, mutation-report utilities
 ├── CHANGELOG.md          authoritative version history
 ├── SECURITY.md           private vulnerability disclosure
 └── package.json          scripts + dependencies
@@ -88,9 +88,9 @@ Run the no-stack tiers (`test:unit`, `test:boundary`, `test:regression:p0`) befo
 
 New tests that introduce `.env`-like fixtures must not commit any real credentials. Use placeholder values and document the required env vars in the test file's top comment.
 
-**Wait on a condition, never on a duration.** A standalone `await sleep(2500)` or `await new Promise(r => setTimeout(r, 2500))` before an assertion passes or fails on how busy the venue is, and dozens of them survive here from before this rule. The two spellings are the same defect and the gate below counts both. Use `src/db.js`'s `_waitFor(checkFn, criteria, timeMax)` or one of its `waitForX` wrappers, or the poll helpers in `test/helpers/stakeHelper.js`, and carry the old sleep duration over as the timeout budget. For a negative expectation ("assert it was rejected"), do not poll for absence: wait on a positive signal proving the indexer has processed past the relevant point, then assert the negative. A `sleep()` that is the pause between iterations of a loop re-checking a condition is already deterministic and needs no change.
+**Wait on a condition, never on a duration.** A standalone `await sleep(2500)` or `await new Promise(r => setTimeout(r, 2500))` before an assertion passes or fails on how busy the venue is, and dozens of them survive here from before this rule. The two spellings are the same defect and the gate below counts both. Use `_waitFor(checkFn, criteria, timeMax)` in `src/db/wait.js` or one of the `waitForX` wrappers in `src/db/*.js`, or the poll helpers in `test/helpers/stakeHelper.js`, and carry the old sleep duration over as the timeout budget. For a negative expectation ("assert it was rejected"), do not poll for absence: wait on a positive signal proving the indexer has processed past the relevant point, then assert the negative. A `sleep()` that is the pause between iterations of a loop re-checking a condition is already deterministic and needs no change.
 
-`npm run lint:sleep-flake` (chained into `npm run ci`) counts the standalone fixed-duration waits, in both spellings, against `scripts/sleep-flake-baseline.json` and fails when the count rises. Converting one to a condition wait puts the count below the baseline; re-run with `--write-baseline` to lower it. The baseline only ever goes down, with one recorded exception: it was raised once, 26 to 38, when the detector was widened to read `await new Promise(r => setTimeout(r, n))` alongside `await sleep(n)`. That rise was the gate seeing a shape it had been blind to, not new debt, and the rule is unchanged either side of it. `test/unit/scripts/sleepFlakeScanner.test.js` pins what the detector counts and what it must not (poll intervals inside a re-checking loop, `sleep` helper definitions, `Promise.race` timeout arms, event waits with no timer).
+`npm run lint:sleep-flake` (chained into `npm run ci`) counts the standalone fixed-duration waits, in both spellings, against `bin/sleep-flake-baseline.json` and fails when the count rises. Converting one to a condition wait puts the count below the baseline; re-run with `--write-baseline` to lower it. The baseline only ever goes down, with one recorded exception: it was raised once, 26 to 38, when the detector was widened to read `await new Promise(r => setTimeout(r, n))` alongside `await sleep(n)`. That rise was the gate seeing a shape it had been blind to, not new debt, and the rule is unchanged either side of it. `test/unit/scripts/sleep_flake_scanner.test.js` pins what the detector counts and what it must not (poll intervals inside a re-checking loop, `sleep` helper definitions, `Promise.race` timeout arms, event waits with no timer).
 
 ---
 
@@ -109,7 +109,7 @@ New tests that introduce `.env`-like fixtures must not commit any real credentia
 
 Match the existing log style: a concise subject line, then a short body explaining what changed and why.
 
-- Branch off `master` and keep history linear (rebase, don't merge).
+- Fork the repository, branch off `develop`, and open your pull request against `develop`. Keep history linear (rebase, don't merge). `master` is what production runs and only ever receives release merges from `develop`; a pull request into `master` from a fork or any other branch fails the `base-branch guard` check and cannot be merged.
 - One logical change per commit; don't batch unrelated work.
 - **No `Co-Authored-By` trailers.** This is a project policy.
 - **Never `--no-verify`.** If a hook fails, fix the cause; don't bypass it.
@@ -125,6 +125,7 @@ Before opening a PR:
 3. Update `CHANGELOG.md` with a terse entry for your change.
 4. Make sure `git status` is clean apart from intended changes (no `node_modules/`, no editor leftovers, no `.env`).
 5. Open the PR with a clear title and a description of what changed and why.
+6. Agree to the Contributor License Agreement when the CLA Assistant bot links it on your first PR. The bot records your signature once for every XChain Platform repository, and its `license/cla` check must pass before the PR can be merged.
 
 For non-security bugs, open an issue at <https://github.com/XChain-Platform/xchain-e2e-test/issues/new>. For security bugs, see [`SECURITY.md`](./SECURITY.md).
 

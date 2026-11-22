@@ -32,7 +32,7 @@
 'use strict';
 
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts } = require('./helpers/sdkHelper');
 
 // Expand scientific notation to a plain fixed-decimal string, no floats.
 // The explorer can return very small balances as e.g. "1e-18". The VALUE is

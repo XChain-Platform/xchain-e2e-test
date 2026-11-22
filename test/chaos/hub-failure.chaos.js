@@ -68,7 +68,7 @@ describe('Chaos Experiment 3: Hub Auto-Discovery Total Failure @P1', function ()
             sinon.stub(axios, 'post').rejects(new Error('ECONNREFUSED'))
             const hub = new XChainHubConnector('10.255.255.1', '9999')
 
-            const result = await hub._call({ jsonrpc: '2.0', method: 'ping', id: 1 })
+            const result = await hub['_call']({ jsonrpc: '2.0', method: 'ping', id: 1 })
 
             assert.strictEqual(result, null)
             assert(axios.post.calledOnce)
@@ -82,7 +82,7 @@ describe('Chaos Experiment 3: Hub Auto-Discovery Total Failure @P1', function ()
                 'http://10.255.255.3:9999'
             ])
 
-            const result = await hub._call({ jsonrpc: '2.0', method: 'ping', id: 1 })
+            const result = await hub['_call']({ jsonrpc: '2.0', method: 'ping', id: 1 })
 
             assert.strictEqual(result, null)
             assert.strictEqual(axios.post.callCount, 3, 'should try all 3 endpoints')
@@ -92,7 +92,7 @@ describe('Chaos Experiment 3: Hub Auto-Discovery Total Failure @P1', function ()
             sinon.stub(axios, 'post').resolves({ data: {} }) // missing result key
             const hub = new XChainHubConnector('10.255.255.1', '9999')
 
-            const result = await hub._call({ jsonrpc: '2.0', method: 'getallconfigs', id: 1 })
+            const result = await hub['_call']({ jsonrpc: '2.0', method: 'getallconfigs', id: 1 })
 
             assert.strictEqual(result, null)
         })
@@ -167,7 +167,7 @@ describe('Chaos Experiment 3: Hub Auto-Discovery Total Failure @P1', function ()
             sinon.stub(axios, 'post').rejects(degraded503Error())
             const hub = new XChainHubConnector('10.255.255.1', '9999')
 
-            const result = await hub._call({ jsonrpc: '2.0', method: 'ping', id: 1 })
+            const result = await hub['_call']({ jsonrpc: '2.0', method: 'ping', id: 1 })
 
             assert.deepStrictEqual(result, { status: 'degraded', db: false })
         })

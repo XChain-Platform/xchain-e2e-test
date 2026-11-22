@@ -19,11 +19,11 @@
 const assert = require('assert')
 const sinon = require('sinon')
 const bitcoin = require('bitcoinjs-lib')
-const { saveGlobals, restoreGlobals, GLOBAL_KEYS } = require('./chaos-helpers')
+const { saveGlobals, restoreGlobals, GLOBAL_KEYS } = require('./helpers/chaos_helpers')
 
 const GAS_TICK = 'XCHAIN'
 
-// Replicate the GAS token bootstrap logic from initialCheck.test.js
+// Replicate the GAS token bootstrap logic from initial_check.test.js
 async function runGasBootstrap(db, cryptoHelper, issueHelper) {
     const gasTokenExists = await db.checkIssue({ tick: GAS_TICK, status: 'valid' })
     if (!gasTokenExists) {

@@ -10,6 +10,19 @@ const { startDisposableHubDb } = require('../../helpers/disposableHubDb');
 const { OracleBatchReplayNode } = require('../../helpers/oracleBatchReplay');
 const { anchorRowsDigest } = require('../../helpers/anchor_fold/anchor_fold_readings');
 const { normalizeAnchorRowsForDigest } = require('../../helpers/anchor_fold/normalize_digest_rows');
+const { seedUnarmedAnchors } = require('../../helpers/anchor_fold/seed_unarmed_anchors');
+const venueHooks = require('../../initial_check.test.js').mochaHooks;
+
+// A seeded federation run (the R-3 rail) starts from a fresh chain that carries no anchors,
+// so AF4 first publishes its own pre-fold v0 bundle and archive (R-3 attempt 4 gap B).
+const seedChain = process.env.E2E_REQUIRE_FEDERATION === '1';
+
+// The regtest watermark graces the DOGE rail indexers run with, given to BOTH replay
+// nodes: at the frozen graces a replay cannot pass a block younger than 4800 s of wall
+// time, so AF4 would wait out every near-tip block. AF4 compares nodes, not barriers.
+const REPLAY_WATERMARK_GRACES = {
+    PRICE: 5, ORACLE: 5, MATCH: 5, CALL: 5, ANCHOR_ATTEST: 5, BRIDGE: 0, POLICY: 0
+};
 
 function assertReplayIdentical(firstDigest, replayDigest) {
     assert.strictEqual(replayDigest, firstDigest, 'unarmed replay reproduced byte-identical anchor_actions rows');
@@ -21,7 +34,8 @@ async function startReplayNode(label, hubDb, basePort) {
         coin: 'dogecoin',
         network: 'regtest',
         hubDb: hubDb,
-        basePort: basePort
+        basePort: basePort,
+        watermarkGraces: REPLAY_WATERMARK_GRACES
     });
     try {
         if (await node.up()) return { node: node, reason: null };
@@ -33,7 +47,7 @@ async function startReplayNode(label, hubDb, basePort) {
 
 async function readAnchorRows(node, targetHeight) {
     const database = '`' + node.indexerDbName + '`';
-    return node._conn.query(
+    return node['_conn'].query(
         'SELECT * FROM ' + database + '.anchor_actions ' +
         'WHERE block_index_doge <= ? ORDER BY action_index, section_index',
         [targetHeight]
@@ -88,6 +102,17 @@ async function runReplayComparison() {
 
 describe('ANCHOR fold unarmed replay', function () {
     this.timeout(0);
+
+    if (seedChain) {
+        before(async function () {
+            await venueHooks.beforeAll.call(this);
+            const seeded = await seedUnarmedAnchors();
+            console.log('    seeded pre-fold anchors ' + JSON.stringify(seeded));
+        });
+        after(async function () {
+            await venueHooks.afterAll.call(this);
+        });
+    }
 
     it('replays v0 bundles and archive batches to byte-identical anchor_actions rows', async function () {
         assert.strictEqual(process.env.XC_ANCHOR_FOLD_REGTEST_ACTIVATION, undefined,

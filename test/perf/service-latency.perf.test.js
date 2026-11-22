@@ -27,7 +27,7 @@ const assert = require('assert')
  * are logged for visibility but not gated. Correctness is checked first so a fast
  * failure (connection refused -> instant `false`) can't sneak under a latency bar.
  *
- * Complements test/perf/perfCollector.js + the performance-reporter, which
+ * Complements test/perf/helpers/perfCollector.js + the performance-reporter, which
  * measure whole-suite timing as a wrapper; this file is the only place that
  * asserts per-service latency contracts directly.
  */
@@ -53,7 +53,7 @@ function percentile(sortedAsc, p) {
 // This guarantees we are timing real work, not a fast error path.
 async function measure(label, fn, validate) {
     for (let i = 0; i < WARMUP; i++) {
-        try { await fn() } catch (_) { /* warm-up errors ignored */ }
+        try { await fn() } catch (internal) { /* warm-up errors ignored */ }
     }
     const samples = []
     for (let i = 0; i < SAMPLES; i++) {

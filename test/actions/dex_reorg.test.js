@@ -31,7 +31,7 @@
  ********************************************************************/
 
 const assert       = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const issueHelper  = require('../helpers/issueHelper')
 const gasHelper    = require('../helpers/gasHelper')
 const orderHelper  = require('../helpers/orderHelper')
@@ -66,7 +66,7 @@ async function balanceOf(address, tick) {
     return rows.length ? String(rows[0].amount) : '0'
 }
 async function tip() { const r = await q(`SELECT MAX(block_index) h FROM blocks`, []); return Number(r[0].h) }
-async function mine(n) { try { await regtestMinerConnector.generateBlocks(n) } catch (e) {} }
+async function mine(n) { await regtestMinerConnector.generateBlocks(n) }
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 function randTick(p) { let s = p; for (let i = 0; i < 6; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 
@@ -112,7 +112,7 @@ describe('DEX Reorg: an open ORDER (and its escrow) rolls back across an on-chai
         // Pre-reorg: the order is live and the give amount is escrowed (balance debited
         // 100 -> 70). The escrow debit is the authoritative "open & holding" signal; the
         // status string is logged for context (not asserted: its exact value varies).
-        let ord = await orderRow(orderActionIndex)
+        const ord = await orderRow(orderActionIndex)
         assert(ord, 'order row exists pre-reorg')
         console.log('   order status =', ord.status)
         assert.strictEqual(await balanceOf(maker.address, tick), '70', 'give amount escrowed (balance debited 30)')

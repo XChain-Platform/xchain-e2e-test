@@ -262,9 +262,9 @@ function makeInvariantEngine(opts){
         getInFlightBridgeTransfers:  async () => [],
         getLatestPolicySeq:          async () => 0
     }, o.db || {});
-    eng._pendingInFlight = o.pending || new Map();
-    eng._tickOrigin = o.tickOrigin || new Map([[(o.network || 'regtest') + '|XCHAIN', 'BTC']]);
-    eng._chainStateLogged = {};
+    eng['_pendingInFlight'] = o.pending || new Map();
+    eng['_tickOrigin'] = o.tickOrigin || new Map([[(o.network || 'regtest') + '|XCHAIN', 'BTC']]);
+    eng['_chainStateLogged'] = {};
     eng.chainStateReader = o.chainStateReader;
     return eng;
 }

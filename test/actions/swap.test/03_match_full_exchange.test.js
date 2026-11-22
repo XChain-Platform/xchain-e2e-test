@@ -9,7 +9,7 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const cryptoHelper = require('../../cryptoHelper')
+const cryptoHelper = require('../../helpers/core/cryptoHelper')
 const issueHelper = require('../../helpers/issueHelper')
 const sendHelper = require('../../helpers/sendHelper')
 const gasHelper = require('../../helpers/gasHelper')
@@ -22,12 +22,12 @@ describe('SWAP', () => {
     describe('match - full exchange', () => {
         it('should match two counter-swaps and complete the exchange', async () => {
             // Two separate addresses (matching requires different SOURCE)
-            let addr1 = await cryptoHelper.getNewFundedAddress("SWAP.MATCH1", COIN, NETWORK, null, "legacy", 0, 1)
-            let addr2 = await cryptoHelper.getNewFundedAddress("SWAP.MATCH2", COIN, NETWORK, null, "legacy", 0, 1)
-            let address1 = addr1["address"]
-            let address2 = addr2["address"]
-            let tokenA = "SWPMA"+address1.substring(address1.length-8)
-            let tokenB = "SWPMB"+address1.substring(address1.length-8)
+            const addr1 = await cryptoHelper.getNewFundedAddress("SWAP.MATCH1", COIN, NETWORK, null, "legacy", 0, 1)
+            const addr2 = await cryptoHelper.getNewFundedAddress("SWAP.MATCH2", COIN, NETWORK, null, "legacy", 0, 1)
+            const address1 = addr1["address"]
+            const address2 = addr2["address"]
+            const tokenA = "SWPMA"+address1.substring(address1.length-8)
+            const tokenB = "SWPMB"+address1.substring(address1.length-8)
 
             await issueHelper.sendIssueV0(addr1, tokenA, 100, 50, 0, "Swap match token A", 50)
             await issueHelper.sendIssueV0(addr1, tokenB, 100, 50, 0, "Swap match token B", 50)
@@ -38,9 +38,9 @@ describe('SWAP', () => {
             await gasHelper.ensureGasBalance(addr1, 100)
             await gasHelper.ensureGasBalance(addr2, 100)
 
-            let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90 // 90 days
+            const expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90 // 90 days
 
-            let swap1 = await swapHelper.sendSwapV0(
+            const swap1 = await swapHelper.sendSwapV0(
                 addr1,
                 COIN_CODE, tokenA, 10,
                 COIN_CODE, tokenB, 5,
@@ -48,10 +48,10 @@ describe('SWAP', () => {
                 null, null, "Selling tokenA for tokenB"
             )
             assert(swap1.swap, "Swap 1 should exist in DB")
-            let swap1ActionIndex = Number(swap1.swap["action_index"])
+            const swap1ActionIndex = Number(swap1.swap["action_index"])
 
             // exact counter-swap
-            let swap2 = await swapHelper.sendSwapV0(
+            const swap2 = await swapHelper.sendSwapV0(
                 addr2,
                 COIN_CODE, tokenB, 5,
                 COIN_CODE, tokenA, 10,
@@ -59,15 +59,15 @@ describe('SWAP', () => {
                 null, null, "Buying tokenA with tokenB"
             )
             assert(swap2.swap, "Swap 2 should exist in DB")
-            let swap2ActionIndex = Number(swap2.swap["action_index"])
+            const swap2ActionIndex = Number(swap2.swap["action_index"])
 
-            let match = await indexerDatabase.waitForSwapMatch({ giveActionIndex: swap1ActionIndex, getActionIndex: swap2ActionIndex, status: "valid" }, 30000)
+            const match = await indexerDatabase.waitForSwapMatch({ giveActionIndex: swap1ActionIndex, getActionIndex: swap2ActionIndex, status: "valid" }, 30000)
             assert(match, "Swap match should exist in DB")
 
-            let completedSwap1 = await indexerDatabase.waitForSwap({ source: address1, giveTick: tokenA, swapStatus: "complete" }, 30000)
+            const completedSwap1 = await indexerDatabase.waitForSwap({ source: address1, giveTick: tokenA, swapStatus: "complete" }, 30000)
             assert(completedSwap1, "Swap 1 should be complete")
 
-            let completedSwap2 = await indexerDatabase.waitForSwap({ source: address2, giveTick: tokenB, swapStatus: "complete" }, 30000)
+            const completedSwap2 = await indexerDatabase.waitForSwap({ source: address2, giveTick: tokenB, swapStatus: "complete" }, 30000)
             assert(completedSwap2, "Swap 2 should be complete")
         })
     })

@@ -39,12 +39,12 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { makeSdk, fundedGasAddress } = require('./sdkHelper');
+const { makeSdk, fundedGasAddress } = require('./helpers/sdkHelper');
 const {
     MIN_REFUND_WINDOW, getFeed, getBets, balanceOf, amtEq, actionIndexOf,
     blockTime, jumpTo, resumeMiningAtFrozenClock, releaseClock, waitFeedStatus,
     issueWagerToken, submitBet
-} = require('./betHelper');
+} = require('./helpers/betHelper');
 
 // One oracle and three punters, reused across the drills; each drill gets its
 // OWN wager tick, so balances can never bleed between them.

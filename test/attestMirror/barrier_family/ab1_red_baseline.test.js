@@ -30,12 +30,12 @@
 const assert = require('assert')
 const path = require('path')
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const fixture = require('../helpers/barrierFamilyFixture')
 const rows = require('../helpers/barrierFamilyRows')
 const drive = require('../helpers/barrierFamilyDrive')
-const { queryDb } = require('../mirrorDrillWaits')
+const { queryDb } = require('../helpers/mirrorDrillWaits')
 
 const BUILD_ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const HELD = 0
@@ -50,7 +50,7 @@ describe('AB1: the RED baseline, the anchor-attest barrier holds a +7200 block f
     const ctx = { venue: null, btc: null, coin: 'BTC', block: null, red: null }
 
     before(async function () {
-        const up = await drive.bootFamilyVenue({ label: 'ab1', repoRoot: BUILD_ROOT, indexerGraces: { [HELD]: { anchorAttest: GRACE_S } } })
+        const up = await drive.bootFamilyVenue({ label: 'ab1', repoRoot: BUILD_ROOT, venue: { freshIndexers: true }, indexerGraces: { [HELD]: { anchorAttest: GRACE_S } } })
         Object.assign(ctx, up, { coin: up.evidence.coinCode })
     })
 

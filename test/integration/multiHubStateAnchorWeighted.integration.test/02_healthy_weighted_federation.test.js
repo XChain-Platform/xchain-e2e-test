@@ -48,7 +48,7 @@
 // Covers healthy weighted checkpoint finalization. One part of multiHubStateAnchorWeighted.integration.test.js.
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const assert = require('assert');
 const { MultiValidatorHub, ValidatorIdentity } = require('../../helpers/multiValidatorHubHelper');
@@ -104,7 +104,7 @@ async function tickAll(mvh) {
         let held = 0;
         for (const hub of mvh.hubs) {
             try { if ((await checkpointRows(hub)).length >= 1) held++; }
-            catch (_) { /* a hub that cannot be read has not stored it */ }
+            catch (internal) { /* a hub that cannot be read has not stored it */ }
         }
         return { ok: held === mvh.hubs.length, held: held };
     }, { timeoutMs: SETTLE_MS });

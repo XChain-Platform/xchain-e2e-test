@@ -36,7 +36,7 @@
 'use strict';
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const assert = require('assert');
 const crypto = require('crypto');
@@ -67,6 +67,7 @@ function dispatchRow(roundId, callId) {
         network:               NETWORK,
         source_chain:          'DOGE',
         source_action_index:   5,
+        push_generation:        0,
         source_contract_index: 1,
         target_chain:          'LTC',
         target_contract_index: 2,
@@ -121,7 +122,7 @@ async function driveDispatch(mvh, validators, seedBase, requireLiveLeader) {
                 const r = await hub.db.doQuery(
                     "SELECT call_id FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch'", [callId]);
                 if (r.length >= 1) held++;
-            } catch (_) { /* a hub that cannot be read has not persisted it */ }
+            } catch (internal) { /* a hub that cannot be read has not persisted it */ }
         }
         return { ok: held === mvh.hubs.length, held: held };
     }, { timeoutMs: SETTLE_MS, intervalMs: 100 });
@@ -173,4 +174,5 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM XCALL dispatch relay (C.2)', 
 });
 
 // Run the split parts in this suite's lane; the stubbed lane ignores their directory.
+require('../attestMirror/helpers/crossChainOfferDecimals').installCrossChainSeeds();
 require('./multiHubXcallWeighted.integration.test/02_healthy_weighted_federation.test');

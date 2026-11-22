@@ -16,7 +16,7 @@
 
 const assert      = require('assert');
 const chainRail   = require('../../helpers/chainRail');
-const cryptoHelper = require('../../cryptoHelper');
+const cryptoHelper = require('../../helpers/core/cryptoHelper');
 const bridgeParts = require('./helpers/fixture');
 
 const GAS_TICK = 'XCHAIN';

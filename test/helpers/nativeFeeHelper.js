@@ -48,19 +48,19 @@ const COIN_USD   = '100000.00000000'
 
 // Flat native fee output (satoshis). With the prices above, the indexer's
 // minAcceptable for an action costing X XCHAIN is 0.95 * X * 2 / 100000 coin;
-// 50000 sats (0.0005 coin) clears the min for any action up to ~26 XCHAIN.
+// 100000 sats (0.001 coin) clears the min for any action up to ~52 XCHAIN.
 // (That headroom halved when the seed moved from the 1.00-era value to the $2
 // bootstrap. The largest action any e2e composes is a full-size contract
-// deploy at well under 2 XCHAIN, so 26 is still an order of magnitude of slack; if
+// deploy at well under 2 XCHAIN, so 52 is still an order of magnitude of slack; if
 // a future action approaches it, raise this rather than lowering the price.)
-// Matches nativeFeeLive's proven output and is negligible against the ~1-coin
-// fundings cryptoHelper uses.
-const FLAT_FEE_SATS = 50000
+// This also meets DOGE's 0.001-coin dust threshold and is negligible against the
+// ~1-coin fundings cryptoHelper uses.
+const FLAT_FEE_SATS = 100000
 
-// The XCHAIN cost FLAT_FEE_SATS covers at the seeded pair (0.0005 coin * 100000 / 2).
+// The XCHAIN cost FLAT_FEE_SATS covers at the seeded pair (0.001 coin * 100000 / 2).
 // Re-valued at the indexer's current prices it is the fallback size for an action the
 // feequote cannot price, so the fallback always buys the same XCHAIN as the flat fee.
-const FEE_BUDGET_XCHAIN = 25
+const FEE_BUDGET_XCHAIN = 50
 
 // Headroom over the indexer's own expected fee. The band's floor is 0.95x expected, so
 // 1.10x survives a price move of about 14% between the quote and the action's block.
@@ -74,7 +74,7 @@ const FIXTURE_ROUND_FLOOR = 990000
 
 // At most one displaced-seed re-seed (see nativeFeeSats) per this many milliseconds.
 const DISPLACED_RESEED_MIN_MS = 15000
-let _lastDisplacedReseedMs = 0
+let internalLastDisplacedReseedMs = 0
 
 // What a sender can pay when its balance cannot be read: cryptoHelper's default funding
 // is one coin, which is exactly the 100000000-sat input the encoder refused to stretch
@@ -113,13 +113,13 @@ const OWN_SEED_ROUNDS  = new Set([XCHAIN_ROUND, COIN_ROUND, XCHAIN_ROUND_NOW, CO
 // blocks mined between this check and the action's own block.
 const SEED_CHAIN_DRIFT_SECONDS = 900
 
-let _lastSeedMs = 0
-let _lastSeedAnchor = 0
+let internalLastSeedMs = 0
+let internalLastSeedAnchor = 0
 
 // See seedGlobalPrices: opt-in suppression for a venue that derives XCHAIN/USD.
 // The flag has ONE definition for the whole tree (xchainPriceConstants, imported
 // above), enforced per seed site by the guard test.
-let _noSeedAnnounced = false
+let internalNoSeedAnnounced = false
 
 // Only LTC/DOGE mandate a native fee output; BTC uses the XCHAIN-gas fallback.
 function isFeeChain(){
@@ -188,11 +188,12 @@ function hubSeedTarget(){
 // mark it hub-finalized, which is what a round with no source-chain PRICE tx is.
 const HUB_SEED_SQL = `INSERT INTO price_snapshots
     (round_number, coin_pair, price, reference_block, reference_chain,
-     block_timestamp, validator_count, consensus_round, consensus_proof, status)
-    VALUES (?, ?, ?, 0, 'BTC', ?, 1, 1, '[]', 'finalized')
+     block_timestamp, batch_block_time, validator_count, consensus_round, consensus_proof, status)
+    VALUES (?, ?, ?, 0, 'BTC', ?, ?, 1, 1, '[]', 'finalized')
     ON DUPLICATE KEY UPDATE
      price = VALUES(price),
      block_timestamp = VALUES(block_timestamp),
+     batch_block_time = VALUES(batch_block_time),
      status = 'finalized'`
 
 async function seedIntoHub(target, rows){
@@ -202,7 +203,8 @@ async function seedIntoHub(target, rows){
     const conn = await mariadb.createConnection(Object.assign({ connectTimeout: 5000 }, target))
     try {
         for (const row of rows)
-            await conn.query(HUB_SEED_SQL, [row.roundNumber, row.coinPair, row.price, row.blockTimestamp])
+            await conn.query(HUB_SEED_SQL,
+                [row.roundNumber, row.coinPair, row.price, row.blockTimestamp, row.batchBlockTime])
     } finally {
         if (conn && typeof conn.end === 'function') await conn.end().catch(() => {})
     }
@@ -211,8 +213,8 @@ async function seedIntoHub(target, rows){
 // Where the last seed actually landed: { direct, hub, hubError }. Read by
 // warnIfSeedInvisible so its diagnosis matches what was written, and exposed so a
 // caller (or a drive report) can say whether this run's prices are replay-safe.
-let _lastSeedReport = null
-function lastSeedReport(){ return _lastSeedReport }
+let internalLastSeedReport = null
+function lastSeedReport(){ return internalLastSeedReport }
 
 // Seed XCHAIN/USD + {COIN}/USD so the indexer can value fees. Runs on EVERY
 // chain: native-fee chains (LTC/DOGE) value the injected fee output against
@@ -222,6 +224,16 @@ function lastSeedReport(){ return _lastSeedReport }
 // BTC/USD`, a false red/green by timing on runs past ORACLE_MAX_PRICE_AGE).
 // No-op only when the last seed is still fresh (unless force=true), or when the
 // venue derives the pair itself (NO_PRICE_SEED below).
+// The landed-batch stamp a seeded round carries. A venue that arms the landed-batch fee
+// gate (XC_E2E_PRICE_FEE_BATCH_LANDED=armed) prices fees only from rounds whose PRICE batch
+// landed at or before the action's block. The caller supplies the current chain time,
+// which is at or before the action's next block even for a wall-clock freshness row.
+// With the variable unset or off the stamp is 0, today's behaviour.
+function landedBatchTime(chainTime){
+    const raw = String(process.env.XC_E2E_PRICE_FEE_BATCH_LANDED || '').trim().toLowerCase()
+    return ['armed', 'on', 'true', 'yes', '1'].includes(raw) ? chainTime : 0
+}
+
 async function seedGlobalPrices(force){
     // The full de-seed. On a venue whose own hub publishes XCHAIN/USD (a
     // price-capability oracle validator), seeding it is a defect rather than a
@@ -236,8 +248,8 @@ async function seedGlobalPrices(force){
     // every venue whose hub does not derive the pair, which today is all of them
     // but one.
     if (NO_PRICE_SEED) {
-        if (!_noSeedAnnounced) {
-            _noSeedAnnounced = true
+        if (!internalNoSeedAnnounced) {
+            internalNoSeedAnnounced = true
             console.log('nativeFeeHelper: XCHAIN_E2E_NO_PRICE_SEED=1; not seeding oracle prices ' +
                 '(the venue is expected to publish them itself)')
             // Suppressing the seed is necessary but NOT sufficient: rows a
@@ -262,15 +274,15 @@ async function seedGlobalPrices(force){
     }
 
     const now = Date.now()
-    const throttled = !force && (now - _lastSeedMs) < SEED_REFRESH_MS
+    const throttled = !force && (now - internalLastSeedMs) < SEED_REFRESH_MS
     // The chain clock, not the wall clock, is what ages a snapshot out. Read it
     // even while throttled so a clock jump re-seeds immediately (the read is one
     // indexed query on the suite's existing pool).
     if (throttled) {
-        if (!_lastSeedAnchor) return
+        if (!internalLastSeedAnchor) return
         let chainNow = 0
         try { chainNow = await priceSnapshotHelper.latestBlockTime() } catch (e) { return }
-        const drift = chainNow - _lastSeedAnchor
+        const drift = chainNow - internalLastSeedAnchor
         // Forward drift inside the budget is the only case that needs no work. A
         // NEGATIVE drift is not a smaller version of the same thing: it puts the
         // anchor in the future of the blocks now being mined, which the H-3 gate
@@ -336,12 +348,16 @@ async function seedGlobalPrices(force){
     // higher round (see the anchor note above). Built once and handed to BOTH targets,
     // so the durable hub copy and the copy the indexer reads today cannot disagree.
     const rows = [
-        { coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: chainTime, roundNumber: XCHAIN_ROUND },
-        { coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: chainTime, roundNumber: COIN_ROUND }
+        { coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: chainTime,
+            batchBlockTime: landedBatchTime(chainTime), roundNumber: XCHAIN_ROUND },
+        { coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: chainTime,
+            batchBlockTime: landedBatchTime(chainTime), roundNumber: COIN_ROUND }
     ]
     if (wallTime > chainTime) {
-        rows.push({ coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: wallTime, roundNumber: XCHAIN_ROUND_NOW })
-        rows.push({ coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: wallTime, roundNumber: COIN_ROUND_NOW })
+        rows.push({ coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: wallTime,
+            batchBlockTime: landedBatchTime(chainTime), roundNumber: XCHAIN_ROUND_NOW })
+        rows.push({ coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: wallTime,
+            batchBlockTime: landedBatchTime(chainTime), roundNumber: COIN_ROUND_NOW })
     }
 
     // The durable half, first (see hubSeedTarget). Non-fatal by construction: a venue
@@ -365,15 +381,15 @@ async function seedGlobalPrices(force){
     await priceSnapshotHelper.clearPair('XCHAIN/USD')
     await priceSnapshotHelper.clearPair(global.COIN_CODE + '/USD')
     for (const row of rows) await priceSnapshotHelper.seedSnapshot(row)
-    _lastSeedMs = now
+    internalLastSeedMs = now
     // The CHAIN anchor is what the drift check compares against: it is the row a
     // frozen or jumped chain actually reads.
-    _lastSeedAnchor = chainTime
+    internalLastSeedAnchor = chainTime
     // Named only for the log and the visibility check below; a stubbed helper need not
     // provide it, so this stays optional rather than becoming a second contract.
     const target = (typeof priceSnapshotHelper.seedTarget === 'function')
         ? priceSnapshotHelper.seedTarget() : null
-    _lastSeedReport = { direct: target || null, hub: hubSeeded, hubError: hubError }
+    internalLastSeedReport = { direct: target || null, hub: hubSeeded, hubError: hubError }
     console.log('nativeFeeHelper: seeded oracle prices XCHAIN/USD=' + XCHAIN_USD +
         ' ' + global.COIN_CODE + '/USD=' + COIN_USD + ' (chain_time=' + chainTime +
         (wallTime > chainTime ? ', wall_time=' + wallTime : '') +
@@ -384,7 +400,7 @@ async function seedGlobalPrices(force){
     // rejects `no current oracle price` while this log says the prices are in place, and
     // the two databases involved both look healthy. Confirm it once at bootstrap, where
     // the cost is one call and the answer is unambiguous.
-    if (force) await warnIfSeedInvisible(target, _lastSeedReport)
+    if (force) await warnIfSeedInvisible(target, internalLastSeedReport)
 }
 
 // Ask the indexer whether the seed just written is the one it prices against, and say
@@ -445,11 +461,11 @@ function discoveryPollMs(){ return parseInt(process.env.NATIVE_FEE_DISCOVERY_POL
 // is spent (post-reset the indexer needs a moment to populate it); non-fee
 // chains keep the single-shot probe since they fall back to gas mode anyway.
 // Returns { enabled, destination }; cached after first resolution.
-let _feeMode = null
+let internalFeeMode = null
 async function discoverFeeMode(){
-    if (_feeMode) return _feeMode
+    if (internalFeeMode) return internalFeeMode
     const envDest = resolveFeeDestination()
-    if (envDest) { _feeMode = { enabled: true, destination: envDest }; return _feeMode }
+    if (envDest) { internalFeeMode = { enabled: true, destination: envDest }; return internalFeeMode }
     if (global.indexerConnector && typeof global.indexerConnector.call === 'function') {
         const deadline = Date.now() + discoveryTimeoutMs()
         let lastError = null
@@ -461,8 +477,8 @@ async function discoverFeeMode(){
                 if (sched && !sched.error) {
                     if (attempts > 1)
                         console.log('nativeFeeHelper: feeschedule became ready after ' + attempts + ' attempts')
-                    _feeMode = { enabled: !!sched.nativeFeeEnabled, destination: sched.feeDestination || null }
-                    return _feeMode
+                    internalFeeMode = { enabled: !!sched.nativeFeeEnabled, destination: sched.feeDestination || null }
+                    return internalFeeMode
                 }
                 lastError = (sched && sched.error) ? String(sched.error) : 'empty feeschedule response'
             } catch (e) {
@@ -487,8 +503,8 @@ async function discoverFeeMode(){
     if (isFeeChain())
         throw new Error('cannot determine native-fee mode on ' + global.COIN_CODE +
             ' (no FEE_DESTINATION env and no indexerConnector.feeschedule)')
-    _feeMode = { enabled: false, destination: null }
-    return _feeMode
+    internalFeeMode = { enabled: false, destination: null }
+    return internalFeeMode
 }
 
 // The two prices the indexer values a native fee against right now, from its own
@@ -560,12 +576,17 @@ function rawSatsForXchain(xchainAmount, prices){
 }
 
 // The indexer's own expected fee for this exact action, in satoshis with FEE_HEADROOM,
-// or null when it will not price it. feequote dry-runs the real handler against current
-// state and values its staged XCHAIN fee at the prices the chain will use. It answers
-// no fee for an action it judges invalid (a negative test's deliberately bad action),
-// for a controller-bound one, for BATCH/XEXEC, or while the indexer is busy on a block;
-// connector.call throws on that answer's error envelope, and every one of those cases
-// falls back to the priced budget.
+// or null when it will not price it. For most actions feequote dry-runs the real handler
+// against current state, so `valid` is the handler's verdict and the staged XCHAIN fee is
+// valued at the prices the chain will use. DEPLOY/EXECUTE are never dry-run: their answer
+// is priced from the gas schedule (staticQuote:true, validated:false, valid:null), and this
+// helper deliberately sizes from that fee-only quote, since valid:null means "not judged",
+// not "invalid". It answers no fee for an action it judges invalid (a negative test's
+// deliberately bad action), for a controller-bound one, for BATCH/XEXEC (supported:false,
+// denied:true), or while the indexer is busy on a block; connector.call throws on that
+// answer's error envelope, and every one of those cases falls back to the priced budget.
+// A supported:false answer is refused here too, so a denied answer is never sized even
+// if it someday carries a fee.
 // Returns { sats, prices } where `prices` is the pair the quote itself was valued at (the
 // feequote answer carries it), or null when there is no quote.
 async function quoteActionSats(wire, source){
@@ -577,7 +598,7 @@ async function quoteActionSats(wire, source){
     try {
         q = await c.call('feequote', { action: wire.slice(0, cut), params: wire.slice(cut + 1), source: source })
     } catch (e) { return null }
-    if (!q || q.valid === false) return null
+    if (!q || q.valid === false || (q.supported === false && !q.feeExempt)) return null
     if (q.feeExempt) return { sats: 0, prices: null }
     const sats = Number(q.requiredFeeSats)
     if (!Number.isFinite(sats) || sats < 0) return null
@@ -601,7 +622,7 @@ async function sizeAt(prices, wire, source){
 }
 
 async function reseedDisplaced(why){
-    _lastDisplacedReseedMs = Date.now()
+    internalLastDisplacedReseedMs = Date.now()
     console.log('nativeFeeHelper: ' + why + '; re-seeding')
     await seedGlobalPrices(true)
     return readFeePrices()
@@ -631,7 +652,7 @@ async function nativeFeeSats(wire, source){
     let reseeded = false
     // Rate-limited: where even a fresh seed stays invisible (warnIfSeedInvisible names
     // that case), re-seeding before every action would only repeat the warning.
-    if (prices && seedDisplaced(prices) && (Date.now() - _lastDisplacedReseedMs) >= DISPLACED_RESEED_MIN_MS) {
+    if (prices && seedDisplaced(prices) && (Date.now() - internalLastDisplacedReseedMs) >= DISPLACED_RESEED_MIN_MS) {
         prices = await reseedDisplaced('the indexer no longer prices off the seed (' +
             describePrices('feeschedule', prices) + ')')
         reseeded = true
@@ -682,5 +703,5 @@ async function getNativeFeeOutput(wire, source){
 }
 
 module.exports = { resolveFeeDestination, discoverFeeMode, seedGlobalPrices, getNativeFeeOutput,
-    nativeFeeSats, warnIfSeedInvisible, hubSeedTarget, lastSeedReport, FLAT_FEE_SATS,
+    nativeFeeSats, warnIfSeedInvisible, hubSeedTarget, lastSeedReport, landedBatchTime, FLAT_FEE_SATS,
     FEE_BUDGET_XCHAIN, FEE_HEADROOM }

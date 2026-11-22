@@ -15,7 +15,7 @@ permission-0600 secret store. The treasury comes only from
 a command line, print it, or include it in captured output.
 
 The drill reads the validator and explorer topology itself. Use
-`test/drills/crossChainSettleTestnet.drill.js` as the source of truth for that
+`test/drills/cross_chain_settle_testnet.test.js` as the source of truth for that
 topology instead of supplying or documenting additional topology keys here.
 
 ## Running the live drive
@@ -23,7 +23,7 @@ topology instead of supplying or documenting additional topology keys here.
 Use Node 22 and run this command from the repository root:
 
 ```sh
-node test/drills/crossChainSettleTestnet.drill.js
+node test/drills/cross_chain_settle_testnet.test.js
 ```
 
 Allow hours for testnet inclusion. The process exits 0 only when the verdict's

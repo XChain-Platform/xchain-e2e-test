@@ -33,6 +33,21 @@ const mariadb = require('mariadb')
 
 const topology = require('./hubMirrorTopology')
 
+// initialCheck builds global.hubConnector only on its hub-config path, which a venue whose
+// .env names every service never takes, so a mirrored seed there found no hub to push to.
+// Build the same connector from the same endpoints, once, and only when the hub answers.
+let ownHubConnector = null
+async function hubForPush(){
+    if (global.hubConnector) return global.hubConnector
+    if (!ownHubConnector){
+        const XChainHubConnector = require('../../src/XChainHubConnector.js')
+        const hub = new XChainHubConnector(XChainHubConnector.parseEndpoints())
+        if (!(await hub.ping())) return null
+        ownHubConnector = hub
+    }
+    return ownHubConnector
+}
+
 // See hubMirrorTopology for the three database roles. The short version: seeding
 // and reading are the same database only while no mirror is carrying rows, and
 // the read side is the indexer's hubDb rather than its own DB whenever one is
@@ -70,14 +85,14 @@ module.exports = {
     async waitForMirror({ sourceAddress, coin, tick, fiat, actionIndex, timeoutMs = 30000, pollMs = 500 }){
         topology.assertCoherent()
         if (!seedsThroughMirror()) return { mirrored: true, waitedMs: 0, skipped: true }
-        let params = indexerReadParams()
+        const params = indexerReadParams()
         if (!params) throw new Error('oraclePriceHelper.waitForMirror: no indexer database configured')
-        let started = Date.now()
+        const started = Date.now()
         let conn = null
         try {
             conn = await mariadb.createConnection(params)
             for (;;){
-                let rows = await conn.query(
+                const rows = await conn.query(
                     "SELECT 1 FROM oracle_prices WHERE source_address = ? AND coin = ? AND tick = ? AND fiat = ?"
                     + (actionIndex === undefined ? "" : " AND action_index = ?") + " LIMIT 1",
                     actionIndex === undefined
@@ -105,9 +120,9 @@ module.exports = {
     // seed target would report available on a mirror topology whose read side is
     // unreachable, and every Mode B case would then fail rather than skip.
     async isAvailable(){
-        let targets = topology.clearTargets()
+        const targets = topology.clearTargets()
         if (!targets.length) return false
-        for (let params of targets){
+        for (const params of targets){
             let conn = null
             try {
                 conn = await mariadb.createConnection(params)
@@ -131,8 +146,8 @@ module.exports = {
     // so clearing only the hub's copy leaves a stale mirrored quote that
     // settlement will happily match.
     async clearQuotes({ sourceAddress, coin, tick, fiat }){
-        for (let params of topology.clearTargets()){
-            let conn = await mariadb.createConnection(params)
+        for (const params of topology.clearTargets()){
+            const conn = await mariadb.createConnection(params)
             try {
                 await conn.query(
                     "DELETE FROM oracle_prices WHERE source_address = ? AND coin = ? AND tick = ? AND fiat = ?",
@@ -162,7 +177,8 @@ module.exports = {
     // hour ago. This is faithful rather than a cheat, since reverse matching walks
     // back from the payment block's own time and cannot tell how the row aged.
     async pushQuoteViaHub({ sourceAddress, sourceChain, coin, tick, fiat, value, fee, blockTime, actionIndex, memo, pushGeneration }){
-        if (!global.hubConnector) throw new Error('oraclePriceHelper.pushQuoteViaHub: no hubConnector; the hub is unreachable from this venue')
+        const hub = await hubForPush()
+        if (!hub) throw new Error('oraclePriceHelper.pushQuoteViaHub: no hubConnector; the hub is unreachable from this venue')
         // The hub's upsert is generation-FENCED: an equal-or-lower push_generation
         // is refused as a duplicate rather than applied. The raw-INSERT path can
         // ignore this because its ON DUPLICATE KEY UPDATE refreshes every column
@@ -178,7 +194,7 @@ module.exports = {
                 sourceChain: sourceChain || 'BTC', actionIndex
             })) + 1
         }
-        let result = await global.hubConnector._call({
+        const result = await hub['_call']({
             jsonrpc: '2.0', id: 1, method: 'pushoracleprice',
             params: {
                 source_chain:    sourceChain || 'BTC',
@@ -222,17 +238,17 @@ module.exports = {
     // reorg retraction has been recorded on this chain, a generation-0 push would
     // therefore be rejected even with no row present at all.
     async currentPushGeneration({ sourceChain, actionIndex }){
-        let params = topology.seedParams()
+        const params = topology.seedParams()
         if (!params) return -1
-        let conn = await mariadb.createConnection(params)
+        const conn = await mariadb.createConnection(params)
         try {
             let floor = -1
-            let rows = await conn.query(
+            const rows = await conn.query(
                 'SELECT push_generation FROM oracle_prices WHERE source_chain = ? AND action_index = ? LIMIT 1',
                 [sourceChain, actionIndex])
             if (rows && rows.length) floor = parseInt(rows[0].push_generation) || 0
             try {
-                let wm = await conn.query(
+                const wm = await conn.query(
                     'SELECT retraction_generation, from_action_index FROM price_ingest_watermarks WHERE source_chain = ? LIMIT 1',
                     [sourceChain])
                 if (wm && wm.length && actionIndex >= (Number(wm[0].from_action_index) || 0)){
@@ -252,13 +268,13 @@ module.exports = {
     // leg only. Distinct from waitForMirror, which watches the far end of the
     // replication. Kept separate so a failure says WHICH leg broke.
     async waitForHubRow({ sourceAddress, coin, tick, fiat, timeoutMs = 30000, pollMs = 500 }){
-        let params = topology.seedParams()
+        const params = topology.seedParams()
         if (!params) throw new Error('oraclePriceHelper.waitForHubRow: no hub database configured')
-        let started = Date.now()
-        let conn = await mariadb.createConnection(params)
+        const started = Date.now()
+        const conn = await mariadb.createConnection(params)
         try {
             for (;;){
-                let rows = await conn.query(
+                const rows = await conn.query(
                     "SELECT block_time, effective_at, value, fee FROM oracle_prices "
                     + "WHERE source_address = ? AND coin = ? AND tick = ? AND fiat = ? "
                     + "ORDER BY id DESC LIMIT 1",
@@ -311,10 +327,10 @@ module.exports = {
             await module.exports.waitForMirror({ sourceAddress, coin, tick, fiat, actionIndex })
             return
         }
-        let params = resolveParams()
-        let conn = await mariadb.createConnection(params)
+        const params = resolveParams()
+        const conn = await mariadb.createConnection(params)
         try {
-            let query = `INSERT INTO oracle_prices
+            const query = `INSERT INTO oracle_prices
                 (source_address, source_chain, coin, tick, fiat, value, fee, memo,
                  block_time, effective_at, action_index, push_generation)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)

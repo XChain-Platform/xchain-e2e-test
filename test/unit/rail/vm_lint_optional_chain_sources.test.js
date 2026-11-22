@@ -13,7 +13,7 @@ const {
     HIDDEN_SOURCE,
     CONTROL_SOURCE,
     HIDDEN_EXPRESSION
-} = require('../../rail/vm_lint/optional_chain_sources')
+} = require('../../rail/vm_lint/helpers/optional_chain_sources')
 
 function differingLineCount(left, right){
     const leftLines = left.split('\n')

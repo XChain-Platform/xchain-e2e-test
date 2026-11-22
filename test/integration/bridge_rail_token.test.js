@@ -14,8 +14,8 @@
  *
  * THE TOKEN BRIDGE ACCEPTANCE DRIVE: token AT1 to AT8, over the base drive's venue shape (a harness federation of the seated roster
  * keys, a venue BTC clone, a venue DOGE indexer REPLAYED from genesis under this tree's
- * bridge code). AT9 is the gate run plus the activation parity test and is not a drive:
- * this file runs both as child processes after the drive (see the AT9 section at its foot).
+ * bridge code). AT9 is the gate run, the activation parity test and the genesis replay pin and is not a drive:
+ * this file runs all three as child processes after the drive (see the AT9 section at its foot).
  *
  * ── ONE SUITE IN TWO PLACES ────────────────────────────────────────────────────────
  * This root holds the venue bring-up, the T0 precondition and the arming case; the legs
@@ -32,7 +32,7 @@
  *     BRIDGE_RAIL_REPO_ROOT=<the pinned root the standing containers were built from> \
  *     BRIDGE_RAIL_MINER_PAUSE_FILE=<flag file the BTC loop honours> \
  *     BRIDGE_RAIL_DOGE_MINER_PAUSE_FILE=<flag file the DOGE loop honours> \
- *     npx mocha --timeout 0 --exit --require ./test/initialCheck.test.js \
+ *     npx mocha --timeout 0 --exit --require ./test/initial_check.test.js \
  *     test/integration/bridge_rail_token.test.js "test/integration/bridge_rail_token.test/*.test.js"
  *   kill $(cat ~/scratch/xc-meta/doge-loop.pid)
  *
@@ -65,11 +65,15 @@
  * The last suite in the run is a plain `describe`, not a drive part, so it runs after the
  * venue is torn down and needs no federation. It audits the drive's own cases (every
  * drivable case passed, in the order above), then spawns, on this process's Node 22 with
- * an allowlisted environment: this repository's ordinary CI gate (`npm run ci`, which
- * ends in the live tier) and xchain-indexer's activation constants parity test out of
- * the pinned root with XCHAIN_REQUIRE_SIBLINGS=1. Each is judged on its exit status and
- * its own counts. The live tier's 95 (the host cannot run it) is a RED verdict here: a
- * gate that did not run proves nothing. The last case prints the dated record.
+ * an allowlisted environment: this repository's full CI gate (`npm run ci:full`) and
+ * xchain-indexer's activation constants parity test out of
+ * the pinned root with XCHAIN_REQUIRE_SIBLINGS=1. On a hosted venue the CI gate runs
+ * directly; a workstation with the dispatcher sends it to one of its configured venues.
+ * The direct child carries its venue as a recursion guard, so a token drive selected by
+ * that full gate does not launch the full gate again. Each outer gate is judged on its
+ * exit status and its own counts. A dispatcher exit 95 and every nonzero direct exit are
+ * RED verdicts here: a gate that did not run proves nothing. The last case prints the
+ * dated record.
  *
  * ── EVERY DOGE-SIDE READ IS ON THE VENUE LEDGER, ASSERT BY IDENTITY ─────────────────
  * As the base drive: the standing DOGE indexer parsed a different history, and a count
@@ -88,6 +92,9 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { journalCase } = require('../helpers/bridgeRailVenue');
+const loadRailGateContract = require('./lib/rail_gate_contract');
+const { captureDriveHeads, judgeDriveHeads, rootDiff } = require('../helpers/rail_preflight/drive_heads');
+const { runReplayPin } = require('../helpers/rail_preflight/token_replay_pin_run');
 const {
     assert,
     GAS_TICK,
@@ -97,6 +104,7 @@ const {
     chainHalves,
     needsFederation,
     bridgeRailSuite,
+    recordCase,
     TOKEN_DRIVE,
 } = require('./bridge_rail_token.test/support');
 
@@ -135,7 +143,7 @@ bridgeRailSuite(T0, function () {
         const overlay = await state.venue.rewireHubs();
         state.evidence.engineEnv = Object.keys(overlay).sort().join(', ');
         const settled = await state.venue.waitForRailSettled(GAS_TICK, { timeoutMs: 60 * 60 * 1000 });
-        assert.ok(settled, 'the XCHAIN backlog never drained: ' + JSON.stringify(state.venue._lastSettlePoll) +
+        assert.ok(settled, 'the XCHAIN backlog never drained: ' + JSON.stringify(state.venue['_lastSettlePoll']) +
             '\n' + state.venue.indexerTails(40));
         state.evidence.backlogApplied = settled.applied;
         const dupes = await state.venue.duplicateSourceTransfers();
@@ -159,12 +167,13 @@ const PARITY_FILES = [
 ];
 const PARITY_ORDERING_TITLE = 'holds TOKEN_BRIDGE_ACTIVATION >= XCHAIN_BRIDGE_ACTIVATION for every chain key';
 const CI_GATE_COMMAND = 'npm run ci:full';
-const GATE_DID_NOT_RUN_EXITS = new Set([2, 3, 94, 95, 97, 99, 255]);
+const ENCLOSING_CI_VENUE_ENV = 'TOKEN_AT9_ENCLOSING_CI_VENUE';
 const SIBLING_BRANCH_RULE = /^PUSH_BRANCH="\$\{REMOTE_REF#refs\/heads\/\}"$/m;
 const GATE_BASE_HANDLER = /^\s*--base\)/m;
 const GATE_TIMEOUT_MS = 4 * 60 * 60 * 1000;
 // The two cases a leg skips on purpose because regtest arms their flag at height 0, so no
-// block below it exists to drive; each names the indexer unit coverage that carries it.
+// block below it exists to drive; each names the indexer unit coverage that carries it. A skip
+// title is the declared name, or the declared name followed by '. ' and the reason it is skipped.
 const NOT_DRIVABLE_ON_REGTEST = new Set([
     'token AT4: an ISSUE|7 below TOKEN_BRIDGE_ACTIVATION is invalid: VERSION (unknown)',
     'token AT6 (R8): a ^id edit of a pre-flag three-character row applies',
@@ -182,7 +191,7 @@ const GATE_ENV_MASK_KEYS = [
     'P2P_MAX_CONNECTIONS_PER_IP',
 ];
 
-const at9 = { record: null, drive: null, ordinaryCi: null, parity: null };
+const at9 = { record: null, drive: null, ordinaryCi: null, parity: null, replayPin: null };
 let gitShim = null;
 
 function executableOnPath(name) {
@@ -257,9 +266,11 @@ function gateEnv(extra) {
 function run(cmd, args, cwd, env, input) {
     const res = spawnSync(cmd, args, { cwd, env, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024,
         timeout: GATE_TIMEOUT_MS, input: input === undefined ? '' : input });
-    const out = String(res.stdout || '') + String(res.stderr || '');
+    const stdout = String(res.stdout || '');
+    const stderr = String(res.stderr || '');
+    const out = stdout + stderr;
     return { status: res.status, signal: res.signal, error: res.error ? String(res.error.message) : null,
-        out, tail: out.split('\n').slice(-60).join('\n') };
+        stdout, stderr, out, tail: out.split('\n').slice(-60).join('\n') };
 }
 
 function headOf(dir) {
@@ -314,6 +325,48 @@ function greenVerdictRecord(out, head, venueSpec) {
     return { accepted: true, commit: fields.sha, venue: fields.venue };
 }
 
+// The dispatcher's skip line for a commit already contained in origin develop.
+const ALREADY_LANDED_SKIP = /already contained in origin(?:\/|\s)(?:develop)?/i;
+
+function runDirectCiGate() {
+    // With CI_VENUES set the direct gate runs on the first reachable CI venue, not the drive host.
+    const target = loadRailGateContract.directGateTarget(process.env.CI_VENUES);
+    const venue = target.venue;
+    let res;
+    if (!target.remote) {
+        res = run('npm', ['run', 'ci:full'], E2E_ROOT,
+            gateEnv({ CI_TIER: 'full', [ENCLOSING_CI_VENUE_ENV]: venue }));
+    } else {
+        // ci-venue-worktree: ship the graded head as a tar stream into a scratch worktree of the
+        // venue's cached e2e tree, so sibling checkouts and node_modules resolve there.
+        const remote = loadRailGateContract.venueWorktreeScript(
+            { tree: process.env[loadRailGateContract.VENUE_TREE_ENV],
+                command: CI_GATE_COMMAND, enclosingEnv: ENCLOSING_CI_VENUE_ENV });
+        const script = 'set -e; (cd "$1" && git archive HEAD) | ssh -o BatchMode=yes "$2" "$3"';
+        res = run('bash', ['-c', script, 'at9-direct-gate', E2E_ROOT, venue, remote], E2E_ROOT, gateEnv());
+    }
+    const counts = tallies(res.out);
+    at9.ordinaryCi = { command: CI_GATE_COMMAND, cwd: E2E_ROOT, venue,
+        transport: target.remote ? 'ci-venue-worktree' : 'direct', directGateTarget: target, exit: res.status, signal: res.signal, counts,
+        cachedVerdict: null, failureTail: res.status === 0 ? null : res.tail };
+    assert.strictEqual(res.status, 0, loadRailGateContract.directGateFailureMessage(res, venue));
+    assert.match(res.out, /^ci:full: all tiers green /m,
+        'the direct gate exited 0 without its all-tiers GREEN verdict on venue ' + venue + ':\n' + res.tail);
+    assert.ok(counts.passing > 0, 'the full CI gate exited 0 having run no mocha case on venue ' + venue + ':\n' + res.tail);
+    assert.strictEqual(counts.failing, 0, 'the full CI gate reported failing cases on venue ' + venue + ':\n' + res.tail);
+}
+
+function recordEnclosingDirectCiGate() {
+    const venue = process.env[ENCLOSING_CI_VENUE_ENV];
+    if (!venue) return false;
+    assert.strictEqual(venue, os.hostname(), 'the enclosing full CI gate names venue ' + venue +
+        ', but token AT9 is running on ' + os.hostname());
+    at9.ordinaryCi = { command: CI_GATE_COMMAND, cwd: E2E_ROOT, venue,
+        transport: 'enclosing-direct', exit: null, signal: null, counts: null,
+        cachedVerdict: null, failureTail: null };
+    return true;
+}
+
 function driveTests(root) {
     const outer = root.suites.find((s) => s.title === TOKEN_DRIVE.outerTitle);
     assert.ok(outer, 'the token drive registered no outer suite: the legs were not in this run');
@@ -326,6 +379,8 @@ function driveTests(root) {
 }
 
 describe('token AT9: the gates, and the dated acceptance record', function () {
+    afterEach(recordCase);
+
     after(function () {
         if (gitShim) fs.rmSync(gitShim.dir, { recursive: true, force: true });
     });
@@ -339,8 +394,13 @@ describe('token AT9: the gates, and the dated acceptance record', function () {
         const child = run('node', ['-p', 'process.versions.node'], E2E_ROOT, gateEnv());
         assert.ok(child.status === 0 && /^22\./.test(child.out.trim()),
             'the gate child does not resolve Node 22 first on PATH: ' + child.tail);
+        const pinned = state.evidence.driveHeads;
+        assert.ok(pinned, 'token AT9 found no heads pinned at drive start');
+        const uncaptured = judgeDriveHeads(pinned, pinned).missing;
+        assert.deepStrictEqual(uncaptured, [], 'token AT9 has no head pinned at drive start for: ' + uncaptured.join(', '));
         at9.record = { date: new Date().toISOString().slice(0, 10), node: process.version,
-            platformRoot: PLATFORM_ROOT, e2eHead: headOf(E2E_ROOT), indexerHead: headOf(INDEXER_ROOT) };
+            platformRoot: PLATFORM_ROOT, platformHead: pinned.platform, e2eHead: pinned.e2e,
+            indexerHead: pinned.indexer };
     });
 
     it('the drive ran AT1 to AT8 in this file\'s order and every drivable case passed', function () {
@@ -356,16 +416,20 @@ describe('token AT9: the gates, and the dated acceptance record', function () {
             notDrivableOnRegtest: [...NOT_DRIVABLE_ON_REGTEST], cases: verdicts };
         assert.strictEqual(state.blocked, null, 'the drive never ran its federated cases: ' + state.blocked);
         assert.deepStrictEqual(labels, DRIVE_ORDER, 'the drive parts did not run in the documented order');
-        const wrong = verdicts.filter((v) => v.state !== (NOT_DRIVABLE_ON_REGTEST.has(v.title) ? 'pending' : 'passed'));
+        const declared = (t) => [...NOT_DRIVABLE_ON_REGTEST].find((n) => t === n || t.startsWith(n + '. '));
+        const wrong = verdicts.filter((v) => v.state !== (declared(v.title) ? 'pending' : 'passed'));
         assert.deepStrictEqual(wrong, [], 'drive cases that did not end as required: ' + JSON.stringify(wrong));
         for (const title of NOT_DRIVABLE_ON_REGTEST)
-            assert.ok(verdicts.some((v) => v.title === title), 'the declared not-drivable case is gone: ' + title);
+            assert.ok(verdicts.some((v) => declared(v.title) === title), 'the declared not-drivable case is gone: ' + title);
     });
 
     it('token AT9: this repository\'s full CI gate is green on the CI venue', function () {
         this.timeout(0);
-        const dispatcher = path.join(os.homedir(), '.claude', 'bin', 'ci-dispatch.sh');
-        const dispatcherText = fs.existsSync(dispatcher) ? fs.readFileSync(dispatcher, 'utf8') : '';
+        if (recordEnclosingDirectCiGate()) return;
+        const gateContract = loadRailGateContract();
+        const dispatcher = loadRailGateContract.dispatcherPath();
+        if (!fs.existsSync(dispatcher)) return runDirectCiGate();
+        const dispatcherText = fs.readFileSync(dispatcher, 'utf8');
         assert.ok(SIBLING_BRANCH_RULE.test(dispatcherText), 'the dispatcher at ' + dispatcher + ' has no sibling-branch rule, so a develop pre-push line would\n' +
             'still ship every sibling at master and the parity guards would grade this tree against stale twins; refresh the dispatcher on this host first');
         const binDir = path.dirname(dispatcher);
@@ -384,14 +448,19 @@ describe('token AT9: the gates, and the dated acceptance record', function () {
         const venues = process.env.CI_VENUES ? { CI_VENUES: process.env.CI_VENUES } : {};
         const res = run(dispatcher, ['--repo', 'xchain-e2e-test', '--src', E2E_ROOT,
             '--cmd', CI_GATE_COMMAND], E2E_ROOT, gateEnv(Object.assign({ CI_TIER: 'full' }, venues)), prePush);
+        // The dispatcher refuses to ship a commit that origin develop already contains, so it
+        // runs no gate at all; the landed head still has to be graded, so run the gate directly.
+        if (ALREADY_LANDED_SKIP.test(res.out)) return runDirectCiGate();
         const counts = tallies(res.out);
-        const freshGreen = /CI gate GREEN on/.test(res.out);
+        const freshGreen = /CI gate GREEN on\s+([^;\s]+)/.exec(res.out);
         const cachedGreen = greenVerdictRecord(res.out, head, venueSpec);
         at9.ordinaryCi = { command: dispatcher + ' --repo xchain-e2e-test --src ' + E2E_ROOT +
-            ' --cmd "' + CI_GATE_COMMAND + '" (pre-push stdin: develop)', cwd: E2E_ROOT, exit: res.status, signal: res.signal, counts,
+            ' --cmd "' + CI_GATE_COMMAND + '" (pre-push stdin: develop)', cwd: E2E_ROOT,
+            venue: freshGreen ? freshGreen[1] : cachedGreen.venue || null, transport: 'dispatcher',
+            exit: res.status, signal: res.signal, counts,
             cachedVerdict: cachedGreen.accepted ? { commit: cachedGreen.commit, venue: cachedGreen.venue } : null,
             failureTail: res.status === 0 ? null : res.tail };
-        assert.ok(!GATE_DID_NOT_RUN_EXITS.has(res.status), 'the CI gate did not run (exit ' + res.status +
+        assert.ok(!gateContract.gateDidNotRunExits.includes(res.status), 'the CI gate did not run (exit ' + res.status +
             '):\n' + res.tail);
         assert.strictEqual(res.status, 0, 'the full CI gate is red (exit ' + res.status +
             (res.signal ? ', signal ' + res.signal : '') + (res.error ? ', ' + res.error : '') + '):\n' + res.tail);
@@ -412,27 +481,43 @@ describe('token AT9: the gates, and the dated acceptance record', function () {
         try { json = JSON.parse(fs.readFileSync(report, 'utf8')); } catch (e) { json = null; }
         try { fs.unlinkSync(report); } catch (e) { /* never written */ }
         assert.ok(json && json.stats, 'the parity run wrote no mocha report (exit ' + res.status + '):\n' + res.tail);
+        const parityFailureTitles = json.failures.map((t) => t.fullTitle);
         const ordering = json.passes.filter((t) => t.title === PARITY_ORDERING_TITLE).length;
         at9.parity = { files: PARITY_FILES, cwd: INDEXER_ROOT, exit: res.status,
             counts: { passing: json.stats.passes, failing: json.stats.failures, pending: json.stats.pending },
-            orderingCasesPassed: ordering };
-        assert.strictEqual(res.status, 0, 'the parity test is red (exit ' + res.status + '):\n' + res.tail);
-        assert.strictEqual(json.stats.failures, 0, 'parity failures: ' + JSON.stringify(json.failures.map((t) => t.fullTitle)));
+            orderingCasesPassed: ordering, failureTitles: parityFailureTitles };
+        assert.strictEqual(res.status, 0, 'the parity test is red (exit ' + res.status + '):\n' + res.tail +
+            '\nparity failures: ' + JSON.stringify(parityFailureTitles));
+        assert.strictEqual(json.stats.failures, 0, 'parity failures: ' + JSON.stringify(parityFailureTitles));
         assert.strictEqual(json.stats.pending, 0, 'parity cases skipped, so they compared nothing: ' +
             JSON.stringify(json.pending.map((t) => t.fullTitle)));
         assert.ok(json.stats.passes > 0, 'the parity run passed no case');
         assert.ok(ordering >= 1, 'the parity run never passed "' + PARITY_ORDERING_TITLE + '"');
     });
 
+    it('token AT9: the genesis replay pin and the case-folded reserved guard hold, so pre-activation hashes are unchanged', function () {
+        this.timeout(0);
+        const result = runReplayPin(INDEXER_ROOT, gateEnv({ XCHAIN_REQUIRE_SIBLINGS: '1' }));
+        at9.replayPin = { files: result.files, cwd: result.cwd, exit: result.exit, counts: result.counts,
+            missingCases: result.missing, problems: result.problems };
+        assert.ok(result.ok, 'the replay pin run is red:\n' + result.problems.join('\n'));
+    });
+
     it('prints the dated acceptance record', function () {
         assert.ok(at9.record, 'AT9 took no record header');
+        const heads = judgeDriveHeads(state.evidence.driveHeads,
+            captureDriveHeads(state.evidence.driveHeadRoots), rootDiff(state.evidence.driveHeadRoots));
+        at9.record.headsMoved = heads.moved;
+        at9.record.headsLedgerOnly = heads.ledgerOnly;
+        assert.ok(heads.ok, 'a live head moved since drive start, so the record does not describe the tree that ran:\n' +
+            heads.problems.join('\n'));
         const record = Object.assign({ rail: 'BTC/DOGE regtest', drive: at9.drive,
-            ordinaryCi: at9.ordinaryCi, activationConstantsParity: at9.parity }, at9.record);
+            ordinaryCi: at9.ordinaryCi, activationConstantsParity: at9.parity, replayPin: at9.replayPin }, at9.record);
         console.log('\n=== token bridge acceptance record ' + record.date + ' ===\n' +
             JSON.stringify(record, null, 2) + '\n');
         journalCase({ suite: TOKEN_DRIVE.journalSuite, title: '=== acceptance record ===', state: 'evidence',
             evidence: record });
-        for (const part of ['drive', 'ordinaryCi', 'activationConstantsParity'])
+        for (const part of ['drive', 'ordinaryCi', 'activationConstantsParity', 'replayPin'])
             assert.ok(record[part], 'the record has no ' + part + ' reading: its case failed before measuring');
     });
 });

@@ -23,7 +23,7 @@ const transactionHelper = {
     }
 }
 
-const transactionHelperPath = require.resolve('../../transactionHelper')
+const transactionHelperPath = require.resolve('../../helpers/core/transactionHelper')
 const issueHelperPath = require.resolve('../../helpers/issueHelper')
 const cachedTransactionHelper = require.cache[transactionHelperPath]
 const cachedIssueHelper = require.cache[issueHelperPath]
@@ -82,7 +82,7 @@ describe('bootstrap ISSUE wait budget', function () {
     })
 
     it('uses the bootstrap wait constant in the BTC gas-token check', function () {
-        const source = fs.readFileSync(path.join(__dirname, '../../initialCheck.test.js'), 'utf8')
+        const source = fs.readFileSync(path.join(__dirname, '../../initial_check.test.js'), 'utf8')
 
         assert.match(source, /const BOOTSTRAP_ISSUE_WAIT_MS = 240000/)
         assert.match(source, /sendIssueV0Waiting\(\s*BOOTSTRAP_ISSUE_WAIT_MS,\s*gasAddressInfo,/)

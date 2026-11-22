@@ -162,13 +162,13 @@ describe('XCHAIN/USD seed guard', function () {
     })
 
     it('keeps the derivation proof carrying its own inline no-seed guard', function () {
-        // xchainPriceDerivation.test.js proves the pair FROM real on-chain fills, and it
+        // xchain_price_derivation.test.js proves the pair FROM real on-chain fills, and it
         // already guards itself against being "fixed" with a seed. Deliberately asserted
         // as PRESENCE rather than re-scanning that file here: a second scan would match
         // the very lines of the first guard and fail on them, which is the self-match
         // trap that has already bitten two guards in this repo. Keep one scanner per
         // file, and check from outside that it still exists.
-        const proof = path.join(TEST_ROOT, 'actions', 'xchainPriceDerivation.test.js')
+        const proof = path.join(TEST_ROOT, 'actions', 'xchain_price_derivation.test.js')
         if (!fs.existsSync(proof)) return this.skip()
         const body = fs.readFileSync(proof, 'utf8')
         assert.ok(body.includes('the anti-reseed guard (spec step 8)'),

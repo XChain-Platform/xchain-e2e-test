@@ -1,3 +1,13 @@
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 'use strict'
 
 const assert = require('assert')
@@ -7,7 +17,7 @@ const path = require('path')
 const { spawnSync } = require('child_process')
 
 const ROOT = path.resolve(__dirname, '..', '..', '..')
-const DRIVER = path.join(ROOT, 'scripts', 'attest-mirror-stack-driver.sh')
+const DRIVER = path.join(ROOT, 'bin', 'attest-mirror-stack-driver.sh')
 const BF6 = 'test/attestMirror/barrier_family/bf6_producer_follower_parity.test.js'
 
 function writeExecutable (file, contents) {
@@ -97,7 +107,7 @@ function logLines (f) {
     return fs.readFileSync(f.log, 'utf8').trim().split('\n')
 }
 
-describe('attest-mirror concrete stack driver', function () {
+function registerPhaseTests () {
     it('passes the prepared real-checkout root only to BF6', function () {
         const f = fixture()
         try {
@@ -114,7 +124,9 @@ describe('attest-mirror concrete stack driver', function () {
             fs.rmSync(f.root, { recursive: true, force: true })
         }
     })
+}
 
+function registerVolumeSweepTests () {
     it('sweeps a stale project volume before booting the replacement stack', function () {
         const f = fixture()
         try {
@@ -146,7 +158,9 @@ describe('attest-mirror concrete stack driver', function () {
             fs.rmSync(f.root, { recursive: true, force: true })
         }
     })
+}
 
+function registerLookupScopeTests () {
     it('scopes every stale-resource lookup to the selected project label', function () {
         const f = fixture()
         try {
@@ -163,4 +177,39 @@ describe('attest-mirror concrete stack driver', function () {
             fs.rmSync(f.root, { recursive: true, force: true })
         }
     })
+}
+
+function registerSeedAndPathTests () {
+    it('seed phase hands run-leg.sh a reseed spec that exists on disk', function () {
+        const f = fixture()
+        try {
+            const result = spawnSync(DRIVER, ['seed', '--stack', 'am-proof-1', '--slot', '0',
+                '--leg', 'test/attestMirror/zc5_flag_day.test.js'], {
+                cwd: ROOT,
+                env: Object.assign({}, process.env, { ATTEST_MIRROR_STACK_ROOT: f.root, FAKE_DRIVER_LOG: f.log }),
+                encoding: 'utf8',
+            })
+            assert.strictEqual(result.status, 0, result.stderr)
+            const args = fs.readFileSync(f.log, 'utf8').trim().split(/\s+/)
+            assert.strictEqual(args[0], 'am-proof-1-seed')
+            assert.strictEqual(args[3], 'test/tools/reseed_attestation_roster.test.js')
+            assert.ok(fs.existsSync(path.join(ROOT, args[3])), 'seed spec missing: ' + args[3])
+        } finally {
+            fs.rmSync(f.root, { recursive: true, force: true })
+        }
+    })
+
+    it('every test/ path the driver names exists on disk', function () {
+        const named = fs.readFileSync(DRIVER, 'utf8').match(/test\/[A-Za-z0-9_./-]+\.js/g) || []
+        assert.ok(named.length > 0, 'the driver names no test/ path, so this check reads nothing')
+        const missing = named.filter((rel) => !fs.existsSync(path.join(ROOT, rel)))
+        assert.deepStrictEqual(missing, [], 'driver names a test path that does not exist')
+    })
+}
+
+describe('attest-mirror concrete stack driver', function () {
+    registerPhaseTests()
+    registerVolumeSweepTests()
+    registerLookupScopeTests()
+    registerSeedAndPathTests()
 })

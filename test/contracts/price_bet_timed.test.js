@@ -41,7 +41,7 @@
 // matrix (push, reclaim, SCANNING paging, etc.).
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const vmHelper = require('../helpers/vmHelper')
 const gasHelper = require('../helpers/gasHelper')
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')

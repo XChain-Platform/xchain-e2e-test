@@ -6,8 +6,8 @@ const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
 
-const checker = require('../../../scripts/check-mirror-pendings')
-const checkerPath = path.resolve(__dirname, '../../../scripts/check-mirror-pendings.js')
+const checker = require('../../../bin/check-mirror-pendings')
+const checkerPath = path.resolve(__dirname, '../../../bin/check-mirror-pendings.js')
 
 function fixture (files) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mirror-pendings-'))
@@ -23,10 +23,10 @@ function run (input) {
     return spawnSync(process.execPath, [checkerPath, input], { encoding: 'utf8' })
 }
 
-describe('check-mirror-pendings', function () {
+function registerSkipReasonCases () {
     it('reports and accepts an it.skip with a stated reason', function () {
         const root = fixture({
-            'at1-example.test.js': "describe('AT1', () => { it.skip('covers the slow edge (needs 257 rounds)', () => {}) })",
+            'at1-example.test.js': "describe('AT1', () => { it.skip('covers the slow edge (needs 257 rounds to mine)', () => {}) })",
         })
         const result = run(root)
         assert.strictEqual(result.status, 0, result.stderr)
@@ -57,10 +57,12 @@ describe('check-mirror-pendings', function () {
         assert.strictEqual(parsed.pending[0].line, 3)
         assert.match(parsed.pending[0].title, /before hook/)
     })
+}
 
+function registerCrossReferenceAndInputCases () {
     it('resolves a named leg whose active case title covers the deferred claim', function () {
         const root = fixture({
-            'at2.test.js': "describe('AT2', () => { it.skip('holds delivery past the forward margin (DRIVEN in at2b)', () => {}) })",
+            'at2.test.js': "describe('AT2', () => { it.skip('holds delivery past the forward margin (DRIVEN in at2b: \"holds the barrier\")', () => {}) })",
             'at2b-forward-margin.test.js': "describe('delivery past the forward margin', () => { it('holds the barrier', () => {}) })",
         })
         const result = run(root)
@@ -87,6 +89,9 @@ describe('check-mirror-pendings', function () {
         assert.match(result.stderr, /at2b.*no matching active case title/)
     })
 
+}
+
+function registerEmptyInputCases () {
     it('refuses an empty directory as zero files read', function () {
         const result = run(fixture())
         assert.strictEqual(result.status, 1)
@@ -100,7 +105,9 @@ describe('check-mirror-pendings', function () {
         assert.match(result.stderr, /input path does not exist/)
         assert.match(result.stderr, /read zero files from input/)
     })
+}
 
+function registerCensusLineCases () {
     it('refuses a file with no pending tests after reporting one file read', function () {
         const root = fixture({ 'clean.test.js': "describe('clean', () => { it('runs', () => {}) })" })
         const result = run(path.join(root, 'clean.test.js'))
@@ -112,15 +119,18 @@ describe('check-mirror-pendings', function () {
         const root = fixture({
             'at5.test.js': [
                 "describe('AT5', function () {",
-                "  it.skip('dead-letters the window (needs 257 rounds)', function () {})",
+                "  it.skip('dead-letters the window (needs 257 rounds to mine)', function () {})",
                 '})',
             ].join('\n'),
         })
         const result = run(root)
         assert.strictEqual(result.status, 0, result.stderr)
-        assert.match(result.stdout, /PENDING .*at5\.test\.js:2 \| title: AT5 > dead-letters the window \(needs 257 rounds\) \| reason: needs 257 rounds/)
+        assert.match(result.stdout, /PENDING .*at5\.test\.js:2 \| title: AT5 > dead-letters the window \(needs 257 rounds to mine\) \| reason: needs 257 rounds to mine/)
     })
 
+}
+
+function registerReasonSourceCases () {
     it('uses a directly attached comment as the stated reason', function () {
         const root = fixture({
             'at6.test.js': [
@@ -133,6 +143,52 @@ describe('check-mirror-pendings', function () {
         const result = run(root)
         assert.strictEqual(result.status, 0, result.stderr)
         assert.match(result.stdout, /reason: Regtest is armed at height zero/)
+    })
+
+    it('refuses an attached comment shorter than the shared three-word reason rule', function () {
+        const withComment = (comment) => run(fixture({
+            'at6.test.js': [
+                "describe('AT6', function () {",
+                '  // ' + comment,
+                "  it.skip('serves a below-height request', function () {})",
+                '})',
+            ].join('\n'),
+        }))
+        for (const thin of ['TODO fix', 'flaky - 12345678', 'Section: requests']) {
+            const result = withComment(thin)
+            assert.strictEqual(result.status, 1, thin + ' must not count as a reason')
+            assert.match(result.stderr, /unreasoned pending: .*serves a below-height request/)
+        }
+        const reasoned = withComment('Regtest arms at genesis.')
+        assert.strictEqual(reasoned.status, 0, reasoned.stderr)
+        assert.match(reasoned.stdout, /reason: Regtest arms at genesis\./)
+    })
+
+    it('refuses a title that only contains a reason keyword, outside any parenthetical', function () {
+        const result = run(fixture({
+            'at1.test.js': "describe('AT1', () => { it.skip('holds the barrier until the window closes', () => {}) })",
+        }))
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /unreasoned pending: .*holds the barrier until the window closes/)
+    })
+
+    it('refuses a keyword parenthetical shorter than the shared three-word reason rule', function () {
+        const result = run(fixture({ 'at1.test.js': "describe('AT1', () => { it.skip('covers the slow edge (needs)', () => {}) })" }))
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /unreasoned pending: .*covers the slow edge/)
+    })
+
+    it('falls through a too-short parenthetical to the attached comment', function () {
+        const result = run(fixture({
+            'at1.test.js': [
+                "describe('AT1', () => {",
+                '  // Regtest cannot mine the 257 rounds this case waits on.',
+                "  it.skip('covers the slow edge (needs rounds)', () => {})",
+                '})',
+            ].join('\n'),
+        }))
+        assert.strictEqual(result.status, 0, result.stderr)
+        assert.match(result.stdout, /reason: Regtest cannot mine the 257 rounds/)
     })
 
     it('does not count the standard unavailable-venue hook as a pending claim', function () {
@@ -148,4 +204,382 @@ describe('check-mirror-pendings', function () {
         ].join('\n')
         assert.deepStrictEqual(checker.parseSource(source, 'at0.test.js').pending, [])
     })
+
+    it('does not count a skip right after a SKIPPED unreachable-rail log as a pending claim', function () {
+        const source = [
+            "describe('rail leg', function () {",
+            '  before(function () {',
+            '    if (!rail) {',
+            "      console.log('AT5 SKIPPED: the DOGE regtest rail is unreachable')",
+            '      this.skip()',
+            '    }',
+            '  })',
+            '})',
+        ].join('\n')
+        assert.deepStrictEqual(checker.parseSource(source, 'at5.test.js').pending, [])
+    })
+
+    it('still reports an unrelated skip near a comment that reads like the venue guard', function () {
+        const source = [
+            "describe('venue leg', function () {",
+            '  before(function () {',
+            '    // When if (!up) holds the venue is unavailable; that case is handled elsewhere.',
+            '    if (!llm.ok) {',
+            '      this.skip()',
+            '    }',
+            '  })',
+            '})',
+        ].join('\n')
+        const pending = checker.parseSource(source, 'at0.test.js').pending
+        assert.strictEqual(pending.length, 1, JSON.stringify(pending))
+        assert.strictEqual(pending[0].line, 5)
+    })
+
+    it('still reports a skip that only follows the venue guard or a SKIPPED log', function () {
+        const afterGuard = [
+            "describe('venue leg', function () {",
+            '  before(function () {',
+            '    if (!up) {',
+            "      console.log('SKIPPED: ' + venue.unavailable)",
+            '      return',
+            '    }',
+            '    if (!seeded) this.skip()',
+            '  })',
+            '})',
+        ].join('\n')
+        assert.strictEqual(checker.parseSource(afterGuard, 'at0.test.js').pending.length, 1)
+        const afterLog = [
+            "describe('rail leg', function () {",
+            "  it('settles on the rail', function () {",
+            "    console.log('AT9 SKIPPED: the rail is unreachable')",
+            '    if (!ready) {',
+            '      this.skip()',
+            '    }',
+            '  })',
+            '})',
+        ].join('\n')
+        assert.strictEqual(checker.parseSource(afterLog, 'at9.test.js').pending.length, 1)
+    })
+}
+
+describe('check-mirror-pendings', function () {
+    registerSkipReasonCases()
+    registerCrossReferenceAndInputCases()
+    registerEmptyInputCases()
+    registerCensusLineCases()
+    registerReasonSourceCases()
+})
+
+const LEG_SUITE = "describe('delivery past the forward margin', () => { it('holds the barrier', () => {}) })"
+
+function crossrefRun (pendingTitle, legSource) {
+    return run(fixture({
+        'at2.test.js': "describe('AT2', () => { it.skip(" + JSON.stringify(pendingTitle) + ', () => {}) })',
+        'at2b-forward-margin.test.js': legSource,
+    }))
+}
+
+function registerAnchorRefusalCases () {
+    it('refuses a bare reference even when the leg shares every claim word', function () {
+        const result = crossrefRun('holds delivery past the forward margin (DRIVEN in at2b)', LEG_SUITE)
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /at2b.*quotes no target case/)
+    })
+
+    it('refuses an anchor that only shares words with the active case', function () {
+        const result = crossrefRun('holds delivery (DRIVEN in at2b: "holds the barrier when delayed")', LEG_SUITE)
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /no active case titled "holds the barrier when delayed"/)
+    })
+
+    it('refuses an anchor that matches only the suite title', function () {
+        const result = crossrefRun('holds delivery (DRIVEN in at2b: "delivery past the forward margin")', LEG_SUITE)
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /no active case titled/)
+    })
+
+    it('refuses an anchor whose case is skipped or sits under a skipped suite', function () {
+        const pending = 'holds delivery (DRIVEN in at2b: "holds the barrier")'
+        const skippedCase = crossrefRun(pending, "describe('m', () => { it.skip('holds the barrier (needs a lever)', () => {}); it.skip('holds the barrier', () => {}) })")
+        assert.strictEqual(skippedCase.status, 1)
+        assert.match(skippedCase.stderr, /no active case titled "holds the barrier"/)
+        const skippedSuite = crossrefRun(pending, "describe.skip('m (needs a lever)', () => { it('holds the barrier', () => {}) })")
+        assert.strictEqual(skippedSuite.status, 1)
+        assert.match(skippedSuite.stderr, /no active case titled "holds the barrier"/)
+    })
+}
+
+function registerAnchorCommentCases () {
+    it('reads the anchor from the attached comment, normalizing case and spacing', function () {
+        const root = fixture({
+            'at2.test.js': [
+                "describe('AT2', () => {",
+                '  // DRIVEN in at2b: "Holds  the BARRIER"',
+                "  it.skip('holds delivery past the margin (DRIVEN in at2b, see comment)', () => {})",
+                '})',
+            ].join('\n'),
+            'at2b-forward-margin.test.js': LEG_SUITE,
+        })
+        const result = run(root)
+        assert.strictEqual(result.status, 0, result.stderr)
+        assert.match(result.stdout, /cross-references 1/)
+    })
+}
+
+describe('check-mirror-pendings: a cross-reference names its target case', function () {
+    registerAnchorRefusalCases()
+    registerAnchorCommentCases()
+})
+
+function registerSkipFormCases () {
+    it('reports a skipped suite with a reason and refuses one without', function () {
+        const reasoned = run(fixture({ 'at3.test.js': "describe.skip('AT3 deadline (needs 257 rounds to mine)', () => { it('a', () => {}); it('b', () => {}) })" }))
+        assert.strictEqual(reasoned.status, 0, reasoned.stderr)
+        assert.match(reasoned.stdout, /AT3 deadline \(needs 257 rounds to mine\) \[skipped suite, 2 cases\]/)
+        const bare = run(fixture({ 'at3.test.js': "context.skip('AT3 deadline', () => { it('a', () => {}) })" }))
+        assert.strictEqual(bare.status, 1)
+        assert.match(bare.stderr, /unreasoned pending: .*AT3 deadline/)
+    })
+
+    it('reports the xit, xdescribe and xcontext aliases', function () {
+        const source = [
+            "describe('AT7', () => {",
+            "  xit('aliased case', () => {})",
+            "  xdescribe('aliased suite', () => { it('inner', () => {}) })",
+            "  xcontext('aliased context', () => { it('inner', () => {}) })",
+            '})',
+        ].join('\n')
+        const titles = checker.parseSource(source, 'at7.test.js').pending.map((p) => p.claim)
+        assert.deepStrictEqual(titles, ['aliased case', 'aliased suite', 'aliased context'])
+    })
+}
+
+function registerAliasAndBodySkipCases () {
+    it('reports a this.skip in a test body, reasoned by its attached comment', function () {
+        const source = (comment) => [
+            "describe('AT8', function () {",
+            "  it('settles an llm request', function () {",
+            '    if (!llm.ok) {',
+            comment,
+            '      this.skip()',
+            '    }',
+            '  })',
+            '})',
+        ].join('\n')
+        const reasoned = checker.parseSource(source('      // Skipped, not passed: no model is reachable here.'), 'at8.test.js').pending
+        assert.strictEqual(reasoned.length, 1)
+        assert.strictEqual(reasoned[0].kind, 'body')
+        assert.match(reasoned[0].reason, /no model is reachable/)
+        const bare = checker.parseSource(source('      console.log(why)'), 'at8.test.js').pending
+        assert.strictEqual(bare.length, 1)
+        assert.strictEqual(bare[0].reason, '')
+    })
+}
+
+function registerRegexMemberCase () {
+    it('does not mistake a regex .test( member call for a mocha test', function () {
+        const source = [
+            "describe('AT9', function () {",
+            '  const ok = pattern.test(value)',
+            "  it('runs only when ready', function () {",
+            '    // Skipped, not passed: the venue is not ready yet.',
+            '    this.skip()',
+            '  })',
+            '})',
+        ].join('\n')
+        const pending = checker.parseSource(source, 'at9.test.js').pending
+        assert.strictEqual(pending.length, 1)
+        assert.strictEqual(pending[0].claim, 'runs only when ready')
+    })
+}
+
+describe('check-mirror-pendings: every skip form is reported', function () {
+    registerSkipFormCases()
+    registerAliasAndBodySkipCases()
+    registerRegexMemberCase()
+})
+
+function registerExpressionBodyCases () {
+    it('reports an expression-bodied skip that no block-bodied function follows', function () {
+        const source = "describe('AT10', () => { it.skip('rejects the stale proof (needs a reorg lever)', () => assert.ok(false)) })"
+        const pending = checker.parseSource(source, 'at10.test.js').pending
+        assert.strictEqual(pending.length, 1)
+        assert.strictEqual(pending[0].claim, 'rejects the stale proof (needs a reorg lever)')
+        assert.match(pending[0].title, /^AT10 > /)
+    })
+
+    it('keeps an expression-bodied skip from swallowing the next test\'s runtime skip', function () {
+        const source = [
+            "describe('AT10', function () {",
+            "  it.skip('x (needs y)', () => assert.ok(false))",
+            "  it('runs when ready', function () {",
+            '    this.skip()',
+            '  })',
+            '})',
+        ].join('\n')
+        const pending = checker.parseSource(source, 'at10.test.js').pending
+        assert.strictEqual(pending.length, 2)
+        const body = pending.find((entry) => entry.kind === 'body')
+        assert.ok(body, 'the runtime skip in the next test must be reported')
+        assert.strictEqual(body.claim, 'runs when ready')
+    })
+}
+
+function registerCallbacklessCases () {
+    it('counts the cases of an expression-bodied skipped suite and hides them from cross-references', function () {
+        const leg = "describe.skip('m (needs a lever)', () => it('holds the barrier', () => {}))"
+        const parsed = checker.parseSource(leg, 'at2b-forward-margin.test.js')
+        assert.match(parsed.pending[0].title, /\[skipped suite, 1 cases\]/)
+        const result = crossrefRun('holds delivery (DRIVEN in at2b: "holds the barrier")', leg)
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /no active case titled "holds the barrier"/)
+    })
+
+    it('reports a callback-less test as pending and refuses it without a reason', function () {
+        const bare = run(fixture({ 'at11.test.js': "describe('AT11', () => { it('claim awaiting a lever') })" }))
+        assert.strictEqual(bare.status, 1)
+        assert.match(bare.stderr, /unreasoned pending: .*claim awaiting a lever/)
+        const reasoned = run(fixture({ 'at11.test.js': "describe('AT11', () => { it('claim awaiting a lever (needs 257 rounds to mine)') })" }))
+        assert.strictEqual(reasoned.status, 0, reasoned.stderr)
+        assert.match(reasoned.stdout, /PENDING .*claim awaiting a lever/)
+    })
+
+    it('does not let a callback-less case satisfy a cross-reference anchor', function () {
+        const result = crossrefRun('holds delivery (DRIVEN in at2b: "holds the barrier")',
+            "describe('delivery past the forward margin', () => { it('holds the barrier') })")
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /no active case titled "holds the barrier"/)
+    })
+}
+
+function registerSuiteBindingCases () {
+    it('binds a callback-less pending to its own suite and leaves the next test its own body', function () {
+        const source = [
+            "describe('Outer', () => { it.skip('x') })",
+            "it('z', function () { this.skip() })",
+        ].join('\n')
+        const pending = checker.parseSource(source, 'at12.test.js').pending
+        assert.deepStrictEqual(pending.map((entry) => entry.title), ['Outer > x', 'z'])
+    })
+
+    it('reports a callback-less skip that is the last mocha call in the file', function () {
+        const pending = checker.parseSource("describe('S', function () { it.skip('x') })", 'at12.test.js').pending
+        assert.deepStrictEqual(pending.map((entry) => entry.title), ['S > x'])
+    })
+
+    it('reports a skip that names its callback, under the right suite', function () {
+        const source = [
+            'function namedFn () {}',
+            "describe('S', function () { it.skip('x', namedFn) })",
+        ].join('\n')
+        const pending = checker.parseSource(source, 'at12.test.js').pending
+        assert.deepStrictEqual(pending.map((entry) => [entry.title, entry.kind]), [['S > x', 'declared']])
+    })
+
+    it('counts every case form a skipped suite hides', function () {
+        const pending = checker.parseSource("describe.skip('S', () => { it('a'); it('b', fn); it('c', () => {}) })", 'at12.test.js').pending
+        assert.ok(pending.some((entry) => /\[skipped suite, 3 cases\]/.test(entry.title)), JSON.stringify(pending))
+    })
+}
+
+function registerNamedHookCase () {
+    it('reports nothing for named hooks and named test callbacks that are not skipped', function () {
+        const source = "describe('AT12', function () { before(setupFn); it('runs', runIt) })"
+        assert.deepStrictEqual(checker.parseSource(source, 'at12.test.js').pending, [])
+    })
+}
+
+describe('check-mirror-pendings: a call binds only the callback inside its own parentheses', function () {
+    registerExpressionBodyCases()
+    registerCallbacklessCases()
+    registerSuiteBindingCases()
+    registerNamedHookCase()
+})
+
+// A hook that hands its mocha context to a helper (bringUp(ctx, this)) skips from the helper.
+const HELPER_LEG = (comment) => [
+    'async function settleLlm (ctx, mocha) {',
+    comment,
+    '    if (!ctx.llm.ok) return mocha.skip()',
+    '}',
+    "describe('AT1', function () {",
+    "  it('settles an llm request', async function () { await settleLlm(ctx, this) })",
+    '})',
+].join('\n')
+
+function registerHelperSkipCases () {
+    it('reports a mocha.skip in a helper, charged to the helper, and refuses it without a reason', function () {
+        const pending = checker.parseSource(HELPER_LEG('    const unused = 0'), 'at1.test.js').pending
+        assert.deepStrictEqual(pending.map((p) => [p.title, p.kind, p.line, p.reason]),
+            [['settleLlm [helper skip]', 'helper', 3, '']])
+        const result = run(fixture({ 'at1.test.js': HELPER_LEG('    const unused = 0') }))
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /unreasoned pending: .*at1\.test\.js:3 settleLlm \[helper skip\]/)
+    })
+
+    it('accepts a helper skip whose attached comment states the reason', function () {
+        const result = run(fixture({ 'at1.test.js': HELPER_LEG('    // Skip the llm case when no provider is runnable here.') }))
+        assert.strictEqual(result.status, 0, result.stderr)
+        assert.match(result.stdout, /settleLlm \[helper skip\] \| reason: Skip the llm case/)
+    })
+
+    it('does not count a helper venue guard that logs the venue unavailable reason', function () {
+        const source = [
+            'async function bringUp (ctx, mocha) {',
+            '    if (!(await ctx.venue.start())) {',
+            "        console.log('AT1 SKIPPED: ' + ctx.venue.unavailable)",
+            '        return mocha.skip()',
+            '    }',
+            '}',
+        ].join('\n')
+        assert.deepStrictEqual(checker.parseSource(source, 'at1.test.js').pending, [])
+    })
+
+    it('still reports a helper skip after a SKIPPED log that only mentions unavailable in text', function () {
+        const source = [
+            'function requireHappyPath (ctx, mocha) {',
+            "    console.log('AT2 SKIPPED: the path was unavailable ' + ctx.why)",
+            '    mocha.skip()',
+            '}',
+        ].join('\n')
+        const pending = checker.parseSource(source, 'at2.test.js').pending
+        assert.deepStrictEqual(pending.map((p) => p.title), ['requireHappyPath [helper skip]'])
+    })
+}
+
+function registerHelperModuleCases () {
+    it('reads a helper module that is not a test file', function () {
+        const root = fixture({
+            'at1.test.js': "describe('AT1', () => { it.skip('slow edge (needs 257 rounds to mine)', () => {}) })",
+            'helpers/fixture.js': 'function bootFixture (ctx, mocha) {\n    mocha.skip()\n}\n',
+        })
+        const result = run(root)
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /unreasoned pending: .*helpers\/fixture\.js:2 bootFixture \[helper skip\]/)
+    })
+
+    it('does not take a helper module as the leg a cross-reference names', function () {
+        const root = fixture({
+            'at2.test.js': "describe('AT2', () => { it.skip('holds the margin (DRIVEN in zc1: \"holds the barrier\")', () => {}) })",
+            'helpers/zc1_fixture.js': "describe('zc1 helper', () => { it('holds the barrier', () => {}) })",
+        })
+        const result = run(root)
+        assert.strictEqual(result.status, 1)
+        assert.match(result.stderr, /unresolved cross-reference zc1 .*leg file does not exist/)
+    })
+
+    it('reads neither a declared skip nor a skip with arguments as a runtime skip', function () {
+        const source = [
+            "describe('AT3', function () {",
+            '  const rows = cursor.skip(5)',
+            "  it('runs', function () { return rows })",
+            '})',
+        ].join('\n')
+        assert.deepStrictEqual(checker.parseSource(source, 'at3.test.js').pending, [])
+    })
+}
+
+describe('check-mirror-pendings: a skip handed to a helper is reported', function () {
+    registerHelperSkipCases()
+    registerHelperModuleCases()
 })

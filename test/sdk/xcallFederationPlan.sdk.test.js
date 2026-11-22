@@ -27,7 +27,7 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const plan = require('./xcallFederationPlan');
+const plan = require('./helpers/xcallFederationPlan');
 
 const PK = (n) => String(n).repeat(64).slice(0, 64);
 

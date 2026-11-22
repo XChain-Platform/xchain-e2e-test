@@ -14,7 +14,7 @@ const assert  = require('assert')
 const sinon   = require('sinon')
 const bitcoin = require('bitcoinjs-lib')
 
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 
 function resetGlobals() {
     global.NETWORK_OBJECT       = { ...bitcoin.networks.regtest, dustThreshold: 546 }
@@ -137,7 +137,7 @@ describe('[regression:p0] Transaction Pipeline', function () {
             try {
                 await transactionHelper.createAndSendTransaction(
                     { address, privateKey: privKey, publicKey: keyPair.publicKey },
-                    { action: 'ISSUE' }
+                    { action: 'ISSUE' }, null, [], null, null, true
                 )
             } finally {
                 dateStub.restore()
@@ -184,7 +184,7 @@ describe('[regression:p0] Transaction Pipeline', function () {
             try {
                 await transactionHelper.createAndSendTransaction(
                     { address, privateKey: privKey, publicKey: keyPair.publicKey },
-                    {}
+                    {}, null, [], null, null, true
                 )
             } finally {
                 dateStub.restore()

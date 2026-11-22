@@ -25,7 +25,7 @@ const logger = getLogger();
 // Per-request cap, same reasoning and same fix as RegtestMinerConnector's
 // PING_TIMEOUT_MS: axios defaults to no timeout, so an explorer that accepts
 // the socket and never answers (the "503 with zero DB pools" venue left with
-// no pool to even answer FROM) left ping() pending forever. initialCheck.test.js
+// no pool to even answer FROM) left ping() pending forever. initial_check.test.js
 // requires this ping before any action test runs, and the suite runs under
 // `mocha --timeout 0`, so nothing else in this stack would ever time the call
 // out: a stuck explorer silently stalled the whole CI job instead of failing
@@ -52,7 +52,7 @@ class XChainExplorerConnector {
             id: 1
         }
 
-        var response = null
+        let response = null
         try {
             response = await axios.post(this.url, data, { timeout: PING_TIMEOUT_MS })
         } catch (err) {

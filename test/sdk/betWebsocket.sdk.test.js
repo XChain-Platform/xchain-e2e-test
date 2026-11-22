@@ -52,11 +52,11 @@
 'use strict';
 
 const { expect } = require('chai');
-const { makeSdk, fundedGasAddress } = require('./sdkHelper');
+const { makeSdk, fundedGasAddress } = require('./helpers/sdkHelper');
 const {
     MIN_REFUND_WINDOW, getFeed, blockTime, jumpTo, releaseClock, resumeMiningAtFrozenClock,
     waitFeedStatus, issueWagerToken, submitBet, actionIndexOf
-} = require('./betHelper');
+} = require('./helpers/betHelper');
 
 function haveConnectors() {
     return global.regtestMinerConnector && global.utxoTrackerConnector && global.nodeConnector;

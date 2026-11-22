@@ -9,7 +9,7 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const cryptoHelper = require('../../cryptoHelper')
+const cryptoHelper = require('../../helpers/core/cryptoHelper')
 const issueHelper = require('../../helpers/issueHelper')
 const sendHelper = require('../../helpers/sendHelper')
 const gasHelper = require('../../helpers/gasHelper')
@@ -24,12 +24,12 @@ describe('ORDER', () => {
             // Large order: GIVE 100 tokenA, GET 70 tokenB (price = 0.7)
             // Small counter: GIVE 7 tokenB, GET 10 tokenA (price = 10/7 = 1.4285...)
             // Expected: partial fill of 10 tokenA for 7 tokenB, large order stays open
-            let addr1 = await cryptoHelper.getNewFundedAddress("ORDER.PF1", COIN, NETWORK, null, "legacy", 0, 1)
-            let addr2 = await cryptoHelper.getNewFundedAddress("ORDER.PF2", COIN, NETWORK, null, "legacy", 0, 1)
-            let address1 = addr1["address"]
-            let address2 = addr2["address"]
-            let tokenA = "ORDPFa"+address1.substring(address1.length-8)
-            let tokenB = "ORDPFb"+address1.substring(address1.length-8)
+            const addr1 = await cryptoHelper.getNewFundedAddress("ORDER.PF1", COIN, NETWORK, null, "legacy", 0, 1)
+            const addr2 = await cryptoHelper.getNewFundedAddress("ORDER.PF2", COIN, NETWORK, null, "legacy", 0, 1)
+            const address1 = addr1["address"]
+            const address2 = addr2["address"]
+            const tokenA = "ORDPFa"+address1.substring(address1.length-8)
+            const tokenB = "ORDPFb"+address1.substring(address1.length-8)
 
             await issueHelper.sendIssueV0(addr1, tokenA, 1000, 500, 0, "PF token A", 500)
             await issueHelper.sendIssueV0(addr1, tokenB, 1000, 500, 0, "PF token B", 500)
@@ -37,22 +37,22 @@ describe('ORDER', () => {
             await gasHelper.ensureGasBalance(addr1, 100)
             await gasHelper.ensureGasBalance(addr2, 100)
 
-            let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+            const expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
-            let bigOrder = await orderHelper.sendOrderV0(addr1, COIN_CODE, tokenA, 100, COIN_CODE, tokenB, 70, address1, expiration, null, null, "Large order")
+            const bigOrder = await orderHelper.sendOrderV0(addr1, COIN_CODE, tokenA, 100, COIN_CODE, tokenB, 70, address1, expiration, null, null, "Large order")
             assert(bigOrder.order, "Big order should exist")
-            let bigOrderAI = Number(bigOrder.order["action_index"])
+            const bigOrderAI = Number(bigOrder.order["action_index"])
 
-            let smallOrder = await orderHelper.sendOrderV0(addr2, COIN_CODE, tokenB, 7, COIN_CODE, tokenA, 10, address2, expiration, null, null, "Small counter order")
+            const smallOrder = await orderHelper.sendOrderV0(addr2, COIN_CODE, tokenB, 7, COIN_CODE, tokenA, 10, address2, expiration, null, null, "Small counter order")
             assert(smallOrder.order, "Small order should exist")
 
-            let match = await indexerDatabase.waitForOrderMatch({ giveActionIndex: bigOrderAI, status: "valid" }, 30000)
+            const match = await indexerDatabase.waitForOrderMatch({ giveActionIndex: bigOrderAI, status: "valid" }, 30000)
             assert(match, "Partial fill match should exist")
 
-            let completedSmall = await indexerDatabase.waitForOrder({ source: address2, giveTick: tokenB, orderStatus: "complete" }, 30000)
+            const completedSmall = await indexerDatabase.waitForOrder({ source: address2, giveTick: tokenB, orderStatus: "complete" }, 30000)
             assert(completedSmall, "Small order should be complete")
 
-            let openBig = await indexerDatabase.waitForOrder({ source: address1, giveTick: tokenA, orderStatus: "open" }, 30000)
+            const openBig = await indexerDatabase.waitForOrder({ source: address1, giveTick: tokenA, orderStatus: "open" }, 30000)
             assert(openBig, "Big order should still be open after partial fill")
         })
     })

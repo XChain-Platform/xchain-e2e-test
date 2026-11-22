@@ -52,13 +52,13 @@ describe('Boundary: WHERE Clause Construction', function () {
             // The method catches the SQL error and returns null.
             mockConn.query.rejects(new Error('SQL syntax error near WHERE'))
 
-            const result = await db.checkIssue({
+            const check = db.checkIssue({
                 source: null, tick: null, txHash: null, maxSupply: null,
                 maxMint: null, decimals: null, description: null, mintSupply: null,
                 status: null
             })
 
-            assert.strictEqual(result, null, 'should return null on SQL error')
+            await assert.rejects(check, /SQL syntax error near WHERE/)
             assert(mockConn.release.calledOnce, 'connection should be released')
         })
     })
@@ -175,12 +175,12 @@ describe('Boundary: WHERE Clause Construction', function () {
             const { db, mockConn } = createDb()
             mockConn.query.rejects(new Error('SQL syntax error'))
 
-            const result = await db.checkSend({
+            const check = db.checkSend({
                 source: null, destination: null, tick: null,
                 amount: null, txHash: null, memo: null, status: null
             })
 
-            assert.strictEqual(result, null)
+            await assert.rejects(check, /SQL syntax error/)
             assert(mockConn.release.calledOnce)
         })
     })

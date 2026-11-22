@@ -9,7 +9,7 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const issueHelper = require('../helpers/issueHelper')
 const fileHelper = require('../helpers/fileHelper')
 const linkHelper = require('../helpers/linkHelper')
@@ -17,23 +17,23 @@ const linkHelper = require('../helpers/linkHelper')
 describe('LINK', () => {
     describe('v0', () => {
         it('should link two actions v0', async () => {
-            let addr = await cryptoHelper.getNewFundedAddress("LINK.V0", COIN, NETWORK, null, "legacy", 0, 1)
+            const addr = await cryptoHelper.getNewFundedAddress("LINK.V0", COIN, NETWORK, null, "legacy", 0, 1)
 
-            let issueResult = await issueHelper.sendIssueV0(
+            const issueResult = await issueHelper.sendIssueV0(
                 addr, "LINKv0"+addr["address"].substring(addr["address"].length-8),
                 100, 10, 0, "Link test token", 10
             )
             assert(issueResult.issue, "Issue for link should exist")
-            let issueActionIndex = Number(issueResult.issue["action_index"])
+            const issueActionIndex = Number(issueResult.issue["action_index"])
 
-            let fileResult = await fileHelper.sendFileV0(
+            const fileResult = await fileHelper.sendFileV0(
                 addr, "link-test.txt", "text/plain", "Link test file", "Link file memo",
                 "TGluayB0ZXN0IGZpbGU=" // base64 "Link test file"
             )
             assert(fileResult.file, "File for link should exist")
-            let fileActionIndex = Number(fileResult.file["action_index"])
+            const fileActionIndex = Number(fileResult.file["action_index"])
 
-            let result = await linkHelper.sendLinkV0(
+            const result = await linkHelper.sendLinkV0(
                 addr,
                 COIN_CODE, issueActionIndex,
                 COIN_CODE, fileActionIndex,

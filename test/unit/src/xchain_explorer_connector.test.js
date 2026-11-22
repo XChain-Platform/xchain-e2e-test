@@ -59,7 +59,7 @@ describe('XChainExplorerConnector', function () {
 
         // Without a per-request cap, an explorer that accepts the socket and
         // never answers (the "503 with zero DB pools" venue left with no pool
-        // to answer FROM) left this pending forever. initialCheck.test.js
+        // to answer FROM) left this pending forever. initial_check.test.js
         // requires this ping before any action test runs, and the suite runs
         // under `mocha --timeout 0`, so nothing else in this stack would ever
         // time the call out: a stuck explorer silently stalled the whole CI

@@ -34,7 +34,7 @@
  *
  *   nohup ~/scratch/xc-meta/doge-loop.sh >/dev/null 2>&1 & echo $! > ~/scratch/xc-meta/doge-loop.pid
  *   COIN=bitcoin NETWORK=regtest NODE_PATH=<the chunked module directory> \
- *     npx mocha --timeout 0 --exit --require ./test/initialCheck.test.js \
+ *     npx mocha --timeout 0 --exit --require ./test/initial_check.test.js \
  *     test/integration/bridge_rail_doge_guards.test.js \
  *     test/integration/bridge_rail_base.test.js "test/integration/bridge_rail_base.test/*.test.js"
  *   kill $(cat ~/scratch/xc-meta/doge-loop.pid)
@@ -55,7 +55,7 @@
  *    regtest capability sets (cross_chain, price, oracle_publish, attestation) hold the
  *    same five keys at block 597: the four roster keys at 50000 each and the standing
  *    hub's lost key at 10000. The four were staked on 2026-09-08 by
- *    `test/tools/reseedAttestationRoster.test.js` and are idle GENERATIONS 0 to 3 of the
+ *    `test/tools/reseed_attestation_roster.test.js` and are idle GENERATIONS 0 to 3 of the
  *    venue's seeding mnemonic. `mirrorDrillFixture._knownSignerSeeds()` sweeps those
  *    generations only when `XC_ROLLCALL_FEDERATION_MNEMONIC` is in the environment: with
  *    the variable absent it holds four keys, none of them seated, the venue hubs hold 0
@@ -219,7 +219,7 @@ bridgeRailSuite('the destination ledger before any in leg (AT1 precondition, AT9
         assert.ok(settled, 'the rail backlog never drained: every XBRIDGE leg on the chain must ' +
             'reach a finalized hub row and a destination bridge_settlements row before a baseline ' +
             'means anything. Outstanding at timeout: ' +
-            JSON.stringify(state.venue._lastSettlePoll) + '\n' + state.venue.indexerTails(40));
+            JSON.stringify(state.venue['_lastSettlePoll']) + '\n' + state.venue.indexerTails(40));
         state.evidence.backlogApplied = settled.applied;
 
         state.baseline = {

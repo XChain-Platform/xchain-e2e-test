@@ -12,8 +12,8 @@ const fs = require('fs');
 const path = require('path');
 const { encode: wifEncode } = require('wif');
 
-const cryptoHelper = require('../../cryptoHelper');
-const CryptoNetworks = require('../../../src/CryptoNetworks');
+const cryptoHelper = require('../../helpers/core/cryptoHelper');
+const CryptoNetworks = require('../../../src/crypto_networks');
 const {
     MultiValidatorHub,
     ValidatorIdentity,
@@ -23,14 +23,17 @@ const {
 const { startDisposableHubDb } = require('../../helpers/disposableHubDb');
 const { seedWeightSnapshot } = require('../../helpers/seededWeightSnapshot');
 const { archiveCountCases } = require('../../helpers/flag_days/archive_count_cases');
+const { unusedBtcSnapshotBlock, pinMeshSignerSet } = require('../../helpers/flag_days/snapshot_block');
+const { armHeight } = require('../../helpers/anchorArmHeight');
 
 const MATCHES_LENGTH = 3;
 const CASES = archiveCountCases(MATCHES_LENGTH);
 const MATCH_COUNT_GATE = 'archive_match_count_activation.ARCHIVE_MATCH_COUNT_ACTIVATION';
+const MATCH_COUNT_ARM_HEIGHT = Number(armHeight('XC_ANCHOR_STAKE_REGTEST_ACTIVATION'));
 const HUB_DB_PORT = 14000 + (process.pid % 300);
 const HUB_DB_NAME = 'xchain-archive-count-hubdb-' + process.pid;
-const SNAPSHOT_BLOCK = Number(process.env.ARCHIVE_COUNT_SNAPSHOT_BLOCK) ||
-    (1600000 + (Date.now() % 300000));
+// Set in setup to an unused committed BTC block (ARCHIVE_COUNT_SNAPSHOT_BLOCK pins one).
+let SNAPSHOT_BLOCK = null;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -63,13 +66,15 @@ function indexerGateRegistryPath(){
 function assertMatchCountGateArmed(){
     const gates = require(indexerGateRegistryPath());
     const activation = gates.copy(MATCH_COUNT_GATE);
-    assert.strictEqual(activation.regtest, 0,
-        'the archive MATCH_COUNT rail requires regtest activation at height 0');
-    assert.strictEqual(gates.activeAt(MATCH_COUNT_GATE, 'regtest', null, 0, null), true,
-        'the archive MATCH_COUNT rule must be active from the regtest genesis block');
+    assert.strictEqual(activation.regtest, MATCH_COUNT_ARM_HEIGHT,
+        'the archive MATCH_COUNT rail must follow the anchor stake arm height');
+    assert.strictEqual(gates.activeAt(
+        MATCH_COUNT_GATE, 'regtest', null, MATCH_COUNT_ARM_HEIGHT, null), true,
+        'the archive MATCH_COUNT rule must be active at the anchor stake arm height');
+    return gates;
 }
 
-assertMatchCountGateArmed();
+const gates = assertMatchCountGateArmed();
 
 async function indexerQuery(sql, params){
     const conn = await indexerDatabase.getConnection();
@@ -97,7 +102,9 @@ function stageProductionSigner(addressInfo){
     const network = CryptoNetworks.getBitcoinJsNetwork(COIN + '-' + NETWORK);
     process.env.DOGE_NETWORK = COIN + '-' + NETWORK;
     process.env.DOGE_ADDRESS = addressInfo.address;
-    process.env.DOGE_WIF = wifEncode(network.wif, Buffer.from(addressInfo.privateKey), true);
+    process.env.DOGE_WIF = wifEncode({
+        version: network.wif, privateKey: Buffer.from(addressInfo.privateKey), compressed: true
+    });
     process.env.DOGE_ENCODER_URL = 'http://' + (process.env.ENCODER_URL || 'localhost') + ':' +
         (process.env.ENCODER_API_PORT || '3023');
     process.env.HUB_SIGNER_MODULE = path.join(signerDir, 'signer.js');
@@ -157,7 +164,7 @@ function checkpointFor(caseIndex){
 
 function signedMatches(caseIndex){
     const dex = mvh.hubs[0].getCrossChainDex();
-    return Array.from({ length: MATCHES_LENGTH }, (_, matchIndex) => {
+    return Array.from({ length: MATCHES_LENGTH }, (internal, matchIndex) => {
         const match = {
             match_id: crypto.createHash('sha256')
                 .update('archive-count-' + process.pid + '-' + caseIndex + '-' + matchIndex).digest('hex'),
@@ -226,12 +233,13 @@ async function publishArchiveCase(testCase, caseIndex){
     return wire;
 }
 
-async function waitForStatus(wire, expected){
+async function waitForStatus(wire, caseIndex){
     const deadline = Date.now() + 180000;
     let observed = null;
+    let expected = null;
     while(Date.now() < deadline){
         const rows = await indexerQuery(
-            `SELECT a.action_index, s.status,
+            `SELECT a.action_index, a.block_index_doge, s.status,
                     (SELECT COUNT(*) FROM anchor_actions c
                      WHERE c.version = 2 AND c.match_batch_seq = ?) AS chunk_count
              FROM anchor_actions a
@@ -239,7 +247,12 @@ async function waitForStatus(wire, expected){
              WHERE a.version = 1 AND a.ledger_hash = ? AND a.match_batch_seq = ?
              ORDER BY a.action_index DESC LIMIT 1`,
             [wire.batchSeq, wire.cp.ledger_hash, wire.batchSeq]);
-        if(rows.length) observed = rows[0];
+        if(rows.length){
+            observed = rows[0];
+            const active = gates.activeAt(MATCH_COUNT_GATE, 'regtest', null,
+                Number(observed.block_index_doge), null);
+            expected = archiveCountCases(MATCHES_LENGTH, { active })[caseIndex].expect;
+        }
         if(observed && Number(observed.chunk_count) === wire.chunks.length - 1 &&
            String(observed.status) === expected) return observed;
         await regtestMinerConnector.generateBlocks(1);
@@ -250,6 +263,9 @@ async function waitForStatus(wire, expected){
 }
 
 async function setup(){
+    SNAPSHOT_BLOCK = await unusedBtcSnapshotBlock({
+        indexerQuery, override: process.env.ARCHIVE_COUNT_SNAPSHOT_BLOCK
+    });
     process.env.XDEX_SNAPSHOT_BLOCK = String(SNAPSHOT_BLOCK);
     process.env.CHECKPOINT_CHAINS = 'DOGE';
     process.env.CHECKPOINT_POLL_MS = '600000000';
@@ -275,6 +291,7 @@ async function setup(){
     await mvh.start();
     identities = mvh.identities.map((identity) => new ValidatorIdentity(identity.privkeyHex));
     weightSeed = seedWeightSnapshot(mvh, { blockIndex: SNAPSHOT_BLOCK, network: 'regtest' });
+    pinMeshSignerSet(mvh);
     publisher = mvh.hubs[0].stateAnchorPublisher;
     publisher.network = 'regtest';
     publisher.indexers = publisher.indexers || {};
@@ -285,8 +302,9 @@ async function setup(){
     await seedCapabilityRows();
     await nextSequenceBases();
 
+    // Funds native coin only: the publisher pays no XCHAIN, and the DOGE gas seed is a bridge.
     const addressInfo = await cryptoHelper.getNewFundedAddress(
-        'archive-count-publisher', COIN, NETWORK, null, 'legacy', 0, 10.0);
+        'archive-count-publisher', COIN, NETWORK, null, 'legacy', 0, 10.0, false);
     await settleTracker();
     signerHooks = stageProductionSigner(addressInfo);
     assert.ok(signerHooks && signerHooks.broadcastFn,
@@ -294,6 +312,14 @@ async function setup(){
 }
 
 async function teardown(){
+    // Removes the capability rows seeded at a real BTC block.
+    if(identities.length && SNAPSHOT_BLOCK !== null){
+        for(const identity of identities)
+            await indexerQuery(
+                "DELETE FROM capability_snapshots WHERE snapshot_block = ? AND signing_pubkey = ? " +
+                "AND capability IN ('oracle_publish', 'cross_chain')",
+                [SNAPSHOT_BLOCK, identity.getPubkeyHex().toLowerCase()]);
+    }
     if(weightSeed) weightSeed.restore();
     if(mvh){ await mvh.stop(); await mvh.dropDatabases(); }
     if(hubDb) await hubDb.stop();
@@ -309,11 +335,14 @@ describe('ANCHOR archive MATCH_COUNT flag day on DOGE regtest', function () {
     after(teardown);
 
     for(const [caseIndex, testCase] of CASES.entries()){
-        it('stores the ' + testCase.name + ' MATCH_COUNT archive as ' + testCase.expect,
+        it('stores the ' + testCase.name + ' MATCH_COUNT archive according to the gate state',
             async function () {
                 const wire = await publishArchiveCase(testCase, caseIndex);
-                const row = await waitForStatus(wire, testCase.expect);
-                assert.strictEqual(String(row.status), testCase.expect);
+                const row = await waitForStatus(wire, caseIndex);
+                const active = gates.activeAt(MATCH_COUNT_GATE, 'regtest', null,
+                    Number(row.block_index_doge), null);
+                const expected = archiveCountCases(MATCHES_LENGTH, { active })[caseIndex].expect;
+                assert.strictEqual(String(row.status), expected);
             });
     }
 });

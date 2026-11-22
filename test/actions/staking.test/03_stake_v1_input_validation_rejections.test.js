@@ -10,10 +10,10 @@
 
 const assert = require('assert')
 const crypto = require('crypto')
-const cryptoHelper = require('../../cryptoHelper')
+const cryptoHelper = require('../../helpers/core/cryptoHelper')
 const stakeHelper = require('../../helpers/stakeHelper')
 const gasHelper = require('../../helpers/gasHelper')
-const transactionHelper = require('../../transactionHelper')
+const transactionHelper = require('../../helpers/core/transactionHelper')
 
 function requireBitcoin () {
     if (typeof COIN_CODE === 'undefined' || COIN_CODE !== 'BTC') this.skip()
@@ -47,16 +47,16 @@ async function setupBadInputAddress () {
 // Fresh Ed25519 pubkey so no case can collide with an existing stake
 // and get rejected for the wrong reason ("already in use").
 function freshPubkey () {
-    let { publicKey } = crypto.generateKeyPairSync('ed25519')
+    const { publicKey } = crypto.generateKeyPairSync('ed25519')
     return publicKey.export({ format: 'der', type: 'spki' })
         .subarray(12).toString('hex')
 }
 
 async function rejectsZeroAmount () {
     // stake-teardown-ok: rejected on the greater-than-zero guard.
-    let msg = 'STAKE|1|0.00000000|' + freshPubkey()
-    let txHash = await transactionHelper.createAndSendTransaction(badInputAddr, msg)
-    let row = await stakeHelper.waitForAnyStake({
+    const msg = 'STAKE|1|0.00000000|' + freshPubkey()
+    const txHash = await transactionHelper.createAndSendTransaction(badInputAddr, msg)
+    const row = await stakeHelper.waitForAnyStake({
         source: badInputAddr.address,
         txHash: txHash
     })
@@ -71,9 +71,9 @@ async function rejectsOverPrecisionAmount () {
     // 9 decimal places: past XCHAIN's 8dp, so the AMOUNT format
     // regex rejects it before any balance lookup.
     // stake-teardown-ok: rejected on the AMOUNT format guard.
-    let msg = 'STAKE|1|1000.123456789|' + freshPubkey()
-    let txHash = await transactionHelper.createAndSendTransaction(badInputAddr, msg)
-    let row = await stakeHelper.waitForAnyStake({
+    const msg = 'STAKE|1|1000.123456789|' + freshPubkey()
+    const txHash = await transactionHelper.createAndSendTransaction(badInputAddr, msg)
+    const row = await stakeHelper.waitForAnyStake({
         source: badInputAddr.address,
         txHash: txHash
     })
@@ -87,11 +87,11 @@ async function rejectsOverPrecisionAmount () {
 async function rejectsMalformedPubkey () {
     // 64 characters so length alone passes, but the leading 'zz'
     // is not hex, so the Ed25519 pubkey pattern rejects it.
-    let malformedPubkey = 'zz' + 'a'.repeat(62)
+    const malformedPubkey = 'zz' + 'a'.repeat(62)
     // stake-teardown-ok: rejected on the SIGNING_PUBKEY format guard.
-    let msg = 'STAKE|1|1000.00000000|' + malformedPubkey
-    let txHash = await transactionHelper.createAndSendTransaction(badInputAddr, msg)
-    let row = await stakeHelper.waitForAnyStake({
+    const msg = 'STAKE|1|1000.00000000|' + malformedPubkey
+    const txHash = await transactionHelper.createAndSendTransaction(badInputAddr, msg)
+    const row = await stakeHelper.waitForAnyStake({
         source: badInputAddr.address,
         txHash: txHash
     })
@@ -106,15 +106,15 @@ async function rejectsInsufficientBalance () {
     // Its own address, funded with far less XCHAIN than it stakes.
     // A separate address keeps the shortfall independent of what the
     // other cases in this block spent.
-    let poorAddr = await cryptoHelper.getNewFundedAddress(
+    const poorAddr = await cryptoHelper.getNewFundedAddress(
         'poor-staker', COIN, NETWORK, null, 'legacy', 0, 1
     )
     await gasHelper.ensureGasBalance(poorAddr, '10')
 
     // stake-teardown-ok: rejected for an insufficient XCHAIN balance.
-    let msg = 'STAKE|1|1000.00000000|' + freshPubkey()
-    let txHash = await transactionHelper.createAndSendTransaction(poorAddr, msg)
-    let row = await stakeHelper.waitForAnyStake({
+    const msg = 'STAKE|1|1000.00000000|' + freshPubkey()
+    const txHash = await transactionHelper.createAndSendTransaction(poorAddr, msg)
+    const row = await stakeHelper.waitForAnyStake({
         source: poorAddr.address,
         txHash: txHash
     })

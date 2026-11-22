@@ -100,7 +100,7 @@ for COIN in "${COINS[@]}"; do
     PARITY_OUT_DIR="$PARITY_OUT_DIR" PARITY_BASELINE="$PARITY_BASELINE" \
     COIN="$PKG" NETWORK="regtest" \
     ./node_modules/.bin/mocha --timeout 0 \
-      --require ./test/initialCheck.test.js \
+      --require ./test/initial_check.test.js \
       test/parity/multichain_parity.test.js )
 
   echo "[parity] $COIN - tearing down"
@@ -114,4 +114,4 @@ ARGS=()
 for COIN in "${COINS[@]}"; do
   ARGS+=("$COIN=$PARITY_OUT_DIR/digest-$COIN.json")
 done
-node "$E2E_DIR/test/parity/compare.js" "${ARGS[@]}"
+node "$E2E_DIR/test/parity/helpers/compare.js" "${ARGS[@]}"

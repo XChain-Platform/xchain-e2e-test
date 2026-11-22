@@ -27,11 +27,11 @@
 const assert = require('assert')
 const path = require('path')
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const fixture = require('../helpers/barrierFamilyFixture')
 const drive = require('../helpers/barrierFamilyDrive')
-const { diffStateHashes } = require('../mirrorDrillWaits')
+const { diffStateHashes } = require('../helpers/mirrorDrillWaits')
 
 const BUILD_ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const ARMED = 0
@@ -47,6 +47,7 @@ describe('AB5: a mixed fleet, one armed and one inert indexer, derives one set a
     before(async function () {
         const up = await drive.bootFamilyVenue({
             label: 'ab5', repoRoot: BUILD_ROOT, armed: [ARMED],
+            venue: { freshIndexers: true },
             indexerExtraEnv: { HUB_SYNC_ANCHOR_ATTEST_ARRIVAL_MARGIN_S: String(MARGIN_S) },
         })
         Object.assign(ctx, up, { coin: up.evidence.coinCode })

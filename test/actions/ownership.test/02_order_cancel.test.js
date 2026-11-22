@@ -9,7 +9,7 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const cryptoHelper = require('../../cryptoHelper')
+const cryptoHelper = require('../../helpers/core/cryptoHelper')
 const issueHelper = require('../../helpers/issueHelper')
 const sendHelper = require('../../helpers/sendHelper')
 const gasHelper = require('../../helpers/gasHelper')
@@ -29,20 +29,20 @@ describe('OWNERSHIP', () => {
     // owner_id stays with the seller (it never moved).
     describe('ORDER - ownership cancel returns the gate', () => {
         it('should release the ownership escrow when an ownership order is cancelled', async () => {
-            let addr = await cryptoHelper.getNewFundedAddress("OWN.OC", COIN, NETWORK, null, "legacy", 0, 1)
-            let address = addr["address"]
-            let jdog    = "OWNCANJ"+address.substring(address.length-8)
-            let settle  = "OWNCANS"+address.substring(address.length-8)
+            const addr = await cryptoHelper.getNewFundedAddress("OWN.OC", COIN, NETWORK, null, "legacy", 0, 1)
+            const address = addr["address"]
+            const jdog    = "OWNCANJ"+address.substring(address.length-8)
+            const settle  = "OWNCANS"+address.substring(address.length-8)
 
             await issueHelper.sendIssueV0(addr, jdog,   100, 50, 0, "Ownership cancel subject", 50)
             await issueHelper.sendIssueV0(addr, settle, 100, 50, 0, "Cancel settlement tick",   50)
             await gasHelper.ensureGasBalance(addr, 100)
 
-            let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+            const expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
-            let listed = await orderHelper.sendOrderV0(addr, COIN_CODE, jdog,   null, COIN_CODE, settle, 5, address, expiration, null, null, "Listing then cancelling", 1, 0)
+            const listed = await orderHelper.sendOrderV0(addr, COIN_CODE, jdog,   null, COIN_CODE, settle, 5, address, expiration, null, null, "Listing then cancelling", 1, 0)
             assert(listed.order, "Ownership order should be created")
-            let listedAI = Number(listed.order["action_index"])
+            const listedAI = Number(listed.order["action_index"])
 
             // After listing, an ISSUE v1 description edit should be rejected
             // because the ownership gate is set.
@@ -51,16 +51,16 @@ describe('OWNERSHIP', () => {
             // killed this test inside the helper before it reached its own assertion.
             await issueHelper.sendIssueV1Raw(addr, jdog, "Trying to edit while escrowed")
             // Verify the issue landed with the ownership-escrowed rejection reason.
-            let rejectedIssue = await indexerDatabase.waitForIssue({ source: address, tick: jdog, status: "invalid: TICK (ownership escrowed)" }, 30000)
+            const rejectedIssue = await indexerDatabase.waitForIssue({ source: address, tick: jdog, status: "invalid: TICK (ownership escrowed)" }, 30000)
             assert(rejectedIssue, "ISSUE v1 should be rejected while ownership is escrowed")
 
             // Cancel the ownership order
             await orderHelper.sendOrderCancelV1(addr, listedAI, "Cancelling ownership listing")
-            let cancelled = await indexerDatabase.waitForOrder({ source: address, giveTick: jdog, orderStatus: "cancelled" }, 30000)
+            const cancelled = await indexerDatabase.waitForOrder({ source: address, giveTick: jdog, orderStatus: "cancelled" }, 30000)
             assert(cancelled, "Ownership order should be cancelled")
 
             // After cancel, the escrow gate is clear; owner-only actions work again
-            let postCancelEdit = await issueHelper.sendIssueV1(addr, jdog, "Description after cancel")
+            const postCancelEdit = await issueHelper.sendIssueV1(addr, jdog, "Description after cancel")
             assert(postCancelEdit.issue, "ISSUE v1 should succeed once the ownership gate is released")
         })
     })

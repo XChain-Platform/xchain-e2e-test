@@ -13,7 +13,7 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { getFeed } = require('../betHelper');
+const { getFeed } = require('../helpers/betHelper');
 const {
     ACTIVATION_DELAY_BLOCKS, SyncUtility, state, syncBuildStateHashData, bQuery,
     hashesOf

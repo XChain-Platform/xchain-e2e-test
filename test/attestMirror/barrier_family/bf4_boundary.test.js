@@ -48,7 +48,7 @@
 const assert = require('assert')
 const path = require('path')
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const fixture = require('../helpers/barrierFamilyFixture')
 const rows = require('../helpers/barrierFamilyRows')
@@ -98,9 +98,10 @@ function deferralNote (venue, indexer) {
 // above the activation, publishing `heights`.
 function mirrorStub (heights, active) {
     return {
-        coin: 'BTC', network: 'regtest', heightWatermarks: heights || {}, _heightShortfalls: {},
+        coin: 'BTC', network: 'regtest', heightWatermarks: heights || {}, ['_heightShortfalls']: {},
         admissionChain: () => 'BTC', admissionActiveAt: () => !!active,
         publishedHeight: watermarks.publishedHeight, heightSatisfied: watermarks.heightSatisfied,
+        admissionStreamSatisfied: watermarks.admissionStreamSatisfied,
         matchBootstrapped: true, matchSyncTimestamp: T - 1, streamWatermark: T, matchWatermarkGraceS: 120,
     }
 }
@@ -125,8 +126,8 @@ describe('BF4 unit: below the activation every predicate is today\'s form, above
             assert.strictEqual(satisfied, want,
                 assertionMessage(why + ' to produce heightSatisfied=' + want, satisfied, 'the BF4 height matrix case'))
             if (!want) {
-                assert.strictEqual(stub._heightShortfalls[TABLE + '|BTC'], target,
-                    assertionMessage(why + ' shortfall=' + target, stub._heightShortfalls[TABLE + '|BTC'], 'the BF4 shortfall map'))
+                assert.strictEqual(stub['_heightShortfalls'][TABLE + '|BTC'], target,
+                    assertionMessage(why + ' shortfall=' + target, stub['_heightShortfalls'][TABLE + '|BTC'], 'the BF4 shortfall map'))
             }
         }
     })
@@ -151,10 +152,13 @@ describe('BF4 unit: below the activation every predicate is today\'s form, above
                 assertionMessage('empty-mirror escape=true', emptyMirror, 'the BF4 legacy member predicate'))
         }
         const armed = mirrorStub({ [TABLE]: { BTC: B - 5 } }, true)
+        const armedHeightSatisfied = members.matchSyncSatisfied.call(armed, T + 1, B)
+        assert.strictEqual(armedHeightSatisfied, false,
+            assertionMessage('armed member=false below its height line and stream grace', armedHeightSatisfied, 'the BF4 armed member predicate'))
         armed.streamWatermark = T + 99999
-        const armedSatisfied = members.matchSyncSatisfied.call(armed, T + 1, B)
-        assert.strictEqual(armedSatisfied, false,
-            assertionMessage('armed height-keyed member=false below its height line', armedSatisfied, 'the BF4 armed member predicate'))
+        const armedStreamSatisfied = members.matchSyncSatisfied.call(armed, T + 1, B)
+        assert.strictEqual(armedStreamSatisfied, true,
+            assertionMessage('armed member=true after stream grace with published admission evidence', armedStreamSatisfied, 'the BF4 armed member predicate'))
     })
 
 })
@@ -218,7 +222,7 @@ describe('BF4 live: above the activation a NULL row and a chain-omitting row bin
     const ctx = { venue: null, btc: null, coin: 'BTC', T: null, tip: null, armHeight: null, legacyBlock: null, keys: {}, blocks: [] }
 
     before(async function () {
-        const up = await drive.bootFamilyVenue({ label: 'bf4', repoRoot: BUILD_ROOT, armed: [ARMED, 1], armHubs: true, armAtCrossing: true })
+        const up = await drive.bootFamilyVenue({ label: 'bf4', repoRoot: BUILD_ROOT, armed: [ARMED, 1], armHubs: true, armAtCrossing: true, venue: { freshIndexers: true } })
         Object.assign(ctx, up, { coin: up.evidence.coinCode })
         console.log('BF4 armed at ' + ctx.armHeight + ', legacy era block ' + ctx.legacyBlock)
     })
@@ -266,12 +270,8 @@ async function seedThree (ctx) {
     // canonical; the guard fails this case, not the drill block, if it is ever moved to bridge or policy.
     const hazards = rows.armedLegacyApplyHazards([legacy, omits, control], ctx.armHeight)
     assert.deepStrictEqual(hazards, [], assertionMessage('no armed legacy apply hazards', hazards, 'the BF4 seed rows'))
-    const snapshots = await rows.requiredSnapshotSeeds([legacy, omits, control], ctx.tip, drive.stakeWeightsAt(ctx.venue, ARMED))
-    const coverage = rows.snapshotCapabilityCoverage([legacy, omits, control].concat(snapshots))
-    // Refuse incomplete snapshot coverage before any mirror rows are seeded.
-    assert.ok(coverage.satisfied, assertionMessage('no missing capability snapshot blocks', coverage.missingBlocks,
-        coverage.refusal || 'the BF4 snapshot seed set'))
-    await drive.seedMirrors(ctx.venue, snapshots.concat([legacy, omits, control]))
+    const snapshots = await drive.seedSnapshotsFromStake(ctx.venue, ARMED, [legacy, omits, control], ctx.tip)
+    await drive.seedMirrors(ctx.venue, [legacy, omits, control])
     await drive.waitForMirrorRows(ctx.venue, ARMED, TABLE, 3)
     await drive.waitForMirrorRows(ctx.venue, ARMED, 'capability_snapshots', snapshots.length)
     ctx.keys = { legacy: legacy.row.match_id, omits: omits.row.match_id, control: control.row.match_id }

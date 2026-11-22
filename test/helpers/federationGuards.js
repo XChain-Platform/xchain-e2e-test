@@ -38,7 +38,7 @@
 
 const assert = require('assert')
 
-function _mustRun(){
+function internalMustRun(){
     const v = process.env.E2E_REQUIRE_FEDERATION
     return v === '1' || v === 'true'
 }
@@ -61,7 +61,7 @@ function requireFederationEnv(ctx, opts){
     if (problems.length === 0) return true
 
     const msg = 'Federation prerequisites not met: ' + problems.join('; ')
-    if (_mustRun()){
+    if (internalMustRun()){
         throw new Error('E2E_REQUIRE_FEDERATION is set but ' + msg +
             '. Provision the environment or unset the flag to allow skipping.')
     }
@@ -87,7 +87,8 @@ async function assertCleanValidatorSet(indexerDatabase){
         'Hub-federation tests need a clean validator set, but the chain has ' + n +
         ' active stake(s). Reset to a fresh chain first:\n' +
         '    XCHAIN_NODE_DATA_DIR=<data dir> xchain_node reset all bitcoin regtest\n' +
-        '(run each federation suite on its own fresh chain; they are not isolated from prior staking).')
+        '(run each federation suite on its own fresh chain; they are not isolated from prior staking). ' +
+        'A recently unstaked validator stays active until its deactivation block passes.')
 }
 
 // ── Per-request responsible-set guards (selection-dependent cases) ──────────
@@ -156,7 +157,7 @@ function requireResponsibleValidator(ctx, request, pubkey, label){
         'attestation validator, so a venue carrying other stakes routes some request-ids ' +
         'away from this suite and those requests expire by design.'
 
-    if (_mustRun()){
+    if (internalMustRun()){
         throw new Error('E2E_REQUIRE_FEDERATION is set but ' + msg +
             ' Reset to a clean validator set first:\n' +
             '    XCHAIN_NODE_DATA_DIR=<data dir> xchain_node reset all bitcoin regtest')

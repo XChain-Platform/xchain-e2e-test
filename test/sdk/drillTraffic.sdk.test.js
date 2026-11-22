@@ -30,7 +30,7 @@
 
 const { expect } = require('chai');
 const fs = require('fs');
-const { makeSdk, submit, fundedGasAddress, mine, uniqueTick, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mine, uniqueTick, submitOpts } = require('./helpers/sdkHelper');
 
 const C_H  = parseInt(process.env.DRILL_C_H || '0');
 const B_H  = parseInt(process.env.DRILL_B_H || '0');

@@ -45,7 +45,10 @@ async function startBurn(dest) {
 
     const row = await state.venue.waitForFinalizedTransfer(
         (r) => String(r.src_chain) === 'DOGE' && String(r.dest_chain) === 'BTC' &&
-               String(r.dest_address) === dest.address);
+               String(r.dest_address) === dest.address,
+        // The token and policy drives' budget; the 240 s default ended AT2 14 s before
+        // a round that finalized in 3.8 minutes on a hosted runner.
+        { timeoutMs: 30 * 60 * 1000 });
     return { burner, before, row };
 }
 

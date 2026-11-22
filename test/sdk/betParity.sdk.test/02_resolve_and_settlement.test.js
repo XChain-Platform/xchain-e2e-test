@@ -16,7 +16,7 @@ const { expect } = require('chai');
 const {
     dbQuery, waitFeedStatus, balanceOf, amtEq, actionIndexOf,
     resumeMiningAtFrozenClock, submitBet
-} = require('../betHelper');
+} = require('../helpers/betHelper');
 const {
     state, bQuery, tipOf, compareHashes, betClasses, waitNodeB, blockIndexOfAction
 } = require('./support/bet_parity_support');

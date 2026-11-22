@@ -36,7 +36,7 @@ const fs   = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const { expect } = require('chai');
-const { makeSdk, fundedGasAddress, uniqueTick } = require('./sdkHelper');
+const { makeSdk, fundedGasAddress, uniqueTick } = require('./helpers/sdkHelper');
 
 const COIN = (typeof global.COIN_CODE !== 'undefined' && global.COIN_CODE) || 'BTC';
 const MCP_COIN = 'R' + COIN;                       // regtest prefix, e.g. RBTC

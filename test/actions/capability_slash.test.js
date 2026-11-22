@@ -10,11 +10,11 @@
 
 const assert           = require('assert')
 const crypto           = require('crypto')
-const cryptoHelper     = require('../cryptoHelper')
+const cryptoHelper     = require('../helpers/core/cryptoHelper')
 const gasHelper        = require('../helpers/gasHelper')
 const stakeHelper      = require('../helpers/stakeHelper')
 const stakeTeardown    = require('../helpers/stakeTeardown')
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 const { waitForTxIndexed } = require('../helpers/indexerWait')
 // The same header module the indexer's SLASH verifier derives the EQUIV key from,
 // so the proof this test signs is byte-identical to what a real equivocating

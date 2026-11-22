@@ -1,0 +1,617 @@
+#!/usr/bin/env node
+/*********************************************************************
+ *
+ * Copyright © 2025–2026 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC – https://dankest.llc
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * This file is part of XChain Platform. Licensed under the GNU Affero
+ * General Public License v3.0 or later; see LICENSE.md. A commercial
+ * license (without AGPL source-disclosure terms) is available -
+ * contact legal@dankest.llc.
+ *
+ **********************************************************************
+ *
+ * Live integration tier runner.
+ *
+ * `test/integration/*.integration.test.js` ran in no CI lane at all, so
+ * xchain-indexer 521edf2 turned one of its suites red on 2026-07-16 and nobody
+ * heard about it for ten days. `npm run ci:live` runs this script, and
+ * bin/ci-full.sh (`npm run ci:full`, which `npm run ci` now aliases) calls it
+ * in its live-tier tier. Every venue gate run, every ci-all.sh sweep and every
+ * workflow that runs the repo's own gate exercises the tier.
+ *
+ * WHY A RUNNER RATHER THAN ONE MORE GLOB ON THE MOCHA LINE. The rot that
+ * started this item was not a red suite, it was a red suite NOBODY SAW, and a
+ * bare glob reproduces that failure one level up in two ways this script
+ * closes:
+ *
+ *   ROSTER DRIFT. A glob silently absorbs a new `*.integration.test.js`, so a
+ *   suite can join the tier without anyone deciding whether the lane can
+ *   actually run it - and a suite that cannot run here goes green by skipping.
+ *   Every live suite is declared in test/integration/live-tier.json with
+ *   `run: true|false` and, when false, a `why`. An undeclared file is a hard
+ *   failure, in this lane AND in the hermetic unit tier
+ *   (test/unit/scripts/liveTierRoster.test.js), so the drift is caught on a
+ *   laptop before it ever reaches a venue.
+ *
+ *   SILENT SKIP. Mocha's exit code cannot tell "10 passed" from "0 ran,
+ *   everything pending". These suites skip themselves on a missing service by
+ *   design (`Skipping MultiValidatorHub smoke (HUB_DB_USER/HUB_DB_PASS not
+ *   set)`, `Skipping hub-DB WS mirror: no env DB and Docker unavailable`),
+ *   which is right for a laptop and lethal for a gate: the lane reports green
+ *   having proved nothing. Measured on a bare three-repo checkout on 2026-08-09,
+ *   three of the declared suites skipped exactly that way.
+ *   So a `run: true` suite that contributes no passing test, or that leaves any
+ *   case pending, FAILS the lane and says which file and why.
+ *
+ * The same reasoning is why the excluded roster is printed on every run
+ * including a green one: an exclusion that stops being read is the rot coming
+ * back with a config file in front of it.
+ *
+ * COST, because it is the reason this was not wired years ago. Measured on
+ * 2026-08-09: the 20-suite roster is ~700s, and `npm run ci:full` end to end
+ * is ~12.5 min. That is longer than the ~10 min after which GitHub tends to drop
+ * an idle push connection, so a pre-push gate run can outlive the push it is
+ * gating. The consequence is one failed push, not a lost gate: ci-dispatch banks
+ * a green verdict per (repo, sha, command) for an hour, so the immediate retry
+ * skips the gate and goes straight through. Slow is survivable here; a tier in
+ * no lane at all was not.
+ *
+ * Usage:
+ *   node bin/run-live-tier.js            run the lane
+ *   node bin/run-live-tier.js --list     print the roster and exit
+ *   node bin/run-live-tier.js --force-docker
+ *       ignore HUB_DB_* and require the disposable Docker database path
+ *
+ * Exit: 0 green; 1 red (roster drift, a failing case, or a suite that ran
+ * nothing); 95 when the HOST cannot run the tier truthfully, which the shared
+ * gate reports as "not your commit" rather than as a red one. Those three are
+ * the attribution this lane exists to provide: a lane whose failures cannot be
+ * pinned on anything is worse than no lane at all.
+ *
+ ********************************************************************/
+
+'use strict'
+
+const fs    = require('fs')
+const path  = require('path')
+const os    = require('os')
+const { spawnSync } = require('child_process')
+
+const REPO_ROOT   = path.resolve(__dirname, '..')
+const LIVE_DIR    = path.join(REPO_ROOT, 'test', 'integration')
+const ROSTER_FILE = path.join(LIVE_DIR, 'live-tier.json')
+const SUITE_RE    = /\.integration\.test\.js$/
+
+// Files present on disk, sorted, relative to the repo root so they read the
+// same way in the roster, in the failure text and on a mocha command line.
+function discoverSuites(dir = LIVE_DIR) {
+    return fs.readdirSync(dir)
+        .filter(f => SUITE_RE.test(f))
+        .sort()
+        .map(f => path.posix.join('test', 'integration', f))
+}
+
+// A suite split by behavior keeps its cases in `<suite>.integration.test/NN_*.test.js`
+// and pulls them in with require(). Mocha reports each case against the child
+// file, so the roster only ever names the parent.
+const CHILD_RE = /^(.*\.integration\.test)\/[^/]+\.js$/
+const CHILD_FILE_RE = /^\d+_.*\.test\.js$/
+
+function parentOf(rel) {
+    const m = CHILD_RE.exec(rel)
+    return m ? m[1] + '.js' : rel
+}
+
+function childFiles(parent, repoRoot = REPO_ROOT) {
+    const dir = path.join(repoRoot, parent.replace(/\.js$/, ''))
+    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return []
+    return fs.readdirSync(dir).filter(f => CHILD_FILE_RE.test(f)).sort()
+}
+
+// Specifiers passed to a literal require() call in real code. Comments and the
+// contents of other string or template literals are skipped, so a child named
+// only in prose or data never counts as collected.
+function requiredSpecifiers(source) {
+    const found = []
+    let i = 0
+    const n = source.length
+    while (i < n) {
+        const c = source[i]
+        if (c === '/' && source[i + 1] === '/') {
+            while (i < n && source[i] !== '\n') i++
+        } else if (c === '/' && source[i + 1] === '*') {
+            const end = source.indexOf('*/', i + 2)
+            i = end === -1 ? n : end + 2
+        } else if (c === '"' || c === "'" || c === '`') {
+            let j = i + 1
+            while (j < n && source[j] !== c) j += source[j] === '\\' ? 2 : 1
+            i = j + 1
+        } else if (/[A-Za-z_$]/.test(c)) {
+            let j = i
+            while (j < n && /[\w$]/.test(source[j])) j++
+            const word = source.slice(i, j)
+            const prev = source[i - 1]
+            i = j
+            if (word !== 'require' || prev === '.') continue
+            const m = /^\s*\(\s*(["'`])([^"'`\n]*)\1\s*\)/.exec(source.slice(i, i + 400))
+            if (m) found.push(m[2])
+        } else {
+            i++
+        }
+    }
+    return found
+}
+
+function requiresChild(source, parent, kid) {
+    const dir = path.posix.dirname(parent)
+    const want = path.posix.join(parent.replace(/\.js$/, ''), kid.replace(/\.js$/, ''))
+    return requiredSpecifiers(source).some(spec =>
+        spec.startsWith('.') && path.posix.join(dir, spec).replace(/\.js$/, '') === want)
+}
+
+function readRoster(file = ROSTER_FILE) {
+    return JSON.parse(fs.readFileSync(file, 'utf8'))
+}
+
+// Compare the declared roster against the directory. Returns a list of English
+// problems; empty means the roster describes reality.
+//
+// Both directions matter and for different reasons: an UNDECLARED file is a
+// suite nobody decided about (the drift this lane exists to stop), and a
+// DECLARED-BUT-ABSENT file is a lane still claiming to cover something that was
+// renamed or deleted, which is the same lie in the other direction.
+function auditRoster(files, roster) {
+    const problems = []
+    const declared = new Map()
+
+    if (!roster || !Array.isArray(roster.suites))
+        return ['live-tier.json has no `suites` array']
+
+    for (const entry of roster.suites) {
+        if (!entry || typeof entry.file !== 'string' || entry.file === '') {
+            problems.push('a roster entry has no `file`')
+            continue
+        }
+        if (declared.has(entry.file)) {
+            problems.push(entry.file + ': listed twice in the roster')
+            continue
+        }
+        declared.set(entry.file, entry)
+        if (typeof entry.run !== 'boolean')
+            problems.push(entry.file + ': `run` must be true or false')
+        // An exclusion with no stated reason is how a lane quietly shrinks back
+        // to covering nothing, so the reason is structurally required rather
+        // than a documentation nicety.
+        if (entry.run === false && (typeof entry.why !== 'string' || entry.why.trim() === ''))
+            problems.push(entry.file + ': excluded from the lane with no `why`')
+    }
+
+    for (const file of files)
+        if (!declared.has(file))
+            problems.push(file + ': is a live suite but is NOT in test/integration/live-tier.json'
+                + ' - add it with run:true, or run:false plus a `why`')
+
+    for (const file of declared.keys())
+        if (!files.includes(file))
+            problems.push(file + ': is in the roster but no such file exists')
+
+    // A child the parent never requires is a case the lane reports green
+    // without ever collecting.
+    for (const [file, entry] of declared) {
+        if (entry.run !== true || !files.includes(file)) continue
+        const kids = childFiles(file)
+        if (!kids.length) continue
+        const source = fs.readFileSync(path.join(REPO_ROOT, file), 'utf8')
+        for (const kid of kids)
+            if (!requiresChild(source, file, kid))
+                problems.push(file.replace(/\.js$/, '') + '/' + kid
+                    + ': is a child case file the roster suite never requires, so the lane never collects it')
+    }
+
+    return problems
+}
+
+function suitesToRun(roster) {
+    return roster.suites.filter(s => s.run === true).map(s => s.file)
+}
+
+function suitesExcluded(roster) {
+    return roster.suites.filter(s => s.run !== true)
+}
+
+// Fold mocha's json report into per-file counts. Mocha reports a test's file as
+// an absolute path; key on the repo-relative path so it matches the roster.
+function tallyByFile(report, repoRoot = REPO_ROOT) {
+    const tally = new Map()
+    const bump = (file, field) => {
+        if (!file) return
+        const rel = parentOf(path.relative(repoRoot, file).split(path.sep).join('/'))
+        if (!tally.has(rel)) tally.set(rel, { passing: 0, failing: 0, pending: 0 })
+        tally.get(rel)[field]++
+    }
+    for (const t of report.passes  || []) bump(t.file, 'passing')
+    for (const t of report.failures || []) bump(t.file, 'failing')
+    for (const t of report.pending || []) bump(t.file, 'pending')
+    return tally
+}
+
+// Per-child counts under each parent suite, for the tally listing. Parents with
+// no child directory do not appear.
+function childTally(report, repoRoot = REPO_ROOT) {
+    const kids = new Map()
+    const bump = (file, field) => {
+        if (!file) return
+        const rel = path.relative(repoRoot, file).split(path.sep).join('/')
+        const parent = parentOf(rel)
+        if (parent === rel) return
+        if (!kids.has(parent)) kids.set(parent, new Map())
+        const byChild = kids.get(parent)
+        if (!byChild.has(rel)) byChild.set(rel, { passing: 0, failing: 0, pending: 0 })
+        byChild.get(rel)[field]++
+    }
+    for (const t of report.passes   || []) bump(t.file, 'passing')
+    for (const t of report.failures || []) bump(t.file, 'failing')
+    for (const t of report.pending  || []) bump(t.file, 'pending')
+    return kids
+}
+
+// The lane's verdict. `expected` is the list of files the roster said to run;
+// everything here is derived from what mocha actually reported about them.
+function classify(expected, tally) {
+    const problems = []
+    for (const file of expected) {
+        const t = tally.get(file) || { passing: 0, failing: 0, pending: 0 }
+        if (t.failing > 0) {
+            problems.push({ file, kind: 'failing', detail: t.failing + ' failing case(s)' })
+            continue
+        }
+        // A suite that skipped itself for want of a service reports 0 passing
+        // and (usually) 0 pending, because `this.skip()` in a root `before`
+        // aborts the suite rather than marking its cases. Both shapes are the
+        // same defect: the lane cannot vouch for this file.
+        if (t.passing === 0)
+            problems.push({ file, kind: 'ran-nothing',
+                detail: 'no case ran (the suite skipped itself, or died before its first test).'
+                    + ' A lane that reports green having run nothing is the defect this runner exists to stop' })
+        else if (t.pending > 0)
+            problems.push({ file, kind: 'pending',
+                detail: t.pending + ' case(s) skipped. Every case in a lane suite must run here,'
+                    + ' or the suite belongs in the roster as run:false with a reason' })
+    }
+    return problems
+}
+
+function formatTally(expected, tally, kids = new Map()) {
+    const lines = []
+    const row = (label, t) => label.padEnd(52)
+        + t.passing + ' pass  ' + t.failing + ' fail  ' + t.pending + ' pending'
+    for (const file of expected) {
+        const t = tally.get(file) || { passing: 0, failing: 0, pending: 0 }
+        lines.push('  ' + row(file.replace('test/integration/', ''), t))
+        for (const [child, ct] of kids.get(file) || [])
+            lines.push('    ' + row('- ' + path.posix.basename(child), ct))
+    }
+    return lines
+}
+
+function mochaSummary(report) {
+    const stats = report.stats || {}
+    const count = (field, entries) => Number.isFinite(stats[field])
+        ? stats[field]
+        : (report[entries] || []).length
+    const lines = ['  ' + count('passes', 'passes') + ' passing']
+    const pending = count('pending', 'pending')
+    if (pending) lines.push('  ' + pending + ' pending')
+    lines.push('  ' + count('failures', 'failures') + ' failing')
+    return lines
+}
+
+function reportFile(entry, repoRoot = REPO_ROOT) {
+    if (!entry || !entry.file) return null
+    return parentOf(path.relative(repoRoot, entry.file).split(path.sep).join('/'))
+}
+
+function replaceReportFiles(base, retry, files, repoRoot = REPO_ROOT) {
+    const replacing = new Set(files)
+    const merged = { ...base }
+    for (const field of ['passes', 'failures', 'pending']) {
+        const kept = (base[field] || []).filter(entry => !replacing.has(reportFile(entry, repoRoot)))
+        merged[field] = kept.concat(retry[field] || [])
+    }
+    merged.stats = {
+        ...(base.stats || {}),
+        passes: merged.passes.length,
+        failures: merged.failures.length,
+        pending: merged.pending.length,
+        tests: merged.passes.length + merged.failures.length + merged.pending.length
+    }
+    return merged
+}
+
+const DB_PRIVILEGE_CODES = new Set([
+    'ER_ACCESS_DENIED_ERROR',
+    'ER_DBACCESS_DENIED_ERROR',
+    'ER_TABLEACCESS_DENIED_ERROR',
+    'ER_COLUMNACCESS_DENIED_ERROR',
+    'ER_PROCACCESS_DENIED_ERROR',
+    'ER_SPECIFIC_ACCESS_DENIED_ERROR'
+])
+const DB_PRIVILEGE_ERRNOS = new Set([1044, 1045, 1142, 1143, 1227, 1370])
+
+function isDbPrivilegeError(err) {
+    if (!err) return false
+    let node = err
+    for (let depth = 0; node && depth < 5; depth++) {
+        if (DB_PRIVILEGE_CODES.has(node.code)) return true
+        if (node.errno !== undefined && DB_PRIVILEGE_ERRNOS.has(Number(node.errno))) return true
+        node = node.cause
+    }
+    const detail = [err.code, err.errno, err.sqlState, err.message, err.stack]
+        .filter(v => v !== undefined && v !== null).join('\n')
+    return /\bER_(?:ACCESS_DENIED|DBACCESS_DENIED|TABLEACCESS_DENIED|COLUMNACCESS_DENIED|PROCACCESS_DENIED|SPECIFIC_ACCESS_DENIED)_ERROR\b/i.test(detail)
+        || /\baccess denied for user\b/i.test(detail)
+        || /\b(?:create|drop|alter|select|insert|update|delete|execute) command denied to user\b/i.test(detail)
+}
+
+function isBeforeAllHookFailure(failure) {
+    const hook = [failure && failure.title, failure && failure.fullTitle]
+        .filter(Boolean).join(' ')
+    return /\bbefore(?:[ -])?all\b.*\bhook\b|\bhook\b.*\bbefore(?:[ -])?all\b/i.test(hook)
+}
+
+function isDbPrivilegeBeforeAllFailure(failure) {
+    return isBeforeAllHookFailure(failure) && isDbPrivilegeError(failure.err)
+}
+
+// ---- the lane ------------------------------------------------------------
+
+// Can this host run the tier at all? The suites obtain a database one of two
+// ways (test/helpers/disposableHubDb.js): a pre-provisioned HUB_DB_*, or a
+// throwaway MariaDB container. With neither, every one of them calls this.skip()
+// and the lane would report a tally of zeroes.
+//
+// That case exits 95, the shared gate's VENUE code, rather than 1. The
+// dispatcher's 95 arm tells the pusher in terms that the commit was never
+// evaluated and refuses to offer the bypass, which is the truth here: a venue
+// with no container runtime says nothing about the code. Reporting it as a red
+// commit is the misattribution the exit contract exists to prevent.
+const VENUE_EXIT = 95
+const HUB_DB_KEYS = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS']
+
+function classifyReport(report, problems) {
+    const failures = report.failures || []
+    const venueFailures = failures.filter(isDbPrivilegeBeforeAllFailure)
+    const hasCommitFailure = failures.some(f => !isDbPrivilegeBeforeAllFailure(f))
+    return {
+        venueFailures,
+        exitCode: hasCommitFailure
+            ? 1
+            : (venueFailures.length ? VENUE_EXIT : (problems.length ? 1 : 0))
+    }
+}
+
+function optionForcesDocker(options) {
+    return options === true || !!(options && options.forceDocker)
+}
+
+function liveTierBlocker(env = process.env, options = {}) {
+    const forceDocker = optionForcesDocker(options)
+    if (!forceDocker && env.HUB_DB_USER && env.HUB_DB_PASS) return null
+    const probe = spawnSync('docker', ['version', '--format', '{{.Server.Version}}'], { stdio: 'ignore' })
+    if (probe.error || probe.status !== 0)
+        return forceDocker
+            ? 'Docker was required but no container runtime is available'
+            : 'no container runtime and no HUB_DB_USER/HUB_DB_PASS, so every live suite would skip itself'
+    return null
+}
+
+function mochaEnvironment(env = process.env, options = {}) {
+    const childEnv = { ...env }
+    if (optionForcesDocker(options))
+        for (const key of HUB_DB_KEYS) delete childEnv[key]
+    return childEnv
+}
+
+// Remove disposable-MariaDB containers a previous run left behind.
+//
+// test/helpers/disposableHubDb.js binds a FIXED host port (13307) and names the
+// container after the mocha pid, so a run that was killed (a cancelled push, a
+// venue reboot, an operator ^C) leaves a container holding the port under a name
+// the next run will never reuse. The next run then dies in a before-all hook
+// with `Command failed: docker run -d --name xchain-mvh-testdb-<pid> ...` and
+// nothing in that message says the cause is a corpse from yesterday - the gate
+// reports it against the commit being pushed. Observed on a venue on 2026-08-09.
+//
+// Scoped twice, because the venues are shared and somebody else's hand-run suite
+// must survive this: only containers with this fixture's own name prefix, and of
+// those only the ones that are stopped or older than STALE_MS. A healthy
+// container belongs to ONE suite and lives under a minute, so nothing in a live
+// run is ever old enough to be reaped by a parallel one.
+const STALE_MS = 10 * 60 * 1000
+
+function reapStaleFixtureContainers(now = Date.now()) {
+    const ps = spawnSync('docker', ['ps', '-aq', '--filter', 'name=xchain-mvh-testdb-'], { encoding: 'utf8' })
+    if (ps.error || ps.status !== 0) return 0            // no docker here: the suites skip on their own
+    const ids = String(ps.stdout || '').split('\n').map(s => s.trim()).filter(Boolean)
+    const stale = ids.filter(id => {
+        const info = spawnSync('docker', ['inspect', '-f', '{{.State.Running}} {{.Created}}', id], { encoding: 'utf8' })
+        if (info.error || info.status !== 0) return false
+        const [running, created] = String(info.stdout || '').trim().split(/\s+/)
+        if (running !== 'true') return true
+        const age = now - Date.parse(created)
+        return Number.isFinite(age) && age > STALE_MS
+    })
+    if (!stale.length) return 0
+    spawnSync('docker', ['rm', '-f', ...stale], { stdio: 'ignore' })
+    return stale.length
+}
+
+function evaluate(report, expected) {
+    const tally    = tallyByFile(report)
+    const problems = classify(expected, tally)
+    return { report, tally, problems, outcome: classifyReport(report, problems) }
+}
+
+function runRetry(retryFiles, roster, forceDocker) {
+    reapStaleFixtureContainers()
+    const retried = runMocha(retryFiles, roster, { forceDocker })
+    if (retried.error) {
+        console.error('live tier: could not start retry: ' + retried.error.message)
+        return null
+    }
+    try {
+        return JSON.parse(fs.readFileSync(retried.out, 'utf8'))
+    } catch (e) {
+        console.error('live tier: retry wrote no readable report (' + e.message + ')')
+        return null
+    }
+}
+
+function retryRedSuites(report, expected, roster, rerun) {
+    let state = evaluate(report, expected)
+    const retryCount = Number.isInteger(roster.retryCount) ? roster.retryCount : 0
+    for (let attempt = 1; state.outcome.exitCode === 1 && attempt <= retryCount; attempt++) {
+        const retryFiles = Array.from(new Set(state.problems.map(problem => problem.file)))
+        if (!retryFiles.length) break
+        console.log('\nlive tier: retry ' + attempt + '/' + retryCount + ' in a fresh process for:')
+        for (const file of retryFiles) console.log('  ' + file)
+        const retryReport = rerun(retryFiles)
+        if (!retryReport) break
+        state = evaluate(replaceReportFiles(state.report, retryReport, retryFiles), expected)
+    }
+    return state
+}
+
+function runMocha(files, roster, options = {}) {
+    const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'xc714-live-')), 'report.json')
+    const bin = path.join(REPO_ROOT, 'node_modules', '.bin', 'mocha')
+    const args = [
+        '--no-config',
+        '--timeout', String(roster.timeoutMs || 300000),
+        '--exit',
+        '--reporter', 'json',
+        // Send the report to a FILE, never to stdout: these suites log heavily
+        // (hub bring-up, WS reconnects), and a json reporter sharing stdout with
+        // console.log emits a document nothing can parse.
+        '--reporter-option', 'output=' + out,
+        ...files
+    ]
+    const res = spawnSync(bin, args, {
+        cwd: REPO_ROOT,
+        stdio: 'inherit',
+        env: mochaEnvironment(process.env, options)
+    })
+    return { out, status: res.status, error: res.error }
+}
+
+function main(argv) {
+    const roster = readRoster()
+    const files  = discoverSuites()
+
+    const drift = auditRoster(files, roster)
+    if (drift.length) {
+        console.error('\nlive tier: the roster does not match test/integration/:')
+        for (const d of drift) console.error('  - ' + d)
+        console.error('\nlive tier: refusing to run. A lane whose roster has drifted cannot say')
+        console.error('           what it covers, which is exactly how this tier rotted.\n')
+        return 1
+    }
+
+    const expected = suitesToRun(roster)
+    const excluded = suitesExcluded(roster)
+
+    if (argv.includes('--list')) {
+        console.log('live tier roster (' + expected.length + ' run, ' + excluded.length + ' excluded)')
+        for (const f of expected) console.log('  run      ' + f)
+        for (const e of excluded) console.log('  excluded ' + e.file + '  -- ' + e.why)
+        return 0
+    }
+
+    if (!expected.length) {
+        console.error('live tier: every suite is excluded, so this lane proves nothing. Refusing.')
+        return 1
+    }
+
+    const forceDocker = argv.includes('--force-docker') || argv.includes('--forceDocker')
+    const blocker = liveTierBlocker(process.env, { forceDocker })
+    if (blocker) {
+        console.error('live tier: this host cannot run the tier truthfully: ' + blocker + '.')
+        console.error('live tier: the commit was NOT evaluated. Run the lane on a venue with Docker'
+            + (forceDocker ? '.' : ','))
+        if (!forceDocker)
+            console.error('           or export HUB_DB_HOST/PORT/USER/PASS for a database it may create schemas in.')
+        return VENUE_EXIT
+    }
+
+    const reaped = reapStaleFixtureContainers()
+    if (reaped) console.log('live tier: removed ' + reaped + ' stale disposable-MariaDB container(s) from an earlier run')
+
+    console.log('live tier: running ' + expected.length + ' suite(s) on ' + os.hostname()
+        + (forceDocker ? ' (--force-docker)' : ''))
+    const { out, status, error } = runMocha(expected, roster, { forceDocker })
+    if (error) {
+        console.error('live tier: could not start mocha: ' + error.message)
+        return 1
+    }
+
+    let report
+    try {
+        report = JSON.parse(fs.readFileSync(out, 'utf8'))
+    } catch (e) {
+        // No parseable report means the run died before the reporter wrote one.
+        // Say that, rather than inferring a verdict from the exit code alone.
+        console.error('live tier: mocha exited ' + status + ' and wrote no readable report ('
+            + e.message + ').')
+        console.error('live tier: the tier was NOT evaluated; read the output above for the cause.')
+        return 1
+    }
+
+    const settled = retryRedSuites(report, expected, roster, file => runRetry(file, roster, forceDocker))
+    report = settled.report
+    const { tally, problems, outcome } = settled
+
+    console.log('')
+    for (const line of mochaSummary(report)) console.log(line)
+
+    console.log('\nlive tier: per-suite tally')
+    for (const line of formatTally(expected, tally, childTally(report))) console.log(line)
+    if (excluded.length) {
+        // Printed on green runs too, deliberately: this is the list of things
+        // the lane does NOT cover, and it is only honest while it is read.
+        console.log('\nlive tier: NOT covered by this lane (' + excluded.length + '):')
+        for (const e of excluded) console.log('  ' + e.file.replace('test/integration/', '') + ': ' + e.why)
+    }
+
+    if (outcome.exitCode === VENUE_EXIT) {
+        console.error('\nlive tier: VENUE FAILURE')
+        for (const f of outcome.venueFailures)
+            console.error('  ' + (f.file ? path.relative(REPO_ROOT, f.file) : '<unknown file>')
+                + ' :: ' + f.fullTitle + '\n      '
+                + String((f.err && f.err.message) || '').split('\n')[0])
+        console.error('live tier: the commit was NOT evaluated because every failure was a before-all')
+        console.error('           database privilege failure.\n')
+        return VENUE_EXIT
+    }
+
+    if (outcome.exitCode !== 0) {
+        console.error('\nlive tier: FAILED')
+        for (const p of problems) console.error('  ' + p.file + ': ' + p.detail)
+        for (const f of report.failures || [])
+            console.error('  ' + (f.file ? path.relative(REPO_ROOT, f.file) : '<unknown file>') + ' :: ' + f.fullTitle
+                + '\n      ' + String((f.err && f.err.message) || '').split('\n')[0])
+        console.error('')
+        return 1
+    }
+
+    console.log('\nlive tier: GREEN (' + expected.length + ' suite(s))\n')
+    return 0
+}
+
+module.exports = { requiredSpecifiers, requiresChild, formatTally, childTally, childFiles, parentOf, discoverSuites, readRoster, auditRoster, suitesToRun, suitesExcluded, tallyByFile, classify,
+    mochaSummary, reportFile, replaceReportFiles, retryRedSuites, isDbPrivilegeError, isBeforeAllHookFailure, isDbPrivilegeBeforeAllFailure, classifyReport,
+    liveTierBlocker, mochaEnvironment, VENUE_EXIT, ROSTER_FILE, LIVE_DIR }
+
+if (require.main === module) process.exit(main(process.argv.slice(2)))

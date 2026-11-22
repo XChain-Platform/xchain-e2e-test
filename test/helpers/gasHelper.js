@@ -13,8 +13,10 @@ const issueHelper       = require('./issueHelper')
 const sendHelper        = require('./sendHelper')
 const chainRail         = require('./chainRail')
 const requireRow        = require('./requireRow')
-const transactionHelper = require('../transactionHelper')
-const cryptoHelper      = require('../cryptoHelper')
+const transactionHelper = require('./core/transactionHelper')
+const cryptoHelper      = require('./core/cryptoHelper')
+const createHeartbeatController = require('./core/heartbeatHelper')
+const gasFaucet         = require('./rail/gas_faucet')
 const path              = require('path')
 
 // The hub's own relay-margin table, so the wait below tracks the margin the hub
@@ -54,7 +56,7 @@ const GAS_UNIT_SCALE = 10n ** 8n
 // (LTC 600 s, DOGE 240 s, plus the BTC MINT and lock), and nearly every funded
 // address takes gas: on a representative nightly run the lock-to-credit
 // leg alone averaged 518 s on litecoin and 404 s on dogecoin, per address, where
-// bitcoin's faucet is a one-block local MINT. A SEND from the reservoir is one block.
+// bitcoin's grant is one local block (fundGas). A SEND from the reservoir is one block.
 // Sized to cover a full action suite in one bridge: the 111 literal call sites ask
 // for about 364 000 XCHAIN, plus 100 per funded address (261 on the bitcoin leg of
 // that run). A shortfall refills rather than fails.
@@ -111,52 +113,56 @@ function reservoirKey(){
 // mainnet, five to six blocks behind the wall clock at the idle cadence below).
 const BRIDGE_CREDIT_SLACK_MS = 180000
 
-// Empty-block heartbeat driven on BOTH chains while the credit is awaited. Neither
-// regtest miner mines without a transaction in its mempool, so with nothing in
-// flight BTC never buries the lock to the hub's depth and the destination's
-// protocol time never reaches the row's effective_time (run 35124072478 sat on
-// "not proposing BTC:3 (below depth 6)" until the credit wait gave up).
+// Empty-block heartbeat driven on BOTH chains while the credit is awaited. The
+// miners boot with a slow empty-block heartbeat, but the run pins it off for
+// deterministic block counts. Enabling it here lets BTC bury the lock and lets
+// destination protocol time reach the row's effective_time.
 const IDLE_MINE_INTERVAL_MS = 10000
+const {
+    noteHeartbeatBaseline,
+    pinHeartbeatOff,
+    restoreHeartbeatBaselines,
+    withIdleMining,
+    resetHeartbeatBaselines,
+} = createHeartbeatController(IDLE_MINE_INTERVAL_MS)
+
+// How long the hub may hold the lock before it proposes the transfer at all. A BTC leg
+// past BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION (regtest 0) is stamped with the first
+// finalized BTC checkpoint at or above its block, and the hub checkpoints the tip less
+// CHECKPOINT_CONFIRMATIONS (6) once per CHECKPOINT_INTERVAL_BLOCKS (6), judged on a
+// CHECKPOINT_POLL_MS (60 s) tick. That is 12 idle blocks of chain, plus one tick of
+// phase, plus one tick the interval latch drops when the 10 s miner lands its sixth
+// block just after the tick. Release matrix run 41267102555 held four shards 180 s
+// here and none of it was in the slack, so every credit wait gave up seconds short.
+const CHECKPOINT_COVERAGE_MS = (6 + 6) * IDLE_MINE_INTERVAL_MS + 2 * 60000
 
 // Wall-clock budget for the bridged credit on `destCoin`: the hub stamps the
 // finalized transfer with effective_time = now + relayMarginFloorS(dest)
 // (transfer_poll.js), and the destination indexer settles it at the first block
 // whose protocol time reaches that instant, so no wait shorter than the margin
-// itself can ever see the credit (LTC 600 s, DOGE 240 s).
+// itself can ever see the credit (LTC 600 s, DOGE 240 s). The margin clock starts
+// only once a checkpoint covers the lock, so the coverage wait comes first.
 function bridgeCreditWaitMs(destCoin){
-    return relayMarginFloorS(destCoin) * 1000 + BRIDGE_CREDIT_SLACK_MS
+    return relayMarginFloorS(destCoin) * 1000 + CHECKPOINT_COVERAGE_MS + BRIDGE_CREDIT_SLACK_MS
 }
 
-// Run `fn` with the idle heartbeat on every miner in `miners`, and switch it back
-// off on each of them afterwards whether `fn` resolved or threw. The rest of the
-// suite assumes a block lands only on its own transaction (depth and reorg
-// assertions count blocks), so a heartbeat left running would perturb every case
-// after this one. Every miner is restored even when an earlier restore fails;
-// the first restore error surfaces only when `fn` itself succeeded, so the
-// caller's own failure is never masked by a miner that would not answer.
-async function withIdleMining(miners, fn, intervalMs = IDLE_MINE_INTERVAL_MS){
-    for (const miner of miners) await miner.setIdleMineInterval(intervalMs)
-    let fnFailed = false
-    try {
-        return await fn()
-    } catch (err) {
-        fnFailed = true
-        throw err
-    } finally {
-        let restoreError = null
-        for (const miner of miners) {
-            try { await miner.setIdleMineInterval(0) }
-            catch (err) { if (!restoreError) restoreError = err }
-        }
-        // Deliberate: a heartbeat left running is a real failure of this helper's
-        // contract, so it replaces a successful return; it never replaces `fn`'s
-        // own error.
-        if (restoreError && !fnFailed) throw restoreError
-    }
+// Caches derived faucet holders by address, and when each last paid a grant.
+const faucetHolders  = new Map()
+const faucetLastUsed = new Map()
+
+async function faucetHolder(record){
+    if (faucetHolders.has(record.address)) return faucetHolders.get(record.address)
+    const info = await cryptoHelper.getNewAddress('GAS.FAUCET.' + record.address, 'bitcoin', global.NETWORK,
+                                                  record.mnemonic, 'legacy', 0)
+    // Skips a record whose key does not derive its address; it cannot sign for it.
+    const holder = info && info.address === record.address ? info : null
+    faucetHolders.set(record.address, holder)
+    return holder
 }
 
 module.exports = {
     BRIDGE_CREDIT_SLACK_MS,
+    CHECKPOINT_COVERAGE_MS,
     IDLE_MINE_INTERVAL_MS,
     GAS_MAX_MINT,
     RESERVOIR_BRIDGE_AMOUNT,
@@ -164,6 +170,37 @@ module.exports = {
     bridgeCreditAttribution: requireRow.bridgeCreditAttribution,
     bridgeCreditEvidence: requireRow.bridgeCreditEvidence,
     withIdleMining,
+    noteHeartbeatBaseline,
+    pinHeartbeatOff,
+    restoreHeartbeatBaselines,
+
+    // Grants XCHAIN on BTC, the only chain with a local supply: a faucet SEND, else a
+    // MINT chunked to MAX_MINT while supply allows, else a named refusal (rail/gas_faucet.js).
+    async fundGas(addressInfo, amount){
+        if (global.COIN_CODE !== 'BTC')
+            throw new Error('gasHelper.fundGas: XCHAIN is funded on BTC only, not ' + global.COIN_CODE)
+        const db = global.indexerDatabase
+        const records = gasFaucet.readFaucetRecords(gasFaucet.faucetFile())
+        const usable = []
+        for (const r of records) if (await faucetHolder(r)) usable.push(r)
+        const holders = usable.length ? await gasFaucet.readHolderBalances(db, usable, GAS_TICK) : []
+        const plan = gasFaucet.planGasFunding({
+            amount, holders, lastUsed: faucetLastUsed,
+            supply: await gasFaucet.readGasSupply(db, GAS_TICK)
+        })
+        if (plan.kind === 'send') {
+            faucetLastUsed.set(plan.address, Date.now())
+            console.log('Funding ' + amount + ' ' + GAS_TICK + ' to ' + addressInfo['address'] +
+                        ' by SEND from faucet holder ' + plan.address)
+            return await sendHelper.sendSendV0(faucetHolders.get(plan.address), GAS_TICK, amount, addressInfo['address'], '')
+        }
+        if (plan.kind === 'refuse')
+            throw new Error('gasHelper.fundGas: ' + plan.reason + '; faucet file ' + gasFaucet.faucetFile())
+        let result = null
+        for (const chunk of mintChunks(amount))
+            result = await this.mintGas(addressInfo, chunk)
+        return result
+    },
 
     async mintGas(addressInfo, amount){
         return await mintHelper.sendMintV0(
@@ -218,10 +255,10 @@ module.exports = {
                     )
                 }
 
-                for (const chunk of mintChunks(amount))
-                    await mintHelper.sendMintV0(issuerInfo, GAS_TICK, chunk, issuerAddress, "")
+                // SEND from a faucet holder on a rail whose supply is spent, MINT otherwise.
+                await this.fundGas(issuerInfo, amount)
 
-                let lockMessage = "XBRIDGE|0|" + destCoin + "|" + destAddress + "|" + amount + "|"
+                const lockMessage = "XBRIDGE|0|" + destCoin + "|" + destAddress + "|" + amount + "|"
 
                 console.log("Creating and sending XBRIDGE V0 (lock) tx...")
                 lockTxHash = await transactionHelper.createAndSendTransaction(issuerInfo, lockMessage)
@@ -243,7 +280,8 @@ module.exports = {
             // slack (bridgeCreditWaitMs): the credit cannot settle before the
             // destination's protocol clock passes effective_time, which the hub
             // stamps a full margin ahead, and the idle heartbeat above is what moves
-            // that clock while nothing else is being mined.
+            // that clock while nothing else is being mined. The budget also covers
+            // the hub holding the lock until a BTC checkpoint covers it.
             const waitMs = bridgeCreditWaitMs(destCoin)
             console.log("Waiting for the bridged " + GAS_TICK + " credit on " + destCoin
                 + " (up to " + Math.round(waitMs / 1000) + " s: relay margin "
@@ -269,14 +307,14 @@ module.exports = {
     },
 
     // Fresh mnemonics per run mean addresses start at zero balance, so no need to
-    // diff against current balance for idempotency in the e2e context. BTC keeps
-    // the local open-mint faucet; every other chain is paid from the bridged
+    // diff against current balance for idempotency in the e2e context. BTC is paid
+    // by fundGas; every other chain is paid from the bridged
     // reservoir (sendFromGasReservoir below), because xchain-bridge.md's
     // supply-path closure (D62) closes the local ISSUE/open-MINT path everywhere
     // else. A suite that must prove the bridge itself calls bridgeGasIn directly.
     async ensureGasBalance(addressInfo, amount){
         if (global.COIN_CODE === 'BTC')
-            return await this.mintGas(addressInfo, amount)
+            return await this.fundGas(addressInfo, amount)
         return await this.sendFromGasReservoir(addressInfo, amount)
     },
 
@@ -329,7 +367,18 @@ module.exports = {
     },
 
     // Unit tests only: forget every reservoir so each case starts from none.
-    _resetGasReservoirs(){
+    ['_resetGasReservoirs'](){
         reservoirs.clear()
+    },
+
+    // Unit tests only: forget every derived faucet holder and its last-use time.
+    ['_resetGasFaucet'](){
+        faucetHolders.clear()
+        faucetLastUsed.clear()
+    },
+
+    // Unit tests only: forget every recorded heartbeat baseline.
+    ['_resetHeartbeatBaselines'](){
+        resetHeartbeatBaselines()
     }
 }

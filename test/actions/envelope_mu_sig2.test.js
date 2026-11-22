@@ -58,10 +58,9 @@ const ecc = require('tiny-secp256k1')
 bitcoin.initEccLib(ecc)
 
 const envelopeHelper = require('../helpers/envelopeHelper')
-const nativeFeeHelper = require('../helpers/nativeFeeHelper')
 const addressHelper = require('../helpers/addressHelper')
 
-// The SDK is a sibling checkout, resolved the way test/sdk/sdkHelper.js resolves
+// The SDK is a sibling checkout, resolved the way test/sdk/helpers/sdkHelper.js resolves
 // it. These are internal modules rather than package entry points, so they are
 // reached through the package root instead of by deep-requiring a bare specifier.
 function sdkModule(relative){
@@ -88,7 +87,7 @@ async function fundAggregate(address, amount){
     assert(await nodeConnector.waitForTx(txid, 60000), 'the funding tx should reach the chain')
     try { await regtestMinerConnector.generateBlocks(1) } catch (e) { /* the miner auto-mines anyway */ }
 
-    const raw = await nodeConnector._rpc('getrawtransaction', [txid, true])
+    const raw = await nodeConnector['_rpc']('getrawtransaction', [txid, true])
     // Both vout shapes, because litecoind still reports the pre-Core-22
     // `addresses` array; matching only `address` made this test structurally
     // unable to pass on LTC (see addressHelper.findVoutPayingAddress).
@@ -115,6 +114,7 @@ function loadMuSig2Modules(){
 }
 
 async function buildMuSig2Pair(modules){
+    const nativeFeeHelper = require('../helpers/nativeFeeHelper')
     // Fresh keys per run: a fixed pair would reuse one account across runs and
     // leave earlier UTXOs lying in it, which turns a funding mistake into a test
     // that passes on the wrong coin.
@@ -146,6 +146,7 @@ async function buildMuSig2Pair(modules){
 function deriveMuSig2Envelope(modules, account, built){
     const commitPsbt = bitcoin.Psbt.fromHex(built['psbt'], { network: NETWORK_OBJECT })
     const revealPsbt = bitcoin.Psbt.fromHex(built['revealPsbt'], { network: NETWORK_OBJECT })
+    // bitcoinjs-lib 7 returns a Uint8Array, whose toString ignores 'hex'; every caller hex-encodes it.
     const envelopeScript = revealPsbt.data.inputs[0].tapLeafScript[0].script
 
     // The co-signer derives the commit from the envelope script alone. If this
@@ -204,7 +205,7 @@ async function attemptStrictPolicy(modules, signer, daemonSk, publicKeys, built,
         try {
             await strictClient.signAll({
                 psbt: built['psbt'], secretKey: agentSk, inputIndexes: [0],
-                envelopeScript: envelopeScript.toString('hex'), network: NETWORK_OBJECT
+                envelopeScript: Buffer.from(envelopeScript).toString('hex'), network: NETWORK_OBJECT
             })
             return null
         } catch (err){ return err }
@@ -218,8 +219,8 @@ async function signMuSig2Commit(client, built, agentSk, commitPsbt, envelopeScri
     // Commit: key-path spend of the account, authorized off the leaf.
     return await client.signAll({
         psbt: built['psbt'], secretKey: agentSk,
-        inputIndexes: commitPsbt.data.inputs.map((_, i) => i),
-        envelopeScript: envelopeScript.toString('hex'), network: NETWORK_OBJECT
+        inputIndexes: commitPsbt.data.inputs.map((internal, i) => i),
+        envelopeScript: Buffer.from(envelopeScript).toString('hex'), network: NETWORK_OBJECT
     })
 }
 
@@ -236,7 +237,7 @@ async function signMuSig2Reveal(client, built, agentSk, envelopeScript){
     // Reveal: script-path spend of the envelope leaf.
     return await client.sign({
         psbt: built['revealPsbt'], secretKey: agentSk, inputIndex: 0,
-        envelopeScript: envelopeScript.toString('hex'), network: NETWORK_OBJECT
+        envelopeScript: Buffer.from(envelopeScript).toString('hex'), network: NETWORK_OBJECT
     })
 }
 
@@ -276,7 +277,7 @@ describe('Taproot Envelope under MuSig2 co-signing (§3.9)', function () {
         const { agentSk, daemonSk, publicKeys, account, fileName, feeOutput, built } = await buildMuSig2Pair(modules)
         assert.strictEqual(built['encoding'], 'TAPROOT', 'the encoder should have built an envelope')
         const { commitPsbt, revealPsbt, envelopeScript, derived } = deriveMuSig2Envelope(modules, account, built)
-        assert(commitPsbt.txOutputs.some(o => o.script.equals(derived.output)),
+        assert(commitPsbt.txOutputs.some(o => Buffer.from(o.script).equals(Buffer.from(derived.output))),
             'the encoder-built commit output must be the one the co-signer derives independently')
         const signer = createMuSig2Signer(modules, daemonSk, publicKeys, feeOutput)
         const { windowPath, store, client } = signer

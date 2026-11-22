@@ -1,9 +1,11 @@
 # Pin Node 22 (bookworm, not alpine) by digest: the platform requires Node 22
 # exactly, and this digest's V8/ICU build matches xchain-vm's consensus runtime
 # pin, which a floating tag can drift past and fail. node:latest resolves to
-# Node 24+, which can't build isolated-vm, and alpine's musl breaks native
-# addon builds. Matches xchain-indexer's base image.
-FROM node:22.23.2-bookworm@sha256:dd5847a04b0deee391fa145f1f4c6d214196668b6bcc7988ebed67249f226844
+# Node 24+, whose ABI fails checkConsensusRuntime() even though isolated-vm
+# installs there from a prebuilt binding. Not alpine: consensus parity is
+# confirmed only on glibc, and the runtime check does not detect libc.
+# Matches xchain-indexer's base image.
+FROM node:22.23.4-bookworm@sha256:2bd396628eceb5c999a6e43731fab69d5fb98b94ba9d9d90b5f64575c5178765
 
 RUN mkdir /XChainE2ETest/
 # xchain-hub is staged into the build context by xchain-node's install
@@ -75,10 +77,10 @@ RUN ln -s /XChainE2ETest/node_modules /xchain-indexer/node_modules
 # green while never once running.
 COPY ./xchain-sync /xchain-sync
 
-# Same node_modules resolution problem as the bundled indexer: /xchain-sync/src/db.js
-# requires mariadb, which npm ci installed under /XChainE2ETest. Sync files needing
-# deps absent here (express, ws, helmet) still fail if loaded; none are on the
-# drift-lock path.
+# Same node_modules resolution problem as the bundled indexer:
+# /xchain-sync/src/db/index.js requires mariadb, which npm ci installed under
+# /XChainE2ETest. Sync files needing deps absent here (express, ws, helmet) still
+# fail if loaded; none are on the drift-lock path.
 RUN ln -s /XChainE2ETest/node_modules /xchain-sync/node_modules
 
 # xchain-hub already lives in the image at /XChainE2ETest/xchain-hub (the file:

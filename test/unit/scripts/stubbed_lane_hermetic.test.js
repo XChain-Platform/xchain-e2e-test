@@ -23,11 +23,13 @@ const assert = require('assert')
 const fs     = require('fs')
 const path   = require('path')
 const { pathToFileURL } = require('url')
-const collectFiles = require('mocha/lib/cli/collect-files')
+const collectFiles = require('mocha/lib/cli/collect-files.cjs')
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..')
 const INTEGRATION_DIR = path.join(REPO_ROOT, 'test', 'integration')
 const LIVE_MARKERS = /require\([^)]*\b(disposableHubDb|multiValidatorHubHelper)\b/
+const HERMETIC_DIRS = ['database', 'errors', 'helpers', 'parity', 'pipeline', 'setup', 'state']
+const HERMETIC_SPECS = HERMETIC_DIRS.map(dir => `test/integration/${dir}/**/*.test.js`)
 
 // Resolve a mocha spec/ignore selection to sorted repo-relative paths.
 function resolveSelection(spec, ignore) {
@@ -37,11 +39,16 @@ function resolveSelection(spec, ignore) {
 }
 
 // Read the spec and --ignore globs out of the npm stubbed script.
-function stubbedScriptSelection() {
+function stubbedScriptConfig() {
     const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'))
     const script = pkg.scripts['test:integration:stubbed']
     const ignore = [...script.matchAll(/--ignore\s+'([^']+)'/g)].map(m => m[1])
     const spec = [...script.matchAll(/'([^']+)'/g)].map(m => m[1]).filter(g => !ignore.includes(g))
+    return { spec, ignore }
+}
+
+function stubbedScriptSelection() {
+    const { spec, ignore } = stubbedScriptConfig()
     return resolveSelection(spec, ignore)
 }
 
@@ -68,6 +75,12 @@ function reachableFrom(entry) {
 
 describe('stubbed integration lane stays hermetic', () => {
 
+    it('names only the pinned hermetic integration directories', () => {
+        const { spec, ignore } = stubbedScriptConfig()
+        assert.deepStrictEqual(spec, HERMETIC_SPECS)
+        assert.deepStrictEqual(ignore, [])
+    })
+
     it('selects no split-part directory and no file that requires a live helper', () => {
         const files = stubbedScriptSelection()
         assert.ok(files.length > 0, 'the stubbed lane resolved to no files, so it proves nothing')
@@ -80,11 +93,18 @@ describe('stubbed integration lane stays hermetic', () => {
     })
 
     it('phase-2 mutation spec resolves to the same integration files as the npm script', async () => {
-        const config = (await import(pathToFileURL(path.join(REPO_ROOT, 'stryker.phase2.config.mjs')).href)).default
+        const config = (await import(pathToFileURL(path.join(REPO_ROOT, 'test', 'mutation', 'stryker.phase2.config.mjs')).href)).default
         const { spec, ignore = [] } = config.mochaOptions
         const integration = resolveSelection(spec, ignore).filter(f => f.startsWith('test/integration/'))
         assert.deepStrictEqual(integration, stubbedScriptSelection(),
-            'stryker.phase2.config.mjs and package.json test:integration:stubbed select different integration files')
+            'test/mutation/stryker.phase2.config.mjs and package.json test:integration:stubbed select different integration files')
+    })
+
+    it('phase-2 mutation spec pins the hermetic directories with no glob or ignore', async () => {
+        const config = (await import(pathToFileURL(path.join(REPO_ROOT, 'test', 'mutation', 'stryker.phase2.config.mjs')).href)).default
+        const { spec, ignore = [] } = config.mochaOptions
+        assert.deepStrictEqual(spec.filter(g => g.startsWith('test/integration/')), HERMETIC_SPECS)
+        assert.deepStrictEqual(ignore, [])
     })
 
     it('every split part of a live root is reached from that root', () => {

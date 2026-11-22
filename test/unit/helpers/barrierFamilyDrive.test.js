@@ -350,7 +350,7 @@ describe('barrierFamilyDrive: the AT4 corpus coordinates and the VM link a copie
 
     it('reads the corpus coordinates off the venue with the password named, never carried', function () {
         const venue = {
-            coin: 'bitcoin', network: 'regtest', _live: { decoder: { name: 'XChain_BTC_Regtest_Decoder', host: '127.0.0.1', port: 57400, pass: 'secret' } },
+            coin: 'bitcoin', network: 'regtest', ['_live']: { decoder: { name: 'XChain_BTC_Regtest_Decoder', host: '127.0.0.1', port: 57400, pass: 'secret' } },
             hubDb: { host: '127.0.0.1', port: '57400', user: 'root', pass: 'secret', disposable: false },
             indexers: [{ index: 0, mirrorDbName: 'XChain_AM_MVH_at4corpus_Mirror0' }],
         }
@@ -377,5 +377,50 @@ describe('barrierFamilyDrive: the AT4 corpus coordinates and the VM link a copie
         assert.deepStrictEqual(seen.map((q) => q.db), ['M0', 'M1'])
         assert.match(seen[0].sql, /`admit_block_btc` FROM attestation_responses WHERE request_id = \?/)
         assert.deepStrictEqual(seen[0].params, ['c24bfe588b4c7e52'])
+    })
+})
+
+describe('barrierFamilyDrive: seedSnapshotsFromStake', function () {
+    const SPEC = { network: 'regtest', coin: 'BTC', effectiveTime: 1788494058, snapshotBlock: 110, tag: 'drive' }
+    const members = ['cross_chain_matches', 'cross_chain_calls'].map((t) =>
+        rows.inertRow(t, Object.assign({}, SPEC, { tag: 'drive|' + t })))
+    const reorgBuffer = { buriedSnapshotBlock: (block) => block - 6 }
+
+    function recordingVenue () {
+        const injected = []
+        return {
+            injected,
+            indexers: [{ mirrorProxy: { dropSockets: () => injected.push('drop') } }],
+            injectMirrorRow: async (row, o) => { injected.push({ table: o.table, row }); return 'ok' },
+        }
+    }
+
+    it('seeds stake-derived snapshots at the buried height for a reached block', async function () {
+        const venue = recordingVenue()
+        const asked = []
+        const out = await drive.seedSnapshotsFromStake(venue, 0, members, 104, {
+            reorgBuffer, weightsAt: async (b) => { asked.push(b); return [{ pubkey: 'aa', source: 's', weight: '9' }] },
+        })
+        assert.deepStrictEqual(asked, [104])
+        assert.strictEqual(out.length, 1)
+        assert.strictEqual(venue.injected[0].table, 'capability_snapshots')
+        assert.strictEqual(venue.injected[0].row.snapshot_block, 110)
+        assert.strictEqual(venue.injected[0].row.amount, '9')
+    })
+
+    it('seeds the synthetic snapshot without a stake read when the buried block is unreached', async function () {
+        const venue = recordingVenue()
+        const out = await drive.seedSnapshotsFromStake(venue, 0, members, 100, {
+            reorgBuffer, weightsAt: async () => { throw new Error('must not read') },
+        })
+        assert.deepStrictEqual(out, rows.requiredCapabilitySnapshots(members))
+    })
+
+    it('refuses an empty reached weight set before writing anything', async function () {
+        const venue = recordingVenue()
+        await assert.rejects(drive.seedSnapshotsFromStake(venue, 0, members, 104, {
+            reorgBuffer, weightsAt: async () => [],
+        }), /no stake weights/)
+        assert.deepStrictEqual(venue.injected, [])
     })
 })

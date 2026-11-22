@@ -8,18 +8,18 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('./core/transactionHelper')
 const requireRow = require('./requireRow')
 
 module.exports = {
     async sendDividendV0(addressInfo, tick, dividendTick, amount, memo){
-        let dividendMessage = "DIVIDEND|0|"+tick+"|"+dividendTick+"|"+amount+"|"+memo
+        const dividendMessage = "DIVIDEND|0|"+tick+"|"+dividendTick+"|"+amount+"|"+memo
 
         console.log("Creating and sending DIVIDEND V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, dividendMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, dividendMessage)
 
         console.log("Waiting for DIVIDEND in the database...")
-        let row = requireRow(await indexerDatabase.waitForDividend({
+        const row = requireRow(await indexerDatabase.waitForDividend({
             txHash: txHash,
             source: addressInfo["address"],
             tick: tick,

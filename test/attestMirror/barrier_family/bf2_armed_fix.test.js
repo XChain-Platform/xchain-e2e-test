@@ -44,7 +44,7 @@
 const assert = require('assert')
 const path = require('path')
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const fixture = require('../helpers/barrierFamilyFixture')
 const rows = require('../helpers/barrierFamilyRows')
@@ -97,7 +97,7 @@ describe('BF2: the fix, armed, the identical block on the identical mirror state
                   seen: [], seeded: {}, expected: {}, read: {} }
 
     before(async function () {
-        const up = await drive.bootFamilyVenue({ label: 'bf2', repoRoot: BUILD_ROOT, armed: [ARMED, PEER], armHubs: true, armAtCrossing: true })
+        const up = await drive.bootFamilyVenue({ label: 'bf2', repoRoot: BUILD_ROOT, armed: [ARMED, PEER], armHubs: true, armAtCrossing: true, venue: { freshIndexers: true } })
         Object.assign(ctx, up, { coin: up.evidence.coinCode })
         console.log('BF2 armed at ' + ctx.armHeight + ', legacy era block ' + ctx.legacyBlock)
     })
@@ -143,13 +143,8 @@ async function seedAdmissionRows (ctx) {
     // Refuse before seeding: a NULL-map row at or above the activation stalls the drill block, not this case.
     const hazards = rows.armedLegacyApplyHazards(members, ctx.armHeight)
     assert.deepStrictEqual(hazards, [], assertionMessage('no armed legacy apply hazards', hazards, 'the BF2 member seeds'))
-    const snapshots = await rows.requiredSnapshotSeeds(members, tip, drive.stakeWeightsAt(ctx.venue, ARMED))
-    const coverage = rows.snapshotCapabilityCoverage(members.concat(snapshots))
-    // Verify every joined block has a capability snapshot before any row is seeded.
-    assert.ok(coverage.satisfied,
-        assertionMessage('no missing snapshot blocks', coverage.missingBlocks, 'the BF2 snapshot seeds'))
-    const seeds = snapshots.concat(members)
-    await drive.seedMirrors(ctx.venue, seeds)
+    const snapshots = await drive.seedSnapshotsFromStake(ctx.venue, ARMED, members, tip)
+    await drive.seedMirrors(ctx.venue, members)
     ctx.seeded = {}
     for (const t of TABLES) {
         ctx.seeded[t] = members.filter((m) => m.table === t).length

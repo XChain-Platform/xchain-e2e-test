@@ -9,7 +9,7 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const vmHelper = require('../helpers/vmHelper')
 const issueHelper = require('../helpers/issueHelper')
 const mintHelper = require('../helpers/mintHelper')
@@ -57,7 +57,7 @@ describe('VM: Smart Contracts', function () {
 
     describe('DEPLOY v0: Deploy a contract', function () {
         it('should deploy a counter contract and create a contract record', async function () {
-            let result = await vmHelper.sendDeployV0(deployerAddr, COUNTER_CONTRACT, 200000, 'init')
+            const result = await vmHelper.sendDeployV0(deployerAddr, COUNTER_CONTRACT, 200000, 'init')
             assert(result.contract, 'Contract record should exist in DB')
             assert.strictEqual(result.contract.status, 'valid', 'Contract status should be valid')
         })
@@ -67,13 +67,13 @@ describe('VM: Smart Contracts', function () {
         let contractIndex = null
 
         before(async function () {
-            let deploy = await vmHelper.sendDeployV0(deployerAddr, COUNTER_CONTRACT, 200000)
+            const deploy = await vmHelper.sendDeployV0(deployerAddr, COUNTER_CONTRACT, 200000)
             assert(deploy.contract, 'Deploy should succeed')
             contractIndex = deploy.contract.action_index
         })
 
         it('should execute increment and create an execution record', async function () {
-            let result = await vmHelper.sendExecuteV0(deployerAddr, contractIndex, 'increment', [])
+            const result = await vmHelper.sendExecuteV0(deployerAddr, contractIndex, 'increment', [])
             assert(result.execution, 'Execution record should exist in DB')
             assert.strictEqual(result.execution.status, 'valid', 'Execution status should be valid')
             assert(result.execution.gas_used > 0, 'Gas should be consumed')
@@ -82,7 +82,7 @@ describe('VM: Smart Contracts', function () {
 
     describe('DEPLOY v0: Deploy with constructor', function () {
         it('should deploy with constructor params and execute initialize', async function () {
-            let result = await vmHelper.sendDeployV0(deployerAddr, COUNTER_CONTRACT, 200000, 'init')
+            const result = await vmHelper.sendDeployV0(deployerAddr, COUNTER_CONTRACT, 200000, 'init')
             assert(result.contract, 'Contract with constructor should deploy')
             assert.strictEqual(result.contract.status, 'valid')
         })

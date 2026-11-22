@@ -66,66 +66,71 @@
 const support = require('./support.test');
 const { assert, histogram, describeHistogram, CAPABILITY_GAP_STATUS, SNAPSHOT_COMPARE_KEYS } = support;
 
-function testLiveReconstruction() {
-    const { hubDb, liveNode, replayNode, venue, rounds, expectedPairs, targetHeight, livePrices, replayPrices, liveSnaps, replaySnaps, replayMirror, snapDiff, verdictDiff, feeVerdictDiff, liveIsolation, replayIsolation, liveVerdicts, replayVerdicts, wireVersions, venuePublicationBytes, feeCoordinates, feeStatuses, livePushQueue, replayPushQueue } = support.state;
-        const expected = expectedPairs.length;
-        if (liveSnaps.length === expected) return;
-
-        // WHICH RUNG IS BLOCKING, named rather than described. A replayed chain can
-        // only rebuild what a live chain accepted, and the path from a landed wire to
-        // a mirrored snapshot has four rungs. Walking them in order turns "AT2 is
-        // still red" into a statement the next session can read as progress or as a
-        // regression, and each rung names the store the set it needs comes from,
-        // because the node's two judges read two different ones: the INDEXER resolves
-        // the Bitcoin-anchored set from its hub-mirrored capability_snapshots, and the
-        // HUB resolves it by asking its Bitcoin capability oracle.
-        const byStatus = histogram(livePrices, 'status');
-        const gapCount = byStatus[CAPABILITY_GAP_STATUS] || 0;
-        const valid    = byStatus['valid'] || 0;
-        let rung;
-        if (livePrices.length === 0) {
-            rung = 'RUNG 1 (parse): the node indexed NO PRICE action at all for these rounds, so the ' +
-                'wire never reached its parser. The publish landed in a block the node has, so this is a ' +
-                'decode or action-registration failure, not a capability one';
-        } else if (gapCount === livePrices.length) {
-            rung = 'RUNG 2 (signer resolution): every one of the ' + livePrices.length + ' PRICE action(s) it ' +
-                'indexed recorded "' + CAPABILITY_GAP_STATUS + '", so the `price` capability set resolved ' +
-                'empty at the batch anchor and weighted quorum failed closed on S=0. This is the INDEXER\'s ' +
-                'half of the resolution, which off Bitcoin reads the Bitcoin-anchored set from the ' +
-                'capability_snapshots rows in the node\'s own HUB MIRROR database; the rig supplies them as ' +
-                'setup (oracleBatchVenue, the price capability precondition section, plus ' +
-                'oracleBatchReplay._registerPriceCapability). Check that the node registered as a target and ' +
-                'that a venue in this process actually seeded a set, before suspecting the resolver itself';
-        } else if (valid > 0) {
-            const btc = liveNode.btcOracleEvidence() || {};
-            rung = 'RUNG 3 (push): ' + valid + ' of the ' + livePrices.length + ' PRICE action(s) validated, ' +
-                'so signer resolution is working ON CHAIN, but the hub still holds no snapshot for them. The ' +
-                'push is the suspect: its outbox reads ' + JSON.stringify(livePushQueue) + '. An empty outbox ' +
-                'with valid actions means the push was made and the hub refused it (PriceAggregator rejects on ' +
-                'an unresolvable validator snapshot, a duplicate, or a pair/price bound); a non-empty one means ' +
-                'delivery never succeeded. For "validator snapshot unavailable", look at the node\'s BITCOIN ' +
-                'CAPABILITY ORACLE and not at the landing chain: the hub resolves the set at the batch\'s signed ' +
-                'Bitcoin anchor less the reorg buffer, which for this run is block ' + btc.queriedHeight + ' of ' +
-                btc.url + ', where the oracle answered ' + btc.priceSetAtBuried + ' validator(s). Zero there ' +
-                'means the federation\'s stake is not visible at the BURIED height (a set that exists only at ' +
-                'the anchor itself is not found); a null snapshot with a non-zero set means the hub was refused ' +
-                'the read, which is either a missing per-capability MIN_STAKE or the hub\'s own coin check ' +
-                'rejecting the endpoint. For "insufficient signer stake (0 verified signers)" the suspect is ' +
-                'WHICH resolver: under STAKE_WEIGHTED_QUORUM the hub gates on the SOURCE-KEYED weight read, ' +
-                'which answered ' + btc.priceWeightSetAtBuried + ' validator(s) at that same block against the ' +
-                'count read\'s ' + btc.priceSetAtBuried + '. A count set the whole federation wide and a weight ' +
-                'set of nobody is not a hub defect and not a replay failure: the hub is failing closed on a ' +
-                'stake it cannot sum, and the suspect is the SEED. _stakeWeightsSql inner-joins ' +
-                'index_addresses on the stake\'s source_id and then drops any source whose aggregate is under ' +
-                'the `price` MIN_STAKE, so check that the per-validator source rows ' +
-                'oracleBatchVenue.applyPriceCapabilityStakes mints actually landed, and that the seeded ' +
-                'per-source amount still clears that floor';
-        } else {
-            rung = 'RUNG 2 (signer resolution), mixed: the ' + livePrices.length + ' PRICE action(s) it ' +
-                'indexed recorded: ' + describeHistogram(byStatus);
-        }
-        assert.fail('the live node rebuilt ' + liveSnaps.length + ' of the ' + expected + ' price_snapshots the ' +
-            'federation finalized over ' + rounds.length + ' round(s). ' + rung);
+function describeBlockingRung(state) {
+    const { liveNode, livePrices, livePushQueue } = state;
+    // WHICH RUNG IS BLOCKING, named rather than described. A replayed chain can
+    // only rebuild what a live chain accepted, and the path from a landed wire to
+    // a mirrored snapshot has four rungs. Walking them in order turns "AT2 is
+    // still red" into a statement the next session can read as progress or as a
+    // regression, and each rung names the store the set it needs comes from,
+    // because the node's two judges read two different ones: the INDEXER resolves
+    // the Bitcoin-anchored set from its hub-mirrored capability_snapshots, and the
+    // HUB resolves it by asking its Bitcoin capability oracle.
+    const byStatus = histogram(livePrices, 'status');
+    const gapCount = byStatus[CAPABILITY_GAP_STATUS] || 0;
+    const valid    = byStatus['valid'] || 0;
+    let rung;
+    if (livePrices.length === 0) {
+        rung = 'RUNG 1 (parse): the node indexed NO PRICE action at all for these rounds, so the ' +
+            'wire never reached its parser. The publish landed in a block the node has, so this is a ' +
+            'decode or action-registration failure, not a capability one';
+    } else if (gapCount === livePrices.length) {
+        rung = 'RUNG 2 (signer resolution): every one of the ' + livePrices.length + ' PRICE action(s) it ' +
+            'indexed recorded "' + CAPABILITY_GAP_STATUS + '", so the `price` capability set resolved ' +
+            'empty at the batch anchor and weighted quorum failed closed on S=0. This is the INDEXER\'s ' +
+            'half of the resolution, which off Bitcoin reads the Bitcoin-anchored set from the ' +
+            'capability_snapshots rows in the node\'s own HUB MIRROR database; the rig supplies them as ' +
+            'setup (oracleBatchVenue, the price capability precondition section, plus ' +
+            'oracleBatchReplay._registerPriceCapability). Check that the node registered as a target and ' +
+            'that a venue in this process actually seeded a set, before suspecting the resolver itself';
+    } else if (valid > 0) {
+        const btc = liveNode.btcOracleEvidence() || {};
+        rung = 'RUNG 3 (push): ' + valid + ' of the ' + livePrices.length + ' PRICE action(s) validated, ' +
+            'so signer resolution is working ON CHAIN, but the hub still holds no snapshot for them. The ' +
+            'push is the suspect: its outbox reads ' + JSON.stringify(livePushQueue) + '. An empty outbox ' +
+            'with valid actions means the push was made and the hub refused it (PriceAggregator rejects on ' +
+            'an unresolvable validator snapshot, a duplicate, or a pair/price bound); a non-empty one means ' +
+            'delivery never succeeded. For "validator snapshot unavailable", look at the node\'s BITCOIN ' +
+            'CAPABILITY ORACLE and not at the landing chain: the hub resolves the set at the batch\'s signed ' +
+            'Bitcoin anchor less the reorg buffer, which for this run is block ' + btc.queriedHeight + ' of ' +
+            btc.url + ', where the oracle answered ' + btc.priceSetAtBuried + ' validator(s). Zero there ' +
+            'means the federation\'s stake is not visible at the BURIED height (a set that exists only at ' +
+            'the anchor itself is not found); a null snapshot with a non-zero set means the hub was refused ' +
+            'the read, which is either a missing per-capability MIN_STAKE or the hub\'s own coin check ' +
+            'rejecting the endpoint. For "insufficient signer stake (0 verified signers)" the suspect is ' +
+            'WHICH resolver: under STAKE_WEIGHTED_QUORUM the hub gates on the SOURCE-KEYED weight read, ' +
+            'which answered ' + btc.priceWeightSetAtBuried + ' validator(s) at that same block against the ' +
+            'count read\'s ' + btc.priceSetAtBuried + '. A count set the whole federation wide and a weight ' +
+            'set of nobody is not a hub defect and not a replay failure: the hub is failing closed on a ' +
+            'stake it cannot sum, and the suspect is the SEED. _stakeWeightsSql inner-joins ' +
+            'index_addresses on the stake\'s source_id and then drops any source whose aggregate is under ' +
+            'the `price` MIN_STAKE, so check that the per-validator source rows ' +
+            'oracleBatchVenue.applyPriceCapabilityStakes mints actually landed, and that the seeded ' +
+            'per-source amount still clears that floor';
+    } else {
+        rung = 'RUNG 2 (signer resolution), mixed: the ' + livePrices.length + ' PRICE action(s) it ' +
+            'indexed recorded: ' + describeHistogram(byStatus);
     }
+    return rung;
+}
+
+function testLiveReconstruction() {
+    const { rounds, expectedPairs, liveSnaps } = support.state;
+    const expected = expectedPairs.length;
+    if (liveSnaps.length === expected) return;
+    const rung = describeBlockingRung(support.state);
+    assert.fail('the live node rebuilt ' + liveSnaps.length + ' of the ' + expected + ' price_snapshots the ' +
+        'federation finalized over ' + rounds.length + ' round(s). ' + rung);
+}
 
 support.addTest('the live node reconstructed a price snapshot for every round the federation put on the chain', testLiveReconstruction, __filename);

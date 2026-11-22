@@ -23,8 +23,8 @@
 
 const assert            = require('assert');
 const chainRail         = require('../../helpers/chainRail');
-const cryptoHelper      = require('../../cryptoHelper');
-const transactionHelper = require('../../transactionHelper');
+const cryptoHelper      = require('../../helpers/core/cryptoHelper');
+const transactionHelper = require('../../helpers/core/transactionHelper');
 const mintHelper        = require('../../helpers/mintHelper');
 const bridgeParts       = require('./helpers/fixture');
 const {

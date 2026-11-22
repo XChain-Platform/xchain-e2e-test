@@ -27,7 +27,7 @@
  *     DEPLOY_DEFERRED_ASSEMBLY exists for.
  *
  * Nothing here knows about DEPLOY, chunks or the indexer: these are block
- * mechanics against a regtest node connector (test/src/BlockchainConnector.js).
+ * mechanics against a regtest node connector (test/src/blockchain_connector.js).
  *
  ********************************************************************/
 

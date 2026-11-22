@@ -1,3 +1,13 @@
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 'use strict'
 
 const assert = require('assert')
@@ -8,9 +18,12 @@ const proxyquire = require('proxyquire')
 const { ancestorPids } = require('../../helpers/rail_preflight/rail_drive_processes')
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..')
-const SCRIPT = path.join(REPO_ROOT, 'scripts', 'rail_leg_drive.js')
+const SCRIPT = path.join(REPO_ROOT, 'bin', 'rail_leg_drive.js')
 const POLICY_ROOT = 'test/integration/bridge_rail_policy.test.js'
 const POLICY_GLOB = 'test/integration/bridge_rail_policy.test/*.test.js'
+const GUARDS = 'test/integration/bridge_rail_doge_guards.test.js'
+const BASE_ROOT = 'test/integration/bridge_rail_base.test.js'
+const BASE_GLOB = 'test/integration/bridge_rail_base.test/*.test.js'
 const RAIL_DRIVES = {
     policy: {
         root: POLICY_ROOT,
@@ -19,6 +32,12 @@ const RAIL_DRIVES = {
             at1: { grep: 'policy T0:|policy AT1:', minPassed: 5 },
             full: { grep: null, minPassed: 28 },
         },
+    },
+    base: {
+        before: [GUARDS],
+        root: BASE_ROOT,
+        glob: BASE_GLOB,
+        legs: { full: { grep: null, minPassed: 16 } },
     },
 }
 const runner = proxyquire.noCallThru()(SCRIPT, {
@@ -79,6 +98,21 @@ describe('bridge rail leg drive command', function () {
         assert.ok(command.argv.indexOf(POLICY_ROOT) < command.argv.indexOf(POLICY_GLOB))
     })
 
+    it('runs a drive\'s leading suites before its root and glob', function () {
+        const command = runner.buildLegCommand('base', 'full', {
+            journalDir: '/tmp/rail-leg-drive-test',
+            repoRoot: REPO_ROOT,
+            env: {},
+        })
+        const bootstrapAt = command.argv.indexOf('./test/initial_check.test.js')
+        const guardsAt = command.argv.indexOf(GUARDS)
+
+        assert.ok(bootstrapAt >= 0)
+        assert.ok(guardsAt > bootstrapAt)
+        assert.ok(command.argv.indexOf(BASE_ROOT) > guardsAt)
+        assert.ok(command.argv.indexOf(BASE_GLOB) > command.argv.indexOf(BASE_ROOT))
+    })
+
     it('sets journal destinations and drops idle generation', function () {
         const command = build('at1', {
             env: { XC_ROLLCALL_IDLE_GENERATION: '1', KEEP_ME: 'yes' },
@@ -102,7 +136,7 @@ describe('bridge rail overlap detection', function () {
         const psText = [
             ' 101 node ./node_modules/.bin/mocha test/integration/bridge_rail_policy.test.js',
             ' 202 node ./node_modules/.bin/mocha test/integration/bridge_rail_token.test.js',
-            ' 303 node scripts/bridge_rail_policy.test.js',
+            ' 303 node bin/bridge_rail_policy.test.js',
             ' 404 node ./node_modules/.bin/mocha test/integration/ordinary.test.js',
         ].join('\n')
 
@@ -134,6 +168,34 @@ describe('bridge rail overlap detection over the process tree', function () {
             pid: 700,
             args: 'node ./node_modules/.bin/mocha --timeout 0 test/integration/bridge_rail_policy.test.js',
         }])
+    })
+})
+
+// These cases lived inside bin/rail_leg_drive.js, which registered them in every
+// mocha run that loaded the script, including the policy rail drive's dry-run roster.
+describe('bridge rail drive stack scope', function () {
+    it('does not see a drive with another stack prefix as competing', function () {
+        const drives = [{ pid: 101 }, { pid: 202 }]
+        const prefixes = new Map([[101, 'stack-one'], [202, 'stack-two']])
+        const prefixForPid = (pid) => prefixes.get(pid)
+
+        assert.strictEqual(runner.competingDriveForStack(drives, 'stack-one', prefixForPid), drives[0])
+        assert.strictEqual(runner.competingDriveForStack([drives[1]], 'stack-one', prefixForPid), undefined)
+    })
+
+    it('reads the stack prefix through ps when proc is unavailable', function () {
+        const prefix = runner.processStackPrefix(202, {
+            readFileSync: () => { throw new Error('no proc') },
+            execFileSync: () => 'node rail ATTEST_MIRROR_STACK_PREFIX=stack-two OTHER=value',
+        })
+
+        assert.strictEqual(prefix, 'stack-two')
+    })
+
+    it('does not let an unidentified drive block a prefixed stack', function () {
+        const drives = [{ pid: 303 }]
+
+        assert.strictEqual(runner.competingDriveForStack(drives, 'stack-one', () => null), undefined)
     })
 })
 

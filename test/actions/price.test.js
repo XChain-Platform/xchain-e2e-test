@@ -30,7 +30,7 @@
  ********************************************************************/
 
 const assert       = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const priceHelper  = require('../helpers/priceHelper')
 
 describe('PRICE v1 (permissionless user oracle)', function () {

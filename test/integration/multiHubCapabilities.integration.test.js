@@ -31,7 +31,7 @@
 'use strict';
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const assert = require('assert');
 const fs     = require('fs');
@@ -65,10 +65,10 @@ const CAPS = {
     },
     price:          { sources: ['coingecko'], fiats: ['USD'] },
     cross_chain:    { chains: { BTC: { rpc: 'http://node:8332' } } },
-    // A REGTEST-format DOGE address ('n' prefix, 34 chars). The hub's oracle_publish
-    // self-test validates doge_address against HUB_NETWORK, so a mainnet 'D' address
-    // fails closed on the regtest hubs this harness stands up.
-    oracle_publish: { doge_address: 'nsTake195wjCuVwLHf26EsZnRjwpm2LJtb', doge_wallet: '/data/.dogecoin/wallet.dat' }
+    // A DOGE REGTEST address (version byte 0x6f, valid checksum; the registry EXPLORER
+    // literal). The hub's oracle_publish self-test decodes doge_address against
+    // HUB_NETWORK, so a mainnet 0x1e or DOGE-testnet 0x71 address fails on these hubs.
+    oracle_publish: { doge_address: 'n1AvTJLLSA1NHamHd5KFj9mRn6BEcwnVbf', doge_wallet: '/data/.dogecoin/wallet.dat' }
 };
 
 let mvh;
@@ -122,8 +122,8 @@ describe('MultiValidatorHub: capability staking', function () {
             await hub.startCapabilities(capsPath);
             // Stop the live stake poll so it can't overwrite the deterministic
             // stake levels asserted below.
-            if (hub._stakePollTimer) clearInterval(hub._stakePollTimer);
-            if (hub._capabilityRecheckTimer) clearInterval(hub._capabilityRecheckTimer);
+            if (hub['_stakePollTimer']) clearInterval(hub['_stakePollTimer']);
+            if (hub['_capabilityRecheckTimer']) clearInterval(hub['_capabilityRecheckTimer']);
         }
         // Every capability's self-test passing IS the assertion below, and each is a
         // row the one-shot initial poll writes, so wait for them rather than betting
@@ -132,7 +132,7 @@ describe('MultiValidatorHub: capability staking', function () {
         await waitFor(async () => {
             let rows = [];
             try { rows = await mvh.hubs[0].capabilityRegistry.getOwnState(pubkey); }
-            catch (_) { rows = []; }
+            catch (internal) { rows = []; }
             const passing = CAP_NAMES.filter((cap) => {
                 const row = rows.find((r) => r.capability === cap);
                 return row && Number(row.self_test_ok) === 1;
@@ -155,7 +155,7 @@ describe('MultiValidatorHub: capability staking', function () {
     after(async function () {
         this.timeout(180_000);
         if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
-        if (capsPath) { try { fs.unlinkSync(capsPath); } catch (_) {} }
+        if (capsPath) { try { fs.unlinkSync(capsPath); } catch (internal) {} }
         if (db) await db.stop();
     });
 

@@ -35,7 +35,7 @@
  * THE ROSTER. The request needs a responsible set of three live signers, and the
  * venue ADOPTS the seated roster rather than staking. A fresh chain seats none, so
  * the prologue suite runs the repository's roster seeder
- * (test/tools/reseedAttestationRoster.test) when, and only when, the seated set
+ * (test/tools/reseed_attestation_roster.test) when, and only when, the seated set
  * cannot be adopted. Seeding needs E2E_STAKE_TEARDOWN=off, and the seeder refuses
  * loudly without it. A chain that already seats an adoptable roster skips it.
  *
@@ -46,14 +46,14 @@
 const assert = require('assert')
 const path = require('path')
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 const rows = require('../helpers/barrierFamilyRows')
 const drive = require('../helpers/barrierFamilyDrive')
 const {
     provisionDrillIdentities, startAttestTestServer, deployRequestContract, settleStack, readContractState, mineWhile,
-} = require('../mirrorDrillFixture')
-const { findEmittedAttestRequest, waitForMirrorRowEverywhere, waitForAppliedEverywhere, widenArithmetic } = require('../mirrorDrillWaits')
+} = require('../helpers/mirrorDrillFixture')
+const { findEmittedAttestRequest, waitForMirrorRowEverywhere, waitForAppliedEverywhere, widenArithmetic } = require('../helpers/mirrorDrillWaits')
 const vmHelper = require('../../helpers/vmHelper')
 
 const BUILD_ROOT = path.resolve(__dirname, '..', '..', '..', '..')
@@ -67,7 +67,7 @@ const BURIAL_BLOCKS = 6
 // Blocks mined past the apply so the corpus tip clears the admission height by enough
 // for H to sit strictly between them with room on either side.
 const TAIL_BLOCKS = 6
-const SEEDER = require.resolve('../../tools/reseedAttestationRoster.test/01_seed_the_attestation_roster_on_a_reset_chain.test')
+const SEEDER = require.resolve('../../tools/reseed_attestation_roster.test/01_seed_the_attestation_roster_on_a_reset_chain.test')
 
 describe('AT4 corpus prologue: the seated roster is adoptable, seeded only when it is not', function () {
     this.timeout(0)
@@ -80,6 +80,7 @@ describe('AT4 corpus prologue: the seated roster is adoptable, seeded only when 
             return
         }
         console.log('AT4 corpus: the seated roster is already adoptable; the seeder is skipped')
+        // Skip the seeder case: the seated roster is already adoptable, so no reseed is needed.
         this.skip()
     })
 
@@ -103,7 +104,7 @@ describe('AT4 corpus: a federation-signed admission-era mirror row, applied at i
         const staked = await provisionDrillIdentities({ label: LABEL, count: 5, redundancy: 3 })
         const up = await drive.bootFamilyVenue({
             label: LABEL, repoRoot: BUILD_ROOT, armed: [0, 1], armHubs: true,
-            venue: { identities: staked.identities, needsLlm: false, hubExtraEnv: Object.assign({}, ctx.server.hubEnv) },
+            venue: { freshIndexers: true, identities: staked.identities, needsLlm: false, hubExtraEnv: Object.assign({}, ctx.server.hubEnv) },
         })
         Object.assign(ctx, up, { coin: up.evidence.coinCode })
         ctx.contract = await deployRequestContract({ label: LABEL + 'http', code: rows.attestRequestContractCode(DEADLINE_BLOCKS, CONTEXT_TAG) })

@@ -19,7 +19,7 @@ const sinon = require('sinon')
 
 const mockMariadb = require('../integration/fixtures/mockMariadb')
 const Database = require('../../src/db')
-const BlockchainConnector = require('../../src/BlockchainConnector')
+const BlockchainConnector = require('../../src/blockchain_connector')
 const XChainUtxoTrackerConnector = require('../../src/XChainUtxoTrackerConnector')
 
 function makeMockConnection(queryResult) {

@@ -23,8 +23,8 @@ async function prepareRedundancyValidators() {
     // request block. With 3 validators and REDUNDANCY=3 the responsible set is all 3, so a
     // 3-signature response can reach quorum. (Staking both from the operator address would
     // collapse them under SWQ source-dedup and cap valid sigs at 1/3.)
-    let v2 = new attestationHelper.MockAttestationValidator()
-    let v3 = new attestationHelper.MockAttestationValidator()
+    const v2 = new attestationHelper.MockAttestationValidator()
+    const v3 = new attestationHelper.MockAttestationValidator()
     await stakeValidatorFromOwnSource(v2)
     await stakeValidatorFromOwnSource(v3)
     // Advance past activation delay AND the snapshot burial. This request asks for
@@ -44,10 +44,10 @@ describe(TITLE, function () {
         const [v2, v3] = await prepareRedundancyValidators()
 
         // Fire a request with redundancy=3
-        let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracleQuorum', ['https://example.com/v1/quorum/abc'])
+        const exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracleQuorum', ['https://example.com/v1/quorum/abc'])
         assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)
 
-        let request = await indexerDatabase.waitForAttestationRequest({
+        const request = await indexerDatabase.waitForAttestationRequest({
             txHash:        exec.txHash,
             requestStatus: 'pending'
         })
@@ -66,26 +66,26 @@ describe(TITLE, function () {
         })
 
         // Response should land as valid with all 3 sigs recorded
-        let response = await indexerDatabase.waitForAttestationResponse({
+        const response = await indexerDatabase.waitForAttestationResponse({
             requestId:      request.request_id,
             responseStatus: 'ok',
             status:         'valid'
         })
         assert(response, 'attestation_responses row should exist with response_status=ok and status=valid (3-sig path)')
 
-        let sigs = await indexerDatabase.getAttestationValidatorSignatures(response.action_index)
+        const sigs = await indexerDatabase.getAttestationValidatorSignatures(response.action_index)
         assert.strictEqual(sigs.length, 3, 'should have exactly 3 verified signatures')
 
         // Request flipped to fulfilled
-        let updatedRequest = await indexerDatabase.checkAttestationRequest({
+        const updatedRequest = await indexerDatabase.checkAttestationRequest({
             requestId:     request.request_id,
             requestStatus: 'fulfilled'
         })
         assert(updatedRequest, 'request_status should flip to fulfilled')
 
         // Callback fired (writes to the shared callback_* state keys)
-        let cbStatus  = await indexerDatabase.getContractState(contractIndex, 'callback_status')
-        let cbContext = await indexerDatabase.getContractState(contractIndex, 'callback_context')
+        const cbStatus  = await indexerDatabase.getContractState(contractIndex, 'callback_status')
+        const cbContext = await indexerDatabase.getContractState(contractIndex, 'callback_context')
         assert(cbStatus,  'callback_status state row should exist')
         assert.strictEqual(JSON.parse(cbStatus.state_value),  'ok')
         assert.strictEqual(JSON.parse(cbContext.state_value), 'ctx-quorum')
@@ -107,9 +107,9 @@ describe(TITLE, function () {
             return
         }
 
-        let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracleQuorum', ['https://example.com/v1/quorum/def'])
+        const exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracleQuorum', ['https://example.com/v1/quorum/def'])
         assert.strictEqual(exec.execution.status, 'valid')
-        let request = await indexerDatabase.waitForAttestationRequest({
+        const request = await indexerDatabase.waitForAttestationRequest({
             txHash:        exec.txHash,
             requestStatus: 'pending'
         })
@@ -126,7 +126,7 @@ describe(TITLE, function () {
         })
 
         // Either no row (broadcast failed at validation) or row exists with non-valid status
-        let resp = await indexerDatabase.waitForAttestationResponse({
+        const resp = await indexerDatabase.waitForAttestationResponse({
             requestId: request.request_id
         }, 10000)
         if (resp) {
@@ -135,7 +135,7 @@ describe(TITLE, function () {
         }
 
         // Request remains pending
-        let stillPending = await indexerDatabase.checkAttestationRequest({
+        const stillPending = await indexerDatabase.checkAttestationRequest({
             requestId:     request.request_id,
             requestStatus: 'pending'
         })
@@ -164,11 +164,11 @@ RETRYABLE_STATUSES.forEach(function (retryStatus) {
             if (skipIfResponseMirrorEra(this, NETWORK)) return
             const { operatorAddr, contractIndex } = state
             // Fresh pending request (redundancy=1; a single staked validator sig suffices)
-            let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracle', ['https://example.com/v1/retry/' + retryStatus])
+            const exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracle', ['https://example.com/v1/retry/' + retryStatus])
             assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)
-            let request = await indexerDatabase.waitForAttestationRequest({ txHash: exec.txHash, requestStatus: 'pending' })
+            const request = await indexerDatabase.waitForAttestationRequest({ txHash: exec.txHash, requestStatus: 'pending' })
             assert(request, 'pending request should exist for status=' + retryStatus)
-            let requestId = request.request_id
+            const requestId = request.request_id
 
             // Sign with the request's deterministic responsible validator (top-1 by
             // SHA256(request_id||pubkey) over the full staked set, source-deduped). Once
@@ -176,7 +176,7 @@ RETRYABLE_STATUSES.forEach(function (retryStatus) {
             // `validator` is often NOT the responsible signer for a given request_id, so
             // its sig is filtered out → 0/1. Picking the responsible key makes the sig
             // count (1) meet redundancy (1).
-            let signers = attestationHelper.computeResponsibleSigners(requestId, 1, attestationHelper.getSessionStakedValidators())
+            const signers = attestationHelper.computeResponsibleSigners(requestId, 1, attestationHelper.getSessionStakedValidators())
 
             // Broadcast a properly-signed response carrying the retryable status. The
             // responsible validator's signature is valid (validSigs=1 >= redundancy=1), so
@@ -193,7 +193,7 @@ RETRYABLE_STATUSES.forEach(function (retryStatus) {
             })
 
             // Response row lands valid with response_status = the retryable value
-            let response = await indexerDatabase.waitForAttestationResponse({
+            const response = await indexerDatabase.waitForAttestationResponse({
                 requestId:      requestId,
                 responseStatus: retryStatus,
                 status:         'valid'
@@ -201,7 +201,7 @@ RETRYABLE_STATUSES.forEach(function (retryStatus) {
             assert(response, 'response row should exist with response_status=' + retryStatus + ' and status=valid')
 
             // Invariant 1: the request must NOT flip: it stays pending for a retry
-            let stillPending = await indexerDatabase.checkAttestationRequest({
+            const stillPending = await indexerDatabase.checkAttestationRequest({
                 requestId:     requestId,
                 requestStatus: 'pending'
             })
@@ -221,16 +221,16 @@ describe(TITLE, function () {
         if (skipIfResponseMirrorEra(this, NETWORK)) return
         const { operatorAddr, contractIndex } = state
         // Fresh pending request (deadlineBlocks=10 leaves comfortable room for two rounds)
-        let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracle', ['https://example.com/v1/retry-then-ok/abc'])
+        const exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracle', ['https://example.com/v1/retry-then-ok/abc'])
         assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)
-        let request = await indexerDatabase.waitForAttestationRequest({ txHash: exec.txHash, requestStatus: 'pending' })
+        const request = await indexerDatabase.waitForAttestationRequest({ txHash: exec.txHash, requestStatus: 'pending' })
         assert(request, 'pending request should exist')
-        let requestId = request.request_id
+        const requestId = request.request_id
 
         // Both rounds must be signed by the request's responsible validator (top-1 over the
         // full staked set, source-deduped): the same key the indexer will accept for this
         // request_id. The two rounds target the SAME request_id, so they share one signer.
-        let signers = attestationHelper.computeResponsibleSigners(requestId, 1, attestationHelper.getSessionStakedValidators())
+        const signers = attestationHelper.computeResponsibleSigners(requestId, 1, attestationHelper.getSessionStakedValidators())
 
         // Round 1: a valid no_quorum response leaves the request pending
         await attestationHelper.broadcastAttestationResponse(operatorAddr, {
@@ -241,14 +241,14 @@ describe(TITLE, function () {
             meta:            '',
             validators:      signers
         })
-        let firstResp = await indexerDatabase.waitForAttestationResponse({
+        const firstResp = await indexerDatabase.waitForAttestationResponse({
             requestId:      requestId,
             responseStatus: 'no_quorum',
             status:         'valid'
         })
         assert(firstResp, 'no_quorum response row should land valid')
         assert(!firstResp.callback_execute_action_index, 'no_quorum round must not inject a callback')
-        let stillPending = await indexerDatabase.checkAttestationRequest({ requestId: requestId, requestStatus: 'pending' })
+        const stillPending = await indexerDatabase.checkAttestationRequest({ requestId: requestId, requestStatus: 'pending' })
         assert(stillPending, 'request should remain pending after the no_quorum round')
         // Round 2: a subsequent ok response on the SAME request fulfills it and fires the callback
         const okPayload = '{"score":9}'
@@ -260,14 +260,14 @@ describe(TITLE, function () {
             meta:            '200',
             validators:      signers
         })
-        let okResp = await indexerDatabase.waitForAttestationResponse({
+        const okResp = await indexerDatabase.waitForAttestationResponse({
             requestId:      requestId,
             responseStatus: 'ok',
             status:         'valid'
         })
         assert(okResp, 'ok response row should land valid after the earlier no_quorum round')
         // Request is now terminal: fulfilled
-        let fulfilled = await indexerDatabase.checkAttestationRequest({ requestId: requestId, requestStatus: 'fulfilled' })
+        const fulfilled = await indexerDatabase.checkAttestationRequest({ requestId: requestId, requestStatus: 'fulfilled' })
         assert(fulfilled, 'request should flip to fulfilled once a valid ok response arrives')
 
         // Callback EXECUTE injected on the ok response row

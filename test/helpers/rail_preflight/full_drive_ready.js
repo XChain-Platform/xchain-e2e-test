@@ -1,11 +1,28 @@
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 'use strict'
 
-const { otherRailDrives } = require('../../../scripts/rail_leg_drive')
+const { otherRailDrives, competingDriveForStack } = require('../../../bin/rail_leg_drive')
 const { classifyHubPingResponse } = require('./hub_ping_response')
 
-function checkFullDriveReady ({ pingStatusCode, pingBodyText, psText, ownPids }) {
+// A drive on its own isolated stack (ATTEST_MIRROR_STACK_PREFIX set) competes only with
+// drives on that same stack, the same scoping bin/rail_leg_drive.js applies; with no
+// prefix every other drive competes, as before.
+function checkFullDriveReady ({
+    pingStatusCode, pingBodyText, psText, ownPids,
+    stackPrefix = process.env.ATTEST_MIRROR_STACK_PREFIX, stackPrefixForPid,
+}) {
     const hubReady = classifyHubPingResponse(pingStatusCode, pingBodyText).ok
-    const otherDriveRunning = otherRailDrives(psText, ownPids).length > 0
+    const drives = otherRailDrives(psText, ownPids)
+    const otherDriveRunning = Boolean(competingDriveForStack(drives, stackPrefix, stackPrefixForPid))
 
     if (!hubReady && otherDriveRunning) return { ready: false, reason: 'hub+other-drive' }
     if (!hubReady) return { ready: false, reason: 'hub' }

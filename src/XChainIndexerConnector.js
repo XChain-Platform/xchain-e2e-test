@@ -20,22 +20,13 @@
 
 const axios = require('axios');
 const { getLogger } = require('./lib/logger');
+// Reads a non-2xx body so a refusal is not mistaken for a dead socket (see the helper)
+const { serviceRefusal } = require('./lib/service_refusal');
 const logger = getLogger();
 
-// What the SERVICE said, when it said anything at all.
-// The indexer refuses a gated call with a non-2xx status whose body is still a
-// JSON-RPC envelope (api.js: 401 + {error:{code:-32001,message:'Unauthorized...'}}).
-// Axios rejects on any non-2xx, so a catch that never reads err.response cannot
-// tell "the indexer refused this" from "nothing answered the socket".
-// Returns null for a responseless failure (ECONNREFUSED, timeout, DNS), which is
-// the only case the connectors' null/false sentinel is meant to cover.
-function serviceRefusal(err){
-    const res = err && err.response
-    if(!res) return null
-    const body = res.data && res.data.error
-    if(body) return typeof body === 'object' ? (body.message || JSON.stringify(body)) : String(body)
-    return 'HTTP ' + res.status + (res.statusText ? ' ' + res.statusText : '')
-}
+// Cap ping/health: waitForIndexedBlock polls health and checks its deadline only
+// between requests, so a silent indexer would otherwise hang it. call() stays unbounded.
+const PROBE_TIMEOUT_MS = 5000;
 
 class XChainIndexerConnector {
     constructor(url, port, apiKey) {
@@ -55,9 +46,9 @@ class XChainIndexerConnector {
             id: 1
         }
 
-        var response = null
+        let response = null
         try {
-            response = await axios.post(this.url, data)
+            response = await axios.post(this.url, data, { timeout: PROBE_TIMEOUT_MS })
         } catch (err) {
             // A probe keeps its boolean sentinel: callers poll on false. Name the
             // refusal in the log so a gated port is not read as a dead one.
@@ -83,9 +74,9 @@ class XChainIndexerConnector {
             id: 1
         }
 
-        var response = null
+        let response = null
         try {
-            response = await axios.post(this.url, data)
+            response = await axios.post(this.url, data, { timeout: PROBE_TIMEOUT_MS })
         } catch (err) {
             // health() keeps its null sentinel deliberately: waitForIndexedBlock
             // polls it in a loop and must ride out a restarting indexer's non-2xx
@@ -118,7 +109,7 @@ class XChainIndexerConnector {
     //     method-level rejection. That envelope is truthy, so returning it let a
     //     caller that only tests the return for truthiness read a rejected query
     //     as its success payload.
-    // The sibling RegtestMinerConnector._unwrap enforces the same contract for
+    // The sibling RegtestMinerConnector.unwrap enforces the same contract for
     // the same reason; this is that contract applied to the indexer.
     async call(method, params){
         const data = {
@@ -127,7 +118,7 @@ class XChainIndexerConnector {
             params: params,
             id: 1
         }
-        var response = null
+        let response = null
         try {
             const config = this.apiKey ? { headers: { 'x-api-key': this.apiKey } } : {}
             response = await axios.post(this.url, data, config)
@@ -159,14 +150,23 @@ class XChainIndexerConnector {
     // indexer's consensus effective-set query: stake keys minus revocations
     // ∪ active delegated keys backed by the source's aggregate stake).
     // minStake is caller-supplied so tests don't depend on the venue's local
-    // MIN_STAKE config. Returns { capability, block_index, count, validators },
-    // or null on transport failure; a rejected query throws (see call()).
+    // MIN_STAKE config. Returns { capability, block_index, count, truncated,
+    // validators }, or null on transport failure; a rejected query throws (see
+    // call()). Throws when truncated === true (the set hit the indexer's
+    // VALIDATOR_QUERY_LIMIT), since a count or membership check on a cut set is
+    // meaningless; an older indexer that omits the field passes. Use raw call()
+    // to read a truncated set on purpose.
     async getCapabilityValidators(capability, blockIndex, minStake){
-        return await this.call('getcapabilityvalidators', {
+        const result = await this.call('getcapabilityvalidators', {
             capability:  capability,
             block_index: Number(blockIndex),
             min_stake:   minStake
         })
+        if (result && result.truncated === true) {
+            throw new Error('getcapabilityvalidators(' + capability + ') at block ' + blockIndex +
+                ' came back TRUNCATED (hit VALIDATOR_QUERY_LIMIT); a count or membership check on it would be meaningless')
+        }
+        return result
     }
 
     // Resolve the staking source address that owned/delegated a signing pubkey
@@ -187,7 +187,7 @@ class XChainIndexerConnector {
     async waitForIndexedBlock(minHeight, timeMax = 90000){
         const endTime = Date.now() + timeMax
         while(Date.now() < endTime){
-            let health = await this.health()
+            const health = await this.health()
             if(health && health.lastIndexedBlock !== null && Number(health.lastIndexedBlock) >= Number(minHeight))
                 return true
             await this.sleep(1000)

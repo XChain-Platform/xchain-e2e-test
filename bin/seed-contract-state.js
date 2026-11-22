@@ -162,9 +162,9 @@ function loadSDK() {
 // link for xchain-sdk, and there the resolve throws and the budget check silently
 // degrades to "unchecked" on exactly the runs that matter.
 function loadChunkHelper() {
-    for (const c of ['xchain-sdk/src/chunkHelper.js',
-                     '../../xchain-sdk/src/chunkHelper.js',
-                     '../../../xchain-sdk/src/chunkHelper.js']) {
+    for (const c of ['xchain-sdk/src/contract/chunk_helper.js',
+                     '../../xchain-sdk/src/contract/chunk_helper.js',
+                     '../../../xchain-sdk/src/contract/chunk_helper.js']) {
         try {
             return c.startsWith('.') ? require(path.resolve(__dirname, c)) : require(c);
         } catch (e) { /* next */ }

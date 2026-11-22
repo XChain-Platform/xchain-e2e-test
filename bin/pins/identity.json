@@ -1,23 +1,23 @@
 {
   "algorithm": "sha256",
   "coins": {
-    "src/coins/BTC.js": "900d82359d27269ebb775a207e84cac7ac0702f57f07c0239d5406f2a0ec6c90",
-    "src/coins/DOGE.js": "a0952d619edec50c09d0cbac90023cba2e8e75f0fa98b650e2ee1f4eadd7540b",
-    "src/coins/LTC.js": "c227025a7b1e8d70f5165f6065cd2894161abd4966814c8f7b0f462e036474c9",
-    "src/coins/consensus_pin.js": "f41142b6b3c9e3f1c1d491b9737fee5e6fd988d700bd96f0d200f7bd0b301ae7",
-    "src/coins/index.js": "dd350bc0ec999849fe302ac4381f37b7be3eaa866f019a35cbcceebb4d5ebd4b"
+    "src/coins/BTC.js": "ec37a13d1be3375c18fb77dd162ddd2047e598410de6c8050c12cff2766bde81",
+    "src/coins/DOGE.js": "29ac02299b0c779f4e3eda579eeaa9f673c454b73cfe9978a35f03f0e9aed33c",
+    "src/coins/LTC.js": "6155195bfa5fdfeab77dec3802ce67b5cc47a77695e81a4a5545d980e4c421dd",
+    "src/coins/consensus_pin.js": "342bf7af224a19ea0a98ff9cfb2c9a70b3fd5be75de7ecef2db05936f82baa63",
+    "src/coins/index.js": "c76c079e3c0e2793f57120c5450ca3a6b7050cd4d4373c207fc9655715c092dc"
   },
   "vendoredTwins": {
-    "src/coins/BTC.js": "900d82359d27269ebb775a207e84cac7ac0702f57f07c0239d5406f2a0ec6c90",
-    "src/coins/DOGE.js": "a0952d619edec50c09d0cbac90023cba2e8e75f0fa98b650e2ee1f4eadd7540b",
-    "src/coins/LTC.js": "c227025a7b1e8d70f5165f6065cd2894161abd4966814c8f7b0f462e036474c9",
-    "src/coins/consensus_pin.js": "f41142b6b3c9e3f1c1d491b9737fee5e6fd988d700bd96f0d200f7bd0b301ae7",
-    "src/coins/index.js": "dd350bc0ec999849fe302ac4381f37b7be3eaa866f019a35cbcceebb4d5ebd4b"
+    "src/coins/BTC.js": "ec37a13d1be3375c18fb77dd162ddd2047e598410de6c8050c12cff2766bde81",
+    "src/coins/DOGE.js": "29ac02299b0c779f4e3eda579eeaa9f673c454b73cfe9978a35f03f0e9aed33c",
+    "src/coins/LTC.js": "6155195bfa5fdfeab77dec3802ce67b5cc47a77695e81a4a5545d980e4c421dd",
+    "src/coins/consensus_pin.js": "342bf7af224a19ea0a98ff9cfb2c9a70b3fd5be75de7ecef2db05936f82baa63",
+    "src/coins/index.js": "c76c079e3c0e2793f57120c5450ca3a6b7050cd4d4373c207fc9655715c092dc"
   },
   "suiteTitleMap": {
     "path": "bin/pins/at1-suite-titles.json",
-    "sha256": "885c6b14e29770e1ac1b48585ea4332d97d1c224a5f50be1c383b777bdea1bfe",
-    "scripts": 66,
-    "titleSets": 150
+    "sha256": "f4e272eadff10a4860b2ab000308b5536163dc95cbfd699df661184a6a76ac53",
+    "scripts": 71,
+    "titleSets": 312
   }
 }

@@ -1,3 +1,13 @@
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 'use strict';
 
 const assert = require('assert');
@@ -9,7 +19,7 @@ const {
     policyReleaseReading,
 } = require('../../helpers/rail_preflight/policy_at5');
 
-describe('policy AT5 rail decisions', function () {
+function registerBarrierWaitTests() {
     it('observes the withheld barrier after effective time without requiring the parked indexer to advance', function () {
         const transfer = { transferId: 'lag-transfer', effectiveTime: 1790487200, settled: null };
 
@@ -22,7 +32,9 @@ describe('policy AT5 rail decisions', function () {
         assert.strictEqual(barrierWaitReady({ effectiveTime: null }, 1790487205), false);
         assert.strictEqual(barrierWaitReady({ effectiveTime: 1790487200 }, 1790487199), false);
     });
+}
 
+function registerRecoveryTests() {
     it('matches every finalized row at or above the requested sequence', function () {
         const rows = [
             { tick: 'LAGA', policy_seq: 1n, status: 'finalized', snapshot_id: 'seq-1' },
@@ -42,7 +54,9 @@ describe('policy AT5 rail decisions', function () {
         assert.throws(() => followerRecoveryPlan(3, 3), /follower 3 is outside a 3-hub venue/);
         assert.throws(() => followerRecoveryPlan(0, 0), /hub count must be a positive integer/);
     });
+}
 
+function registerReleaseReadingTests() {
     it('reads the recorded early transfer as an ordering failure', function () {
         const reading = policyReleaseReading(
             { block: 18203, actionIndex: 3734 },
@@ -84,4 +98,10 @@ describe('policy AT5 rail decisions', function () {
         assert.strictEqual(Number.isNaN(reading.transferBlock), true);
         assert.strictEqual(Number.isNaN(reading.policyBlock), true);
     });
+}
+
+describe('policy AT5 rail decisions', function () {
+    registerBarrierWaitTests();
+    registerRecoveryTests();
+    registerReleaseReadingTests();
 });

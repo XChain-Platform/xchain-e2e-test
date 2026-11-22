@@ -32,7 +32,7 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { makeSdk, submit, fundedSdkAddress, fundedGasAddress, mine, uniqueTick, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedSdkAddress, fundedGasAddress, mine, uniqueTick, submitOpts } = require('./helpers/sdkHelper');
 const { waitForTxIndexed } = require('../helpers/indexerWait');
 
 // Pull the created action's on-chain action_index out of a submitAction

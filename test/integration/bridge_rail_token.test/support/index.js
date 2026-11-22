@@ -16,16 +16,17 @@
 
 const assert = require('assert');
 const fs = require('fs');
+const path = require('path');
 const { execFileSync } = require('child_process');
 const axios = require('axios');
 
 const XChainHubConnector = require('../../../../src/XChainHubConnector');
 const chainRail         = require('../../../helpers/chainRail');
 const stakeTeardown     = require('../../../helpers/stakeTeardown');
-const cryptoHelper      = require('../../../cryptoHelper');
-const transactionHelper = require('../../../transactionHelper');
+const cryptoHelper      = require('../../../helpers/core/cryptoHelper');
+const transactionHelper = require('../../../helpers/core/transactionHelper');
 const issueHelper       = require('../../../helpers/issueHelper');
-const fixture           = require('../../../attestMirror/mirrorDrillFixture');
+const fixture           = require('../../../attestMirror/helpers/mirrorDrillFixture');
 const { checkFullDriveReady } = require('../../../helpers/rail_preflight/full_drive_ready');
 const { requireHealthyHub } = require('../../../helpers/rail_preflight/hub_health_gate');
 const {
@@ -33,6 +34,7 @@ const {
     launchParentIsAttached,
 } = require('../../../helpers/rail_preflight/rail_drive_processes');
 const { withDogeFeeSchedule } = require('../../../helpers/rail_preflight/token_doge_fee');
+const { driveRoots, captureDriveHeads } = require('../../../helpers/rail_preflight/drive_heads');
 const { caseJournalEntry } = require('../../../helpers/rail_preflight/case_journal_entry');
 const { evidenceJson } = require('../../../helpers/rail_preflight/evidence_json');
 const {
@@ -42,6 +44,7 @@ const {
     journalCase,
     withMiningPaused,
 } = require('../../../helpers/bridgeRailVenue');
+const { resolveRailVenueBasePort } = require('../../../helpers/attestMirrorVenue');
 const token = require('./token');
 const { ensureBridgeRailQuorum, releaseBridgeRailQuorum } = require('./quorum');
 const {
@@ -186,6 +189,12 @@ function createRailDrive(cfg) {
         // support says why: the venue spawns out of BRIDGE_RAIL_REPO_ROOT while the test
         // process loads indexer modules of its own).
         state.evidence.repoRoot = process.env.BRIDGE_RAIL_REPO_ROOT || null;
+        // The heads are read once, here at drive start, and pinned: the AT9 record reports these
+        // and AT9 fails if a live head has moved since.
+        const e2eRoot = path.resolve(__dirname, '..', '..', '..', '..');
+        const platformRoot = process.env.BRIDGE_RAIL_REPO_ROOT || path.resolve(e2eRoot, '..');
+        state.evidence.driveHeadRoots = driveRoots(e2eRoot, platformRoot);
+        state.evidence.driveHeads = captureDriveHeads(state.evidence.driveHeadRoots);
         state.evidence.indexerModulesLoaded = Object.keys(require.cache)
             .filter((p) => /xchain-indexer[\\/]src[\\/]/.test(String(p))).sort();
         const dogeIndexer = await resolveIndexerPort({
@@ -230,7 +239,7 @@ function createRailDrive(cfg) {
             const row = set.byPubkey.get(pk) || {};
             return { pubkey: pk, stake: Number(row.weight || 0) };
         });
-        state.quorum = resolveVenueQuorum(seated, fixture._knownSignerSeeds());
+        state.quorum = resolveVenueQuorum(seated, fixture['_knownSignerSeeds']());
         state.evidence.seated = seated.map((s) => s.pubkey.slice(0, 16) + '@' + s.stake).join(', ');
         state.evidence.buriedBlock = buried;
         state.evidence.btcTip = Number(tip.block_index);
@@ -255,7 +264,8 @@ function createRailDrive(cfg) {
         if (cfg.dropStaleReplay) await dropStaleReplayBeforeVenue(cfg.label);
         state.venue = new BridgeRailVenue({
             label: cfg.label,
-            basePort: cfg.basePort,
+            // AB_VENUE_BASE_PORT (the stack's own window) wins over the drive's fixed base.
+            basePort: resolveRailVenueBasePort(cfg.basePort, process.env),
             identities: mesh.map((a) => ({ pubkeyHex: a.pubkeyHex, privkeyHex: a.seedHex })),
             dogeRail: state.dogeRail,
             // The rail's pinned depth. AT5 raises it through the ORIGIN ROW (MIN_DEPTH), never
@@ -443,6 +453,7 @@ function createRailDrive(cfg) {
         state,
         needsFederation,
         bridgeRailSuite,
+        recordCase,
     }, withDogeFeeSchedule(token.bind(state), state));
 }
 

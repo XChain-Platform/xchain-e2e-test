@@ -30,7 +30,7 @@ async function unreadableIndexes(venue) {
         try { return readableHeight(await venue.statusOf(indexer.index)); }
         catch (e) { return null; }
     }));
-    return venue.indexers.filter((_indexer, i) => readings[i] === null);
+    return venue.indexers.filter((internalIndexer, i) => readings[i] === null);
 }
 
 async function waitForUnreadableIndexes(venue, options) {
@@ -55,10 +55,10 @@ async function rebuildIndexer(venue, indexer) {
     console.log('POLICY RAIL: rebuilding unreadable venue BTC indexer ' + indexer.index +
         (tail ? '\n' + tail : ''));
     // Recreate only the disposable venue clone after its process has released the database.
-    await venue._kill(indexer.proc);
+    await venue['_kill'](indexer.proc);
     indexer.proc = null;
-    await venue._conn.query('DROP DATABASE IF EXISTS `' + indexer.indexerDbName + '`');
-    await venue._spawnIndexer(indexer.index);
+    await venue['_conn'].query('DROP DATABASE IF EXISTS `' + indexer.indexerDbName + '`');
+    await venue['_spawnIndexer'](indexer.index);
 }
 
 async function repairUnreadableIndexers(venue, options) {

@@ -35,7 +35,7 @@
 'use strict';
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const path   = require('path');
 const assert = require('assert');
@@ -43,7 +43,7 @@ const { MultiValidatorHub }       = require('../helpers/multiValidatorHubHelper'
 const { startDisposableHubDb }    = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }      = require('../helpers/seededWeightSnapshot');
 const { silenceOracleValidator }  = require('../helpers/byzantineFaults');
-const { waitForMesh, waitFor }    = require('../helpers/consensusWait');
+const { waitForMesh, waitFor, nominalOracleRoundTime } = require('../helpers/consensusWait');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
 const OracleConsensus = hubRequire('src/oracle/consensus.js');
@@ -57,7 +57,6 @@ const PEER_WAIT_MS = 60_000;
 // window). It therefore keeps its measured length.
 const SETTLE_MS    = 6000;
 const BLOCK_INDEX  = 100;
-const BLOCK_TIME   = 1700000000;
 const ROUND        = 100;
 const PAIR         = 'BTC/USD';
 const PRICE        = '60000';
@@ -72,11 +71,11 @@ async function attachOracle(mvh) {
         round.setConsensus(oc);
         oc.setValidatorSet(await hub.loadValidatorSet());
         await oc.start();
-        hub._wtOracle = oc;
-        hub._wtRound  = round;
+        hub['_wtOracle'] = oc;
+        hub['_wtRound']  = round;
         stops.push(() => oc.stop && oc.stop());
     }
-    return { stop() { stops.forEach((s) => { try { s(); } catch (_) {} }); } };
+    return { stop() { stops.forEach((s) => { try { s(); } catch (internal) {} }); } };
 }
 
 function injectSubmissions(mvh) {
@@ -84,7 +83,7 @@ function injectSubmissions(mvh) {
     for (const hub of mvh.hubs) {
         const subs = new Map();
         for (const addr of addrs) subs.set(addr, { prices: [{ coinPair: PAIR, price: PRICE }] });
-        hub._wtRound.submissions.set(ROUND, subs);
+        hub['_wtRound'].submissions.set(ROUND, subs);
     }
 }
 
@@ -94,12 +93,12 @@ function injectSubmissions(mvh) {
 async function finalizeAll(mvh, opts) {
     opts = opts || {};
     const expect = opts.expect === undefined ? mvh.hubs.length : opts.expect;
-    await Promise.all(mvh.hubs.map((h) => h._wtOracle.finalizeRound(ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
+    await Promise.all(mvh.hubs.map((h) => h['_wtOracle'].finalizeRound(ROUND, BLOCK_INDEX, nominalOracleRoundTime(h['_wtOracle'], ROUND)).catch(() => {})));
     await waitFor(async () => {
         let stored = 0;
         for (const hub of mvh.hubs) {
             try { if ((await snapshotRows(hub)).length > 0) stored++; }
-            catch (_) { /* a hub that cannot be read has not stored it */ }
+            catch (internal) { /* a hub that cannot be read has not stored it */ }
         }
         return { ok: stored >= expect, stored: stored };
     }, { timeoutMs: opts.settle || SETTLE_MS });
@@ -114,7 +113,7 @@ async function snapshotRows(hub) {
 // The deterministic round leader (every hub agrees: same validator set + round).
 function findOracleLeader(mvh) {
     return mvh.hubs.find((h) => {
-        const l = h._wtOracle.getLeader(ROUND);
+        const l = h['_wtOracle'].getLeader(ROUND);
         return l && l.addr === h.getPeerManager().validatorAddr;
     });
 }

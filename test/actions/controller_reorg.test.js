@@ -34,12 +34,12 @@
  ********************************************************************/
 
 const assert            = require('assert')
-const cryptoHelper      = require('../cryptoHelper')
+const cryptoHelper      = require('../helpers/core/cryptoHelper')
 const gasHelper         = require('../helpers/gasHelper')
 const issueHelper       = require('../helpers/issueHelper')
 const sendHelper        = require('../helpers/sendHelper')
 const vmHelper          = require('../helpers/vmHelper')
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 
 // Deny a SEND of the bound token to give the binding observable teeth pre-reorg.
 const SEND_GATE = `module.exports = { meta: { name: 'Send Gate Reorg', description: 'Controller guard denying SEND, used to observe a binding across a reorg.', version: '1.0.0' }, guard: function(){
@@ -82,7 +82,7 @@ async function contractExists(ci) {
 function randTick(p) { let s = p; for (let i = 0; i < 6; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 const j = (x) => JSON.stringify(x, (k, v) => typeof v === 'bigint' ? Number(v) : v)
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
-async function mine(n) { try { await regtestMinerConnector.generateBlocks(n) } catch (e) {} }
+async function mine(n) { await regtestMinerConnector.generateBlocks(n) }
 function issueBindWire(tick, ctrl, cls, cooldown, unbind) {
     return `ISSUE|6|${tick}|${ctrl}|${cls}|${cooldown}|${unbind}|creorg`
 }

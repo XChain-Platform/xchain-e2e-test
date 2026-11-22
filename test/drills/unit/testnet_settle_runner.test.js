@@ -1,3 +1,13 @@
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 'use strict';
 
 const assert = require('assert');
@@ -67,7 +77,7 @@ async function run(h) {
 
 const drillSuite = describe;
 
-drillSuite('testnet cross-chain settlement runner', function () {
+function registerStepOrderTest() {
     it('runs every step in order and records a successful verdict', async function () {
         const h = harness();
         const verdict = await run(h);
@@ -90,7 +100,9 @@ drillSuite('testnet cross-chain settlement runner', function () {
             'await-match', 'await-btc-settlement', 'observe-doge-settlement'
         ]);
     });
+}
 
+function registerDeadlineTest() {
     it('passes the topology deadline to every wait', async function () {
         const h = harness();
         await run(h);
@@ -117,7 +129,9 @@ drillSuite('testnet cross-chain settlement runner', function () {
         assert.strictEqual(h.calls.find((call) => call.name === 'observe-doge-settlement').args.timeoutMs,
             TOPOLOGY.deadlines.settleMs);
     });
+}
 
+function registerRejectedMatchTest() {
     it('names a rejected match wait and skips both settlement waits', async function () {
         const h = harness({
             awaitCrossChainMatch: async (args) => {
@@ -133,7 +147,9 @@ drillSuite('testnet cross-chain settlement runner', function () {
         assert.strictEqual(h.calls.some((call) => call.name === 'await-btc-settlement'), false);
         assert.strictEqual(h.calls.some((call) => call.name === 'observe-doge-settlement'), false);
     });
+}
 
+function registerUnsettledDogeTest() {
     it('keeps an unsettled DOGE observation as a successful result', async function () {
         const observation = { settled: false, lastStatus: 'open' };
         const h = harness({ observeDogeSettlement: async () => observation });
@@ -146,7 +162,9 @@ drillSuite('testnet cross-chain settlement runner', function () {
             result: observation
         });
     });
+}
 
+function registerRedactionTest() {
     it('does not log or record the treasury private key', async function () {
         const h = harness({
             awaitCrossChainMatch: async () => {
@@ -160,4 +178,12 @@ drillSuite('testnet cross-chain settlement runner', function () {
         assert.match(output, /\[redacted\]/);
         assert.strictEqual(verdict.steps[0].result.wif, undefined);
     });
+}
+
+drillSuite('testnet cross-chain settlement runner', function () {
+    registerStepOrderTest();
+    registerDeadlineTest();
+    registerRejectedMatchTest();
+    registerUnsettledDogeTest();
+    registerRedactionTest();
 });

@@ -34,12 +34,12 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { makeSdk, fundedGasAddress } = require('./sdkHelper');
+const { makeSdk, fundedGasAddress } = require('./helpers/sdkHelper');
 const {
     MIN_REFUND_WINDOW, getFeed, getBets, balanceOf, amtEq, actionIndexOf,
     blockTime, jumpTo, resumeMiningAtFrozenClock, releaseClock, waitFeedStatus,
     issueWagerToken, submitBet
-} = require('./betHelper');
+} = require('./helpers/betHelper');
 
 let sdk, oracle, punter, stranger;
 let tickCancel, tickReject;

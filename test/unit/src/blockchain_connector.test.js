@@ -14,7 +14,7 @@ const assert = require('assert');
 const sinon = require('sinon');
 const axios = require('axios');
 
-const BlockchainConnector = require('../../../src/BlockchainConnector');
+const BlockchainConnector = require('../../../src/blockchain_connector');
 
 function makeResponse(body) {
     return { status: 200, data: body };
@@ -126,6 +126,7 @@ describe('BlockchainConnector', function () {
             const data = axiosPostStub.firstCall.args[1];
             assert.strictEqual(data.method, 'getrawtransaction');
             assert.deepStrictEqual(data.params, [TXID, true]);
+            assert.ok(axiosPostStub.firstCall.args[2].timeout > 0, 'waitForTx polls this read, so it must carry a timeout');
         });
 
         it('returns result.hex on success', async function () {
@@ -363,7 +364,7 @@ describe('BlockchainConnector', function () {
         });
 
         it('returns null when the request itself fails', async function () {
-            axiosPostStub.rejects(makeHttpError(500));
+            axiosPostStub.rejects(makeHttpError(500, { result: null, error: { code: -5, message: 'No such mempool or blockchain transaction' } }));
             assert.strictEqual(await connector.getTransaction('boom'), null);
         });
     });
