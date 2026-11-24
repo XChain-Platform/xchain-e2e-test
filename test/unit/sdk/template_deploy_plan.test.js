@@ -51,6 +51,12 @@ const TEMPLATES = [
         gasLimit: 400000,
         constructorParams: ['AMA123456789', 'AMB123456789', 'AMLP12345678'],
     },
+    {
+        name: 'vesting',
+        suite: 'vestingTemplate.sdk.test.js',
+        gasLimit: 400000,
+        constructorParams: ['mzBc4XEFSdzCDcTxAgf6EZXgsZWpztRhef', 'mzBc4XEFSdzCDcTxAgf6EZXgsZWpztRhef', 'VST123456789', '1000', '0', '5', 'false'],
+    },
 ];
 
 function haveTemplates() {
@@ -96,6 +102,8 @@ describe('[unit] contract-template deploy plans', function () {
                 assert.ok(/deployContract\(/.test(suite), t.suite + ' must deploy via sdkHelper.deployContract');
                 assert.ok(!/Needs chunked DEPLOY/.test(suite), t.suite + ' still self-skips instead of chunking');
                 assert.ok(!/MAX_DATA_BYTES/.test(suite), t.suite + ' still gates itself on a hand-rolled payload-size check');
+                // An inline one-action DEPLOY literal breaks as soon as the template outgrows the cap.
+                assert.ok(!/action:\s*'DEPLOY'/.test(suite), t.suite + ' submits an inline DEPLOY instead of deployContract');
             });
         });
     });

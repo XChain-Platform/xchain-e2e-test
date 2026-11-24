@@ -30,50 +30,9 @@
 
 'use strict';
 
-const fs   = require('fs');
-const path = require('path');
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, uniqueTick, mine, submitOpts } = require('./helpers/sdkHelper');
-
-function loadTemplate(name) {
-    const rel = path.join(name, name + '.js');
-    const candidates = [
-        path.resolve(__dirname, '_contracts', rel),
-        process.env.XCHAIN_CONTRACTS_DIR && path.join(process.env.XCHAIN_CONTRACTS_DIR, rel),
-        path.resolve(__dirname, '../../../xchain-contracts', rel),
-        path.resolve(__dirname, '../../../../xchain-contracts', rel),
-        process.env.HOME && path.join(process.env.HOME, 'xchain-modules-src/xchain-contracts', rel),
-        process.env.HOME && path.join(process.env.HOME, 'Sites/XChain-Platform/xchain-contracts', rel),
-    ].filter(Boolean);
-    for (const c of candidates) {
-        try { if (fs.existsSync(c)) return fs.readFileSync(c, 'utf8'); } catch (e) { /* keep trying */ }
-    }
-    throw new Error('Could not locate xchain-contracts/' + rel + '. Set XCHAIN_CONTRACTS_DIR.');
-}
-
-// Comment/whitespace strip (string-aware) so the DEPLOY payload fits the encoder
-// MAX_DATA_BYTES cap (hex-encoded source is 2 bytes/char). See the escrow suite.
-function compactSource(src) {
-    let out = '', i = 0, state = 'code';
-    const n = src.length;
-    while (i < n) {
-        const c = src[i], d = src[i + 1];
-        if (state === 'code') {
-            if (c === '/' && d === '/') { state = 'line'; i += 2; continue; }
-            if (c === '/' && d === '*') { state = 'block'; i += 2; continue; }
-            if (c === "'") { state = 'sq'; out += c; i++; continue; }
-            if (c === '"') { state = 'dq'; out += c; i++; continue; }
-            if (c === '`') { state = 'tpl'; out += c; i++; continue; }
-            out += c; i++; continue;
-        }
-        if (state === 'line') { if (c === '\n') { state = 'code'; out += c; } i++; continue; }
-        if (state === 'block') { if (c === '*' && d === '/') { state = 'code'; i += 2; } else i++; continue; }
-        if (c === '\\') { out += c + (d || ''); i += 2; continue; }
-        if ((state === 'sq' && c === "'") || (state === 'dq' && c === '"') || (state === 'tpl' && c === '`')) state = 'code';
-        out += c; i++;
-    }
-    return out.split('\n').map(l => l.replace(/^\s+/, '').replace(/\s+$/, '')).filter(l => l.length > 0).join('\n');
-}
+const { makeSdk, submit, deployContract, fundedGasAddress, uniqueTick, mine, submitOpts } = require('./helpers/sdkHelper');
+const { loadCompactTemplate } = require('./helpers/templateHelper');
 
 function balanceFor(balances, tick) {
     const list = balances && (Array.isArray(balances) ? balances : balances.data);
@@ -120,7 +79,7 @@ async function setupVesting(context) {
     // Load lazily so a missing xchain-contracts checkout skips this suite
     // instead of aborting the whole run.
     try {
-        VESTING_SRC = compactSource(loadTemplate('vesting'));
+        VESTING_SRC = loadCompactTemplate('vesting');
     } catch (e) {
         console.log('    [vesting] SKIP: ' + e.message.split('\n')[0]);
         context.skip();
@@ -146,15 +105,15 @@ describe('[sdk] template:vesting (on-chain custody)', function () {
     this.timeout(0);
     before(function () { return setupVesting(this); });
 
-    it('DEPLOY vesting with the grant terms', async function () {
-        const res = await submit(sdk,
-            { action: 'DEPLOY', params: {
+    it('DEPLOY vesting with the grant terms (chunked carriers + assembling DEPLOY)', async function () {
+        const res = await deployContract(sdk,
+            {
                 code: VESTING_SRC,
                 gasLimit: 400000,
                 constructorParams: [grantor.address, beneficiary.address, tick, String(TOTAL), String(CLIFF), String(DURATION), 'false']
-            } },
+            },
             { pubkey: grantor.address, change: grantor.address }, submitOpts({ wif: grantor.wif }));
-        console.log('    [vesting] DEPLOY encoding=' + res.encoding + ' status=' + res.indexed.status);
+        console.log('    [vesting] DEPLOY path=' + (res.deployPlan.single ? 'inline' : 'chunked x' + res.deployPlan.totalChunks) + ' encoding=' + res.encoding + ' status=' + res.indexed.status);
         expect(res.indexed.status, 'DEPLOY indexed').to.equal('valid');
         contractIndex = contractIndexOf(res.indexed);
         expect(contractIndex, 'contract action_index').to.not.equal(null);
