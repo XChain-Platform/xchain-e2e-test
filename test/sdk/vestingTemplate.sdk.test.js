@@ -32,6 +32,11 @@
 
 const { expect } = require('chai');
 const { makeSdk, submit, deployContract, fundedGasAddress, uniqueTick, mine, submitOpts } = require('./helpers/sdkHelper');
+// loadCompactTemplate strips comments and whitespace from the template source,
+// string-aware, the same way the escrow suite does. The vesting template has
+// outgrown the one-action DEPLOY data cap even compacted, so the suite deploys
+// through deployContract, which splits the source into chunked carriers when
+// it no longer fits a single action and waits for the assembled contract.
 const { loadCompactTemplate } = require('./helpers/templateHelper');
 
 function balanceFor(balances, tick) {
