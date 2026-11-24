@@ -21,7 +21,7 @@ const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
 
-const root = path.join(__dirname, '..', '..');
+const root = path.join(__dirname, '..', '..', '..');
 
 function major(spec) {
   const m = /(\d+)\.\d+\.\d+/.exec(String(spec));
